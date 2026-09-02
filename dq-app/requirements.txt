@@ -1,0 +1,8 @@
+streamlit>=1.40
+pandas>=2.0
+pyarrow>=15.0          # reads fixtures/out/*.parquet in local mode
+
+# Stage 2 only — uncomment once you have workspace access and have run
+# `databricks auth login --configure-serverless --host <workspace-url>`.
+# databricks-connect==15.4.*
+# databricks-sdk>=0.30

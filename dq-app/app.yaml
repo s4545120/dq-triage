@@ -1,0 +1,10 @@
+command:
+  - streamlit
+  - run
+  - app.py
+
+env:
+  - name: DQ_APP_DATA_SOURCE
+    value: databricks
+  - name: DQ_CATALOG
+    value: dq
