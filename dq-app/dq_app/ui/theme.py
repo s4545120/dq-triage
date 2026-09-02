@@ -294,7 +294,7 @@ _CSS = f"""
    first row of numbers is visible without scrolling. */
 .stMain .block-container {{ padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1400px; }}
 
-h1, h2, h3 {{ letter-spacing: -0.011em; }}
+h1, h2, h3 {{ letter-spacing: 0; }}
 .stMain h1 {{ font-size: 1.45rem; font-weight: 600; margin-bottom: .15rem; }}
 .stMain h2 {{ font-size: 1.02rem; font-weight: 600; margin: .4rem 0 .1rem; }}
 .stMain h3 {{ font-size: .92rem; font-weight: 600; }}
@@ -303,7 +303,7 @@ h1, h2, h3 {{ letter-spacing: -0.011em; }}
 
 /* Section label — the small uppercase rule that separates bands of content. */
 .dq-section {{
-  font-size: .69rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  font-size: .69rem; font-weight: 600; letter-spacing: 0; text-transform: uppercase;
   color: var(--dq-text-3); margin: 1.5rem 0 .55rem; padding-bottom: .3rem;
   border-bottom: 1px solid var(--dq-border);
 }}
@@ -317,7 +317,7 @@ h1, h2, h3 {{ letter-spacing: -0.011em; }}
 /* KPI tile: label above, figure below, tabular figures so columns line up. */
 .dq-kpi {{ padding: .1rem 0; }}
 .dq-kpi .lab {{
-  font-size: .69rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  font-size: .69rem; font-weight: 600; letter-spacing: 0; text-transform: uppercase;
   color: var(--dq-text-3); display: flex; align-items: flex-start; gap: .3rem;
   /* Reserve two lines. A label that wraps would otherwise push its figure down and
      break the alignment of the whole row. */
@@ -325,7 +325,7 @@ h1, h2, h3 {{ letter-spacing: -0.011em; }}
 }}
 .dq-kpi .val {{
   font-size: 1.65rem; font-weight: 600; line-height: 1.25; margin-top: .18rem;
-  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; letter-spacing: 0;
 }}
 .dq-kpi .sub {{ font-size: .74rem; color: var(--dq-text-3); margin-top: .05rem; }}
 
@@ -352,7 +352,7 @@ h1, h2, h3 {{ letter-spacing: -0.011em; }}
 /* Static summary tables — see components.summary_table for why these exist. */
 .dq-tbl {{ width: 100%; border-collapse: collapse; font-size: .82rem; margin: .1rem 0 .3rem; }}
 .dq-tbl th {{
-  text-align: left; font-size: .69rem; font-weight: 600; letter-spacing: .05em;
+  text-align: left; font-size: .69rem; font-weight: 600; letter-spacing: 0;
   text-transform: uppercase; color: var(--dq-text-3); padding: .3rem .6rem .3rem 0;
   border-bottom: 1px solid var(--dq-border); white-space: nowrap;
 }}
@@ -369,6 +369,18 @@ h1, h2, h3 {{ letter-spacing: -0.011em; }}
 }}
 .dq-tbl td.bar .lbl {{ position: relative; }}
 .dq-spark {{ vertical-align: middle; display: block; }}
+
+.dq-monitor-hd {{
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  margin: .85rem 0 .1rem; padding-top: .15rem;
+}}
+.dq-monitor-hd > span:first-child {{
+  display: inline-flex; align-items: center; gap: .38rem;
+  font-size: .96rem; font-weight: 600; color: {NEUTRAL["text"]};
+}}
+.st-key-scorecard_monitor_inventory [data-testid="stDataFrame"] {{
+  border: 1px solid var(--dq-border); border-radius: 6px; overflow: hidden;
+}}
 
 /* Streamlit ships tabs at body size; at that size they compete with headings. */
 .stTabs [data-baseweb="tab"] {{ font-size: .84rem; padding-top: .35rem; padding-bottom: .35rem; }}
