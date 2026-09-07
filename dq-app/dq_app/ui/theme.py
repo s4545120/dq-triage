@@ -300,7 +300,7 @@ def sparkline(values, width: int = 88, height: int = 20, tone: str = "info") -> 
 # --- Marks ------------------------------------------------------------------
 
 
-def hint(text: str) -> str:
+def hint(text: str, side: str = "left") -> str:
     """An inline explanation mark carrying its own tooltip.
 
     `st.markdown(..., help=)` renders its icon absolutely positioned at the top-right
@@ -309,10 +309,46 @@ def hint(text: str) -> str:
     carries its explanation through this instead, inside the header where it reads as
     part of the card. Plain Streamlit widgets keep using `help=`, which places it
     correctly for them.
+
+    **The tooltip is drawn, not delegated to `title=`.** It used to be a bare `title`
+    attribute on this span, and it did not work: the only thing inside the span is an
+    inline `<svg>`, and a pointer over an SVG that has no `<title>` child of its own
+    does not reliably fall back to an ancestor's `title` attribute in Chrome or
+    Safari. The icon *is* the whole hit area, so the hover landed on the one element
+    that swallowed the tooltip and nothing appeared. Two fixes, both needed: the SVG
+    is made transparent to the pointer so the hover lands on this span, and the bubble
+    is a real element so it is styled, instant, readable at this font size, and
+    reachable by keyboard — a `title` is none of those.
+
+    `side` is which way the bubble grows: "left" (default) hangs it from the icon's
+    right edge leftwards, which is right for a hint at the end of a card header;
+    "right" for a hint near the left edge of the page.
     """
     return (
-        f'<span class="dq-hint" title="{html.escape(text)}">{icon("info", 12)}</span>'
+        f'<span class="dq-hint" tabindex="0" role="note" '
+        f'aria-label="{html.escape(text)}">{icon("info", 12)}'
+        f'<span class="tip {html.escape(side)}">{html.escape(text)}</span></span>'
     )
+
+
+def pct_text(value: float | None, places: int = 0, dash: str = "\u2014") -> str:
+    """A percentage that never rounds into a claim the number does not support.
+
+    `f"{99.9:.0f}%"` reads "100%", and a dimension card showing 100% above the words
+    "1 failing" is not a rounding nit — it is the card contradicting itself, and the
+    reader has no way to tell which half is wrong. So: if rounding to `places` would
+    print a perfect 100 (or a clean 0) that the value has not actually reached, keep
+    adding decimals until the printed figure tells the truth. Everything else rounds
+    normally.
+    """
+    if value is None:
+        return dash
+    for dp in range(places, places + 4):
+        shown = float(f"{value:.{dp}f}")
+        if (shown >= 100.0 and value < 100.0) or (shown <= 0.0 and value > 0.0):
+            continue
+        return f"{value:.{dp}f}"
+    return f"{value:.{places + 3}f}"
 
 
 def badge(text: str, tone: str = "neutral", icon_name: str | None = None) -> str:
@@ -650,7 +686,50 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   font-size: var(--dq-fs-hd); font-weight: 550; color: var(--dq-text-2);
 }}
 .dq-card .hd .sp {{ flex: 1 1 auto; }}
-.dq-hint {{ color: var(--dq-text-3); display: inline-flex; cursor: help; flex: none; }}
+/* The hint icon and its drawn tooltip. See theme.hint() for why this is a real
+   element and not a `title` attribute.
+
+   Three things make it work where the old one did not:
+     1. `.dq-hint > svg` is transparent to the pointer, so hovering the icon hovers
+        the SPAN. An inline SVG with no <title> child of its own swallows an
+        ancestor's title tooltip in Chrome and Safari, and the icon was the entire
+        hit area.
+     2. The hit area is padded out to roughly 22px. A 12px icon is a hard target on a
+        laptop trackpad, and a tooltip you have to aim at is a tooltip nobody reads.
+     3. The bubble is fixed-width and wraps. `title` renders one long line that runs
+        off the viewport for anything past a short sentence, and every string this
+        app passes to hint() is a paragraph. */
+.dq-hint {{
+  color: var(--dq-text-3); display: inline-flex; cursor: help; flex: none;
+  position: relative; padding: 5px; margin: -5px; border-radius: 4px;
+}}
+.dq-hint > svg {{ pointer-events: none; }}
+.dq-hint:hover, .dq-hint:focus-visible {{ color: {ACCENT}; outline: none; }}
+.dq-hint > .tip {{
+  position: absolute; bottom: calc(100% + 2px); z-index: 60;
+  /* Wide enough to be a paragraph, narrow enough to fit beside a card without being
+     clipped by stMain, which is the page's scroll container and therefore the one
+     ancestor a bubble cannot escape. `side` picks which way it grows; only the
+     leftmost hint on a row needs to grow rightwards. */
+  width: max-content; max-width: min(19rem, 30vw);
+  background: {NEUTRAL["text"]}; color: #fff;
+  font-size: .74rem; font-weight: 450; line-height: 1.45; letter-spacing: 0;
+  text-transform: none; white-space: normal; text-align: left;
+  padding: .5rem .62rem; border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(16, 24, 40, .22);
+  /* Hidden by visibility rather than display so the transition has something to
+     animate, and pointer-transparent so the bubble can never sit between the cursor
+     and the icon and flicker itself off. */
+  visibility: hidden; opacity: 0; pointer-events: none;
+  transition: opacity .1s ease-out .05s, visibility 0s linear .15s;
+}}
+/* Which way it grows. A hint at the right edge of a card hangs leftwards or it goes
+   off the page; one near the left edge does the opposite. */
+.dq-hint > .tip.left {{ right: 0; }}
+.dq-hint > .tip.right {{ left: 0; }}
+.dq-hint:hover > .tip, .dq-hint:focus-visible > .tip {{
+  visibility: visible; opacity: 1; transition-delay: 0s;
+}}
 .dq-card .val {{
   font-size: var(--dq-fs-val); font-weight: 620; line-height: 1.18;
   margin-top: .3rem; font-variant-numeric: tabular-nums; letter-spacing: -.015em;
@@ -770,6 +849,69 @@ h1, h2, h3 {{ letter-spacing: 0; }}
     flex: 1 1 100%; width: 100%; max-width: 100%; min-width: 0;
   }}
 }}
+
+/* --- Dimension cards and the panel behind them ---------------------------- */
+/* The card is a st.container, not a block of markup, because its last row is a real
+   button — a dimension name is a term of art and the tooltip beside it has room for
+   one sentence, so the card has to be able to open. Border and padding therefore move
+   off .dq-card and onto the container, exactly as .st-key-dq_issue_board does. */
+[class*="st-key-dq_dim_"]:not(.st-key-dq_dimension_panel) {{
+  border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["surface"]};
+  padding: var(--dq-pad-y) var(--dq-pad) calc(var(--dq-pad-y) - .3rem);
+  display: flex; flex-direction: column; height: 100%;
+}}
+/* The open card is marked on both channels — a tinted ring AND the button below it
+   reading "Hide breakdown" — because the ring alone is colour carrying meaning. */
+[class*="st-key-dq_dim_"]:has(.dq-dim-on) {{
+  border-color: {ACCENT}; box-shadow: 0 0 0 1px {ACCENT} inset;
+}}
+[class*="st-key-dq_dim_"]:hover {{ border-color: {NEUTRAL["border_strong"]}; }}
+.dq-dim .sub {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); margin-top: .3rem; }}
+.dq-dim .dq-meter {{ margin-top: auto; }}
+/* The button sits on the card floor under a hairline, so a row of cards with
+   different label heights still lines its buttons up. */
+[data-testid="stHorizontalBlock"]:has(.dq-dim) [class*="st-key-dq_dim_"]
+  [data-testid="stElementContainer"]:has(.stButton) {{
+  flex: 0 0 auto; margin-top: .55rem; border-top: 1px solid var(--dq-border);
+  padding-top: .3rem;
+}}
+[class*="st-key-dq_dim_"] .stButton button {{
+  width: 100%; min-height: 0; padding: .16rem .3rem; font-size: .72rem;
+  font-weight: 500; border: none; background: transparent; color: var(--dq-text-2);
+}}
+[class*="st-key-dq_dim_"] .stButton button:hover {{
+  color: {ACCENT}; background: {ACCENT_TINT};
+}}
+
+.st-key-dq_dimension_panel {{
+  border: 1px solid {ACCENT}; border-radius: 8px; background: {NEUTRAL["surface"]};
+  padding: var(--dq-pad-y) var(--dq-pad) calc(var(--dq-pad-y) + .1rem);
+  margin-top: .55rem;
+}}
+.dq-dim-panel-hd {{ display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }}
+.dq-dim-panel-hd .ic {{ display: inline-flex; color: {ACCENT}; }}
+.dq-dim-panel-hd .t {{ font-size: 1.02rem; font-weight: 620; color: {NEUTRAL["text"]}; }}
+.dq-dim-panel-hd .q {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); }}
+.dq-dim-prose {{ font-size: .82rem; line-height: 1.62; color: var(--dq-text-2);
+  margin-top: .5rem; }}
+.dq-dim-prose.q {{ font-size: .77rem; color: var(--dq-text-3); margin-top: .5rem; }}
+.dq-dim-prose code {{ font-size: .93em; }}
+/* The arithmetic block. Tabular numerals and a monospaced feel, because it is being
+   read as a sum and the operands have to line up under each other. */
+.dq-dim-sum {{ background: {NEUTRAL["canvas"]}; border: 1px solid var(--dq-border);
+  border-radius: 6px; padding: .55rem .7rem; margin-top: .5rem; }}
+.dq-dim-sum .k {{ font-size: .68rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .02em; color: var(--dq-text-3); }}
+.dq-dim-sum .m {{ font-size: .8rem; line-height: 1.55; color: var(--dq-text-2);
+  font-variant-numeric: tabular-nums; margin-top: .15rem; }}
+.dq-dim-sum .m b {{ color: {NEUTRAL["text"]}; font-weight: 620; }}
+.dq-note {{ display: flex; gap: .5rem; align-items: flex-start;
+  background: {TONE["info"]["bg"]}; border: 1px solid {TONE["info"]["bd"]};
+  border-radius: 6px; padding: .55rem .7rem; margin-top: .7rem;
+  font-size: .79rem; line-height: 1.6; color: var(--dq-text-2); }}
+.dq-note > svg {{ flex: none; margin-top: .12rem; color: {ACCENT}; }}
+.dq-note b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
 
 /* --- The issue list ------------------------------------------------------- */
 /* Rows are real Streamlit columns rather than a table, because the last cell is a

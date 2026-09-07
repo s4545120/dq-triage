@@ -23,6 +23,12 @@ Plain words throughout. A steward reading this should not have to know what
 the four dimensions that roll up into it, and the critical elements that have no
 valid rule looking at them, beside recent run outcomes.
 
+**Each dimension opens.** "Validity" is a term of art and the figure on its card is
+weighted by rows while the figure two cards up counts checks, so the pair reads as a
+contradiction whenever a dimension is nearly clean. The panel behind each card is
+where that is settled: the dimension in plain words, the arithmetic with its actual
+operands, both denominators side by side, and every check that fed the number.
+
 **There is no Run button here and there will not be one.** The check runner is a
 scheduled job owned outside this app; this page reads its results. A control that
 starts a run is the first step towards a control that fixes a row, which is the one
@@ -85,25 +91,150 @@ def _run_index(check_run: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("run_ts").reset_index(drop=True)
 
 
+# --- Dimensions -------------------------------------------------------------
+# `_DIMENSION_OF` is the only place a rule type is assigned to a dimension. The prose
+# below describes the dimensions; the membership of each one is read back off this
+# map by `_types_in`, so a new rule type cannot end up described in one place and
+# counted in another.
+
+_DIMENSION_OF = {
+    "not_null": "Completeness",
+    "format": "Validity",
+    "sentinel": "Validity",
+    "variance": "Validity",
+    "consistency": "Consistency",
+    "referential": "Consistency",
+    "uniqueness": "Uniqueness",
+}
+
+
 def _dimension_for(rule_type: str) -> str:
     """Map local rule types to the DQ dimensions used in monitoring tools."""
-    return {
-        "not_null": "Completeness",
-        "format": "Validity",
-        "sentinel": "Validity",
-        "variance": "Validity",
-        "consistency": "Consistency",
-        "referential": "Consistency",
-        "uniqueness": "Uniqueness",
-    }.get(rule_type, "Other")
+    return _DIMENSION_OF.get(rule_type, "Other")
 
+
+def _types_in(name: str) -> list[str]:
+    return [t for t, d in _DIMENSION_OF.items() if d == name]
+
+
+# Four cards, and behind each one a panel you can open.
+#
+# The cards alone were not enough, for two reasons a reader hits immediately.
+# "Validity" is a term of art — not a word a steward uses about their own data — and
+# a one-line tooltip is not room enough to say which checks are in it. And the figure
+# on the card is weighted by ROWS while the figure two cards up is counted in CHECKS,
+# so whenever a dimension is nearly clean the two read as a flat contradiction:
+# Consistency scores 99.9%, which used to print as "100%", directly above the words
+# "1 failing". Nothing on the page told you which half to believe.
+#
+# So the panel is where the number is taken apart: what the dimension means in plain
+# words, the arithmetic with its actual operands, and every check that fed it. And
+# `theme.pct_text` makes sure a dimension with a failing check never prints a clean
+# 100 in the first place.
 
 DIMENSIONS = [
-    ("Completeness", "file", "Is the value there at all."),
-    ("Validity", "shield", "Does the value look like what it claims to be."),
-    ("Consistency", "nodes", "Does it agree with the other columns and tables."),
-    ("Uniqueness", "copy", "Is it there exactly once."),
+    {
+        "name": "Completeness",
+        "icon": "file",
+        "short": "Is the value there at all.",
+        "long": (
+            "Whether a value a record is supposed to carry is actually there. A "
+            "completeness check counts the rows where the column is null, blank, or "
+            "holds a placeholder standing in for a value nobody ever supplied. It "
+            "says nothing about whether the value that is there is any good — that "
+            "is Validity's job."
+        ),
+        "example": "Contact email is present · SIM serial is present for SIM-bearing products",
+    },
+    {
+        "name": "Validity",
+        "icon": "shield",
+        "short": "Does the value look like what it claims to be.",
+        "long": (
+            "Whether a value that is present conforms to the shape it is supposed to "
+            "have: an email with an @ and a real top-level domain, a mobile number "
+            "matching 04########, a date of birth that parses and puts the person "
+            "between 18 and 105. Placeholder values that pass a presence check but "
+            "mean nothing — 0400000000, a row of nines — are caught here too. A "
+            "valid value can still be the wrong value; no automated check can tell."
+        ),
+        "example": "Contact email is well formed · Mobile service number is not a placeholder",
+    },
+    {
+        "name": "Consistency",
+        "icon": "nodes",
+        "short": "Does it agree with the other columns and tables.",
+        "long": (
+            "Whether a value agrees with the rest of the record and the rest of the "
+            "estate. Two columns that have to move together — a document number "
+            "present whenever a document type is set — and two tables that have to "
+            "tell the same story about the same person. Each side can be perfectly "
+            "complete and perfectly valid and still disagree, which is why this is a "
+            "dimension of its own."
+        ),
+        "example": "Subscriber first name agrees with contact first name",
+    },
+    {
+        "name": "Uniqueness",
+        "icon": "copy",
+        "short": "Is it there exactly once.",
+        "long": (
+            "Whether a value that is supposed to identify one thing identifies "
+            "exactly one. A mobile service number live on two subscriptions at once "
+            "is not a wrong value in either row — both rows are individually fine, "
+            "and the defect only exists in the pair."
+        ),
+        "example": "Mobile service number is not reused across subscriptions",
+    },
 ]
+DIMENSION_BY_NAME = {d["name"]: d for d in DIMENSIONS}
+
+SCORING_NOTE = (
+    "Scored by rows: evaluated rows that passed the active checks in this dimension, "
+    "over evaluated rows for those checks. This is aggregate check-level scoring — an "
+    "exact record-level figure would need a key for every finding, which the runner "
+    "keeps only for its samples. Shadow checks are in neither half."
+)
+
+
+def _tagged(check_run: pd.DataFrame, registry: pd.DataFrame,
+            run_id=None) -> pd.DataFrame:
+    """Check results carrying the dimension their rule type belongs to.
+
+    `run_id` narrows to a single scheduled run; omit it to tag every run.
+    """
+    cols = ["rule_id", "rule_type", "rule_name"]
+    dims = registry[cols].drop_duplicates("rule_id").copy()
+    dims["Dimension"] = dims["rule_type"].map(_dimension_for)
+    rows = check_run if run_id is None else check_run[check_run["run_id"] == run_id]
+    out = rows.merge(dims, on="rule_id", how="left")
+    out["Dimension"] = out["Dimension"].fillna("Other")
+    out["rule_name"] = out["rule_name"].fillna(out["rule_id"])
+    return out
+
+
+def _dimension_facts(now: pd.DataFrame) -> dict:
+    """The operands behind one dimension's score, kept beside the score itself.
+
+    A percentage with its numerator and denominator thrown away is how a scorecard
+    starts lying — the same discipline `domain/metrics.Metric` applies to the spec
+    metrics, applied here.
+    """
+    raised = now[now["status"].isin(["pass", "breach"])]
+    breaching = raised[raised["status"] == "breach"]
+    evaluated = int(raised["rows_scanned"].sum())
+    failed = int(raised["violation_count"].sum())
+    return {
+        "score": _row_score(now),
+        "checks": int(len(raised)),
+        "passing": int((raised["status"] == "pass").sum()),
+        "failing": int(len(breaching)),
+        "shadow": int((now["status"] == "skipped").sum()),
+        "evaluated": evaluated,
+        "failed_rows": failed,
+        "findings": int(breaching["violation_count"].sum()),
+        "p1": int((breaching["severity"] == "P1_block").sum()),
+    }
 
 
 def _dimension_cards(check_run: pd.DataFrame, registry: pd.DataFrame) -> list[dict]:
@@ -114,37 +245,145 @@ def _dimension_cards(check_run: pd.DataFrame, registry: pd.DataFrame) -> list[di
     latest = runs.iloc[-1]["run_id"]
     prior = runs.iloc[-2]["run_id"] if len(runs) > 1 else None
 
-    dims = registry[["rule_id", "rule_type"]].drop_duplicates("rule_id").copy()
-    dims["Dimension"] = dims["rule_type"].map(_dimension_for)
-    tagged = check_run.merge(dims[["rule_id", "Dimension"]], on="rule_id", how="left")
-    tagged["Dimension"] = tagged["Dimension"].fillna("Other")
+    tagged = _tagged(check_run, registry)
 
     out = []
-    for name, icon_name, meaning in DIMENSIONS:
+    for spec in DIMENSIONS:
+        name = spec["name"]
         now = tagged[(tagged["run_id"] == latest) & (tagged["Dimension"] == name)]
         was = (
             tagged[(tagged["run_id"] == prior) & (tagged["Dimension"] == name)]
             if prior is not None else now.iloc[0:0]
         )
-        score = _row_score(now)
         before = _row_score(was)
-        breaching = now[now["status"] == "breach"]
-        out.append({
-            "name": name,
-            "icon": icon_name,
-            "score": score,
-            "delta": None if score is None or before is None else score - before,
-            "failing": int(len(breaching)),
-            "findings": int(breaching["violation_count"].sum()),
-            "help": (
-                f"{meaning} Scored by rows: evaluated rows that passed the active "
-                f"{name.lower()} checks, over evaluated rows for those checks. This is "
-                "aggregate check-level scoring — an exact record-level figure would "
-                "need a key for every finding, which the runner keeps only for its "
-                "samples. Shadow checks are excluded from the denominator."
-            ),
-        })
+        card = dict(spec)
+        card.update(_dimension_facts(now))
+        card["delta"] = (None if card["score"] is None or before is None
+                         else card["score"] - before)
+        card["help"] = f"{spec['short']} {SCORING_NOTE}"
+        out.append(card)
     return out
+
+
+def _dimension_panel(card: dict, rows: pd.DataFrame) -> None:
+    """The card, opened up: what the dimension means and how its number was made.
+
+    `rows` is every check in this dimension on the run being scored, shadow ones
+    included — a check excluded from the score is still a check someone wrote, and a
+    panel that silently drops it invites the reader to conclude the list is the whole
+    rule set.
+    """
+    score = card["score"]
+    tone = ("neutral" if score is None else
+            "success" if score >= 98 else "moderate" if score >= 90 else "critical")
+
+    head, close = st.columns([5, 1], vertical_alignment="center")
+    with head:
+        st.markdown(
+            '<div class="dq-dim-panel-hd">'
+            f'<span class="ic">{theme.icon(card["icon"], 17)}</span>'
+            f'<span class="t">{card["name"]}</span>'
+            + theme.badge(f"{theme.pct_text(score, 1)}%" if score is not None
+                          else "Not scored", tone)
+            + f'<span class="q">{html.escape(card["short"])}</span></div>',
+            unsafe_allow_html=True,
+        )
+    if close.button("Close", key="_dim_close", width="stretch"):
+        st.session_state.pop("_dim_pick", None)
+        st.rerun()
+
+    prose, sums = st.columns([1.55, 1])
+    with prose:
+        st.markdown(
+            f'<div class="dq-dim-prose">{html.escape(card["long"])}</div>'
+            '<div class="dq-dim-prose q"><b>Rule types in this dimension:</b> '
+            + ", ".join(f"<code>{t}</code>" for t in sorted(_types_in(card["name"])))
+            + f'.<br><b>For example:</b> {html.escape(card["example"])}.</div>',
+            unsafe_allow_html=True,
+        )
+    with sums:
+        # The arithmetic, with its operands. Both denominators, because the whole
+        # confusion this panel exists to settle is that the page carries two.
+        if card["evaluated"]:
+            st.markdown(
+                '<div class="dq-dim-sum"><div class="k">How the score is made</div>'
+                f'<div class="m">{card["evaluated"]:,} rows evaluated '
+                f'&minus; {card["failed_rows"]:,} rows failed<br>'
+                f'&divide; {card["evaluated"]:,} rows evaluated '
+                f'= <b>{theme.pct_text(score, 1)}%</b></div>'
+                f'<div class="k" style="margin-top:.55rem">Counted in checks instead'
+                '</div>'
+                f'<div class="m">{card["passing"]} of {card["checks"]} checks passing '
+                f'= <b>{theme.pct_text(100.0 * card["passing"] / card["checks"], 0)}%'
+                "</b></div></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="dq-dim-sum"><div class="k">How the score is made</div>'
+                '<div class="m">No check in this dimension is attached to a '
+                "registered element, so there is nothing to score.</div></div>",
+                unsafe_allow_html=True,
+            )
+
+    # The reconciliation. Only shown when the two figures actually disagree, because
+    # a note that appears under every dimension stops being read under any of them.
+    if card["failing"] and score is not None and score >= 98:
+        st.markdown(
+            '<div class="dq-note">'
+            f'{theme.icon("info", 14)}<div><b>Why this reads as almost perfect with '
+            f'{card["failing"]} check failing.</b> The score is weighted by rows, not '
+            f'by checks: {card["failed_rows"]:,} of {card["evaluated"]:,} evaluated '
+            f'rows failed. A check that breaches on a handful of rows barely moves a '
+            "row-weighted score, and that gap is the information — the data is nearly "
+            "clean, the rule set is not. Both numbers are on this page on purpose, "
+            "and neither is rounded up to a clean 100 while a check is failing."
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
+
+    theme.section(f"Checks in {card['name'].lower()}")
+    if rows.empty:
+        st.caption(
+            "No check in this dimension is attached to a registered critical data "
+            "element, so none of them reaches this page. They may still run — see "
+            "the Rules page."
+        )
+        return
+
+    table = rows.sort_values(["status", "violation_count"],
+                             ascending=[True, False]).copy()
+    RESULT = {"pass": ("Passed", "success"), "breach": ("Failed", "critical"),
+              "skipped": ("Shadow — not scored", "neutral")}
+    out = pd.DataFrame({
+        "Check": table["rule_name"],
+        # A consistency check can span columns and tables, so it has no single
+        # target column — XREF_NAME_AGREEMENT is the case. Printing the bare table
+        # name under a heading called "Column" would read as one.
+        "Where": table.apply(
+            lambda r: f'{str(r["target_table"]).split(".")[-1]}.{r["target_column"]}'
+            if pd.notna(r["target_column"])
+            else f'{str(r["target_table"]).split(".")[-1]} · across columns',
+            axis=1),
+        "Severity": [theme.severity_badge(s, words=False) for s in table["severity"]],
+        "Result": [theme.badge(*RESULT.get(s, (s, "neutral")))
+                   for s in table["status"]],
+        "Rows checked": table["rows_scanned"].astype(int),
+        "Findings": table["violation_count"].astype(int),
+        "Failure rate": [f"{v:.2f}%" for v in table["violation_pct"].astype(float)],
+    })
+    components.summary_table(out, raw={"Severity", "Result"})
+    st.markdown(
+        '<div class="dq-quiet" style="margin-top:.4rem">A finding is one row failing '
+        "one check, so a row with one bad value can appear under several checks here. "
+        "Severity belongs to the check and is copied from the rule registry — nothing "
+        "on this page recomputes it, and the criticality of the element it touches "
+        "never changes it. Like every figure on this page, this list is only the "
+        "checks attached to a registered critical data element — a check on a column "
+        "nobody registered still runs and still raises a cohort, but it is not "
+        "scored here.</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ============================================================================
@@ -275,9 +514,9 @@ with hero:
             "more than a check over 40 — which is why it reads far higher than the "
             "share of checks passing next to it. Shadow checks are in neither half. "
             "The trend is that same figure per run; the axis starts at 80 because the "
-            "whole story lives in the top fifth.")
+            "whole story lives in the top fifth.", side="right")
         + "</div>"
-        f'<div class="val">{"—" if score is None else f"{score:.0f}"}'
+        f'<div class="val">{theme.pct_text(score)}'
         '<span class="of">/100</span></div>'
         f'<div style="margin:.3rem 0 .35rem">{theme.badge(band, band_tone)}</div>'
         f'<div class="sub">{theme.delta(score_delta, " pts", 1)} vs previous run</div>'
@@ -306,7 +545,7 @@ with k1:
         + "</div>"
         f'<div class="val">{d["rules_passing"]}<span class="of">of '
         f'{d["rules_raised"]}</span></div>'
-        f'<div class="sub">{pass_share:.0f}% passing</div>'
+        f'<div class="sub">{theme.pct_text(pass_share)}% passing</div>'
         f'{theme.meter(pass_share, "success" if pass_share >= 80 else "moderate")}'
         "</div>",
         unsafe_allow_html=True,
@@ -365,29 +604,63 @@ with k4:
     )
 
 # --- Dimensions -------------------------------------------------------------
+# Each card is a `st.container` rather than a block of markup, because its last row
+# has to be a real button and a button cannot live inside markup this app generates —
+# the same reason the issue board below is built from columns instead of a table. The
+# border is drawn on the container; the markup inside carries `.dq-dim` so the
+# equal-height rule in `theme` still finds this row.
 
 theme.section("Data quality dimensions")
+st.markdown(
+    '<div class="dq-quiet" style="margin:-.35rem 0 .55rem">The four questions a '
+    "quality programme asks of a column. Open one to see what it means, how its score "
+    "was made, and every check behind it.</div>",
+    unsafe_allow_html=True,
+)
 
 dim_cards = _dimension_cards(scoped, registry)
-for col, dim in zip(st.columns(len(dim_cards)), dim_cards):
+picked_dim = st.session_state.get("_dim_pick")
+
+for i, (col, dim) in enumerate(zip(st.columns(len(dim_cards)), dim_cards)):
     if dim["score"] is None:
-        value, tone, sub = "—", "neutral", "not instrumented"
+        value, tone, sub = "—", "neutral", "no check attached to an element"
     else:
-        value = f"{dim['score']:.0f}%"
+        value = f"{theme.pct_text(dim['score'])}%"
         tone = ("success" if dim["score"] >= 98
                 else "moderate" if dim["score"] >= 90 else "critical")
         sub = f"{dim['failing']} failing · {dim['findings']:,} findings"
-    col.markdown(
-        '<div class="dq-card dq-dim">'
-        f'<div class="hd">{theme.icon(dim["icon"], 15)} {dim["name"]}'
-        f'{theme.hint(dim["help"])}<span class="sp"></span>'
-        f'{theme.delta(dim["delta"], "%", 1)}</div>'
-        f'<div class="val" style="color:{theme.TONE[tone]["fg"]}">{value}</div>'
-        f'{theme.meter(dim["score"], tone)}'
-        f'<div class="sub">{sub}</div>'
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    on = picked_dim == dim["name"]
+    with col:
+        with st.container(key=f"dq_dim_{dim['name'].lower()}"):
+            st.markdown(
+                '<div class="dq-dim">'
+                + ('<span class="dq-dim-on"></span>' if on else "")
+                + f'<div class="hd">{theme.icon(dim["icon"], 15)} {dim["name"]}'
+                # The leftmost card has no room to its left for a bubble — stMain
+                # is the scroll container and clips anything that leaves it.
+                + theme.hint(dim["help"], side="right" if i == 0 else "left")
+                + '<span class="sp"></span>'
+                f'{theme.delta(dim["delta"], "%", 1)}</div>'
+                f'<div class="val" style="color:{theme.TONE[tone]["fg"]}">{value}</div>'
+                f'{theme.meter(dim["score"], tone)}'
+                f'<div class="sub">{sub}</div>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            # The label says what opening it gets you, and how much of it there is.
+            # "Details" would say neither.
+            label = ("Hide breakdown" if on
+                     else f"What this means · {dim['checks']} checks")
+            if st.button(label, key=f"_dim_{dim['name']}", width="stretch"):
+                st.session_state["_dim_pick"] = None if on else dim["name"]
+                st.rerun()
+
+if picked_dim in DIMENSION_BY_NAME:
+    card = next(c for c in dim_cards if c["name"] == picked_dim)
+    latest_id = run_index.iloc[-1]["run_id"]
+    tagged_now = _tagged(scoped, registry, latest_id)
+    with st.container(key="dq_dimension_panel"):
+        _dimension_panel(card, tagged_now[tagged_now["Dimension"] == picked_dim])
 
 # --- Issues requiring attention, and what the register says about coverage ---
 # Everything above this line is measured against the rules that exist, so it can only
@@ -549,7 +822,7 @@ with rail:
             f'{theme.icon("file", 14)} {s["covered"]} of {s["bindings"]} validated'
             '<span class="sp"></span>'
             f'<span style="font-size:1.35rem;font-weight:620;'
-            f'color:{theme.TONE["moderate"]["fg"]}">{s["covered_pct"]:.0f}%</span></div>'
+            f'color:{theme.TONE["moderate"]["fg"]}">{theme.pct_text(s["covered_pct"])}%</span></div>'
             + theme.segments(parts)
             + '<div class="dq-legend">'
             f'<span>{theme.dot("success")}{counts.get("covered", 0)} validated</span>'
@@ -578,7 +851,7 @@ with rail:
             f'{theme.icon("check_circle" if ok else "x_circle", 15)}</span>'
             f'<div class="bd"><div class="t1">{r.failing} of {r.checks} checks '
             f'failing</div><div class="t2">{r.run_ts:%d %b %Y · %H:%M}</div></div>'
-            f'<span class="n">{r.score:.1f}%</span></div>'
+            f'<span class="n">{theme.pct_text(r.score, 1)}%</span></div>'
         )
     st.markdown(
         '<div class="dq-card"><div class="ttl">Recent runs'

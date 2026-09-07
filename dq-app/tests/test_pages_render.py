@@ -7,6 +7,7 @@ that no longer matches, a page reading a field the adapter stopped returning.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -82,3 +83,47 @@ def test_cde_page_shows_how_a_cross_table_rule_attaches():
     body = " ".join(str(m.value) for m in at.markdown)
     assert "XREF_NAME_AGREEMENT" in body
     assert "element tag" in body
+
+
+def test_scorecard_opens_every_dimension_panel():
+    """Each dimension panel branches on what its dimension has: a score or none, a
+    failing check or none, checks attached to a registered element or none. Opening
+    one exercises one branch, so open all four."""
+    from dq_app.ui.pages import scorecard  # noqa: F401  (import guard only)
+
+    for name in ["Completeness", "Validity", "Consistency", "Uniqueness"]:
+        at = AppTest.from_file(
+            str(APP_DIR / "dq_app/ui/pages/scorecard.py"), default_timeout=60)
+        at.session_state["_dim_pick"] = name
+        at.run()
+        assert not at.exception, (name, [e.message for e in at.exception])
+        body = " ".join(str(m.value) for m in at.markdown)
+        assert "How the score is made" in body, name
+
+
+def test_a_dimension_with_a_failing_check_never_reads_as_a_clean_100():
+    """Consistency scores 99.9% with one check failing. Printed at zero decimals that
+    is "100%", sitting directly above the words "1 failing" — the card contradicting
+    itself, with nothing to tell the reader which half is wrong. `theme.pct_text` is
+    what stops it, and this is the case that motivated it."""
+    from dq_app.ui import theme
+
+    assert theme.pct_text(99.9) == "99.9"
+    assert theme.pct_text(99.96) == "99.96"
+    assert theme.pct_text(100.0) == "100"
+    assert theme.pct_text(0.0) == "0"
+    assert theme.pct_text(None) == "—"
+
+    at = AppTest.from_file(
+        str(APP_DIR / "dq_app/ui/pages/scorecard.py"), default_timeout=60)
+    at.run()
+    assert not at.exception, [e.message for e in at.exception]
+
+    # A card reading 100% is fine when nothing in it is failing — Uniqueness is
+    # genuinely clean. What must never happen is 100% over a non-zero failing count.
+    cards = [str(m.value) for m in at.markdown if 'class="dq-dim"' in str(m.value)]
+    assert len(cards) == 4, cards
+    for card in cards:
+        failing = int(re.search(r"(\d+) failing", card).group(1))
+        shown = re.search(r'class="val"[^>]*>([\d.]+|—)%?<', card).group(1)
+        assert not (shown == "100" and failing), card
