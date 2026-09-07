@@ -77,6 +77,14 @@ def playbook() -> pd.DataFrame:
     return _read("config.playbook")
 
 
+def cde_registry() -> pd.DataFrame:
+    return _read("config.cde_registry")
+
+
+def cde_profile() -> pd.DataFrame:
+    return _read("results.cde_profile")
+
+
 # --- Writes -----------------------------------------------------------------
 
 

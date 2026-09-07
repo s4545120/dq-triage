@@ -3,7 +3,9 @@
 Cohort triage, recommendation and an audit register on top of an existing DQ detection
 stack. Databricks Apps + Streamlit, Unity Catalog, Lakeflow.
 
-- **Spec (authoritative):** `dq-triage-agent-spec.md` v1.0, 2026-09-01
+- **Spec (authoritative):** `dq-triage-agent-spec.md` v1.0, 2026-09-01, plus
+  **Addendum A — Critical data elements** (v1.1 draft, 2026-09-07) at the foot of the
+  same file. The addendum is additive: nothing in v1.0 changed.
 - **Architecture:** `dq-architecture-diagram.md`
 
 **The one claim the whole design makes:** nothing in this system writes business data.
@@ -11,11 +13,15 @@ The app's only writes are its own append-only audit register and shadow→active
 promotion. Production tables are read by the check runner and written by nobody here.
 Most of the rules below exist to keep that claim true.
 
+Still exactly two writes after the CDE work: the register is seeded and read-only in
+the app, so `sql/ddl/07_grants.sql` is unchanged. If someone asks for in-app CDE
+registration, that is a third `MODIFY` grant and a decision, not a UI change.
+
 ## Current state — read before editing anything
 
 | Path | Status |
 |---|---|
-| `sql/ddl/` | Current. Written to spec v1.0. **Never executed** — no workspace access yet. |
+| `sql/ddl/` | Current. Spec v1.0 + Addendum A. **Never executed** — no workspace access yet. |
 | `fixtures/` | Current. Local Parquet dataset generated from the pilot CSVs. Verified. |
 | `dq-app/` | Current. Rewritten to spec v1.0, runs on the fixture. Never run against a workspace. |
 
@@ -41,6 +47,21 @@ the queue before any warehouse could re-run the view. `tests/test_lifecycle_conf
 asserts that fold reproduces the shipped `results.v_cohort_current.parquet` row for row.
 Change the view in `sql/ddl/08_views.sql` and that test tells you whether the copy kept up.
 
+**The CDE component was added on 2026-09-07.** `config.cde_registry` (09) and
+`results.cde_profile` (10) are new tables; `11_views_cde.sql` adds
+`v_cde_registry_current` and `v_cde_coverage`; `config.rule_registry` gained a
+nullable `cde_id`. `fixtures/cdes.py` declares ten elements over twelve columns,
+`fixtures/profile.py` profiles them from the pilot CSVs, and `fixtures/coverage.py`
+is the fixture-side twin of the coverage view. The app reads all of it through the
+adapter and writes none of it.
+
+**`v_cde_coverage` has a Python twin too, pinned the same way.** `domain/coverage.py`
+recomputes it rather than reading the shipped parquet, because promoting a shadow
+rule changes what is covered and the panel has to say so in-session.
+`tests/test_coverage_conformance.py` asserts the fold reproduces
+`results.v_cde_coverage.parquet` column for column. Change `11_views_cde.sql` and
+that test tells you whether the copy kept up.
+
 **Local writes are session-only.** `fixtures/out/` is generated and gated by `verify.py`,
 so the app never edits it. Events recorded in the UI live in `st.session_state`.
 
@@ -64,6 +85,51 @@ Fixed Broadband / prepaid rows that legitimately lack the column). They are the 
 example behind cohort COH-B, whose root cause is a rule defect rather than a data defect.
 Their correctly-scoped twins — `SUBS_SIM_NOT_NULL`, `SUBS_BILL_OFFR_NOT_ZERO` — return
 zero on the same data. Adding a `scope_filter` to the first pair destroys the demo.
+
+**The CDE register does not fix those two rules — it proves they are wrong.** The
+bindings for `IMEI_ID` and `PRIM_ACCT_KEY` declare the `expected_scope_filter` the
+rules should have had, and `v_cde_coverage` reports a `scope_mismatch` naming each
+rule. That is the whole point: COH-B's root cause becomes an assertion the model
+makes rather than something a human noticed. Adding `scope_filter` to the rules
+themselves still destroys the demo, and now also empties the scope_mismatch bucket
+that `tests/test_coverage_conformance.py` asserts is non-empty.
+
+**The monitoring pages count only CDE-attached checks.** Every figure on
+`ui/pages/scorecard.py`, `monitored_tables.py` and `monitor_detail.py` — headline
+score, the four dimensions, findings, the monitor inventory, applied rules — is
+filtered to the rules `v_cde_coverage` attached to a registered element: 20 of the 34
+in the fixture. The scorecard applies it in its own filter strip; the two monitor
+pages get it from `ui/monitoring.domain_filter`, which is the only other place the
+filter is written. The other 14 checks still run and still raise cohorts, and are
+worked from the Cohorts queue, but they move no number on a monitoring page. The
+reason is the denominator: a quality score over "every rule someone
+happened to write" moves whenever the rule set does, and cannot be compared across two
+months or two domains. `domain/coverage.attached_rule_ids` is the single definition of
+that set and is read back off the coverage view — never re-derived by matching table
+and column, which would silently drop `XREF_NAME_AGREEMENT` (two tables, no
+`target_column`, attaches only through its `cde_id` tag).
+
+The scoping is drawn, not implied: the monitor pages carry a `10 CDEs` badge in the
+filter strip, because a diagnostic page that quietly hides 14 of 34 checks is worse
+than one that shows fewer and says so.
+
+Consequences a reader will otherwise trip over: the scorecard shows 4 passing of 20,
+not 11 of 32; neither shadow rule is CDE-attached, so its shadow count is always 0;
+and three cohorts have no CDE-attached member, so they appear only in the Cohorts
+queue and never on a monitoring page.
+
+**Criticality is not severity, and must never become it.** Criticality belongs to the
+element; severity belongs to the rule. `check_run.severity` is copied verbatim from
+the registry and nothing downstream recomputes it. Criticality may feed
+`cohort.rank_score` (advisory) and inform a human authoring a rule. Wiring it into
+severity would give the same breach two different severities depending on which
+element it touched.
+
+**A PII element's profile stores no values, and the floor is enforced twice.**
+`cde_profile_pii_withholds_values` in the DDL, and a k-anonymity check in both
+`fixtures/verify.py` and `tests/test_coverage_conformance.py`: no stored signature
+may have a row count below five. `violation_sample` is the one accepted PII surface
+in this design; the profile does not open a second.
 
 **Nine rules pass and two are in shadow, on purpose.** A fixture where everything breaches
 cannot exercise the pass path and leaves closure rate with no denominator.

@@ -40,3 +40,23 @@ def shipped_view():
 @pytest.fixture(scope="session")
 def check_runs():
     return _load("results.check_run")
+
+
+@pytest.fixture(scope="session")
+def rule_registry():
+    return _load("config.rule_registry")
+
+
+@pytest.fixture(scope="session")
+def cde_registry():
+    return _load("config.cde_registry")
+
+
+@pytest.fixture(scope="session")
+def cde_profiles():
+    return _load("results.cde_profile")
+
+
+@pytest.fixture(scope="session")
+def shipped_coverage():
+    return _load("results.v_cde_coverage")

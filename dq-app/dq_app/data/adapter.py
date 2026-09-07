@@ -19,6 +19,11 @@ of the events here, by `domain.lifecycle`, which is a labelled copy of
 **Writes.** Exactly two of them exist in the whole app: appending a register event,
 and promoting a shadow rule. Both are `INSERT`. There is no third, and adding one
 that touched a `prod.*` table would contradict the grants the app runs under.
+
+The CDE register is read-only here for the same reason. Registering an element is an
+append to `config.cde_registry` and would be that third write, which is a decision
+about the app's Unity Catalog grants rather than a UI change. Until it is taken, the
+register is seeded and this module only reads it.
 """
 
 from __future__ import annotations
@@ -32,7 +37,7 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import identity
-from dq_app.domain import lifecycle
+from dq_app.domain import coverage, lifecycle
 
 APP_VERSION = "dq-triage-app/1.0.0"
 
@@ -107,6 +112,18 @@ def get_playbook() -> pd.DataFrame:
     return _impl.playbook()
 
 
+@st.cache_data(**_CACHE)
+def get_cde_registry() -> pd.DataFrame:
+    """Every version of every critical data element. Append-only, so this is the
+    history; `get_cde_registry_current()` is the current state."""
+    return _impl.cde_registry()
+
+
+@st.cache_data(**_CACHE)
+def get_cde_profile() -> pd.DataFrame:
+    return _impl.cde_profile()
+
+
 def get_dispositions() -> pd.DataFrame:
     """The register, including anything recorded in this session but not yet durable."""
     base = _base_dispositions()
@@ -132,6 +149,24 @@ def get_rule_registry_current() -> pd.DataFrame:
     reg = reg.assign(effective_to=reg.groupby("rule_id")["effective_from"].shift(-1))
     latest = reg.groupby("rule_id", as_index=False).tail(1)
     return latest[latest["status"] != "retired"].reset_index(drop=True)
+
+
+def get_cde_registry_current() -> pd.DataFrame:
+    """Latest non-retired version of each element, with `effective_to` derived.
+    The Python twin of `v_cde_registry_current`."""
+    return coverage.current_registry(get_cde_registry())
+
+
+def get_cde_coverage() -> pd.DataFrame:
+    """One row per bound CDE column — the Python twin of `v_cde_coverage`.
+
+    Recomputed rather than read because it depends on the rule registry, and
+    promoting a shadow rule is one of the app's two writes: a promotion made in this
+    session changes what is covered, and the panel has to say so before any
+    warehouse could re-materialise the view.
+    """
+    return coverage.derive_cde_coverage(
+        get_cde_registry(), get_rule_registry(), get_check_runs(), get_cde_profile())
 
 
 def clear_cache() -> None:

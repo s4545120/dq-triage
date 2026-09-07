@@ -26,7 +26,13 @@ This is the part to read before quoting any number from `out/`.
 - every `violation_count` and `rows_scanned` on the final run;
 - every `violation_sample` row — actual bad rows with actual bad values
   (`alex.adams0001 hotmail.com`, `service-number-unknown`, `31-02-1988`);
-- which rules pass and which breach.
+- which rules pass and which breach;
+- **every number in `results.cde_profile`** — the null and blank rates, cardinality,
+  length ranges, masked signature distributions and signature match rates are computed
+  over the CSVs by `profile.py`, with the binding's scope filter applied. Nothing in
+  the profile is back-projected or hand-written;
+- **every row of `results.v_cde_coverage`**, which is derived from the register, the
+  rule registry and the final run.
 
 **Synthesised — because one snapshot cannot contain it:**
 - the preceding 39 daily runs (see *History*, below);
@@ -34,7 +40,12 @@ This is the part to read before quoting any number from `out/`.
   job's model endpoints. Here they are hand-written from what profiling actually found,
   so the text is defensible — but no model produced it, `recommendation_source` says so,
   and `model_input_payload` is a stub;
-- every disposition event and the identities on it.
+- every disposition event and the identities on it;
+- **the CDE register itself** (`config.cde_registry`). Which fields are critical, at
+  what tier and on what regulatory basis, is a business judgement, and here it is one
+  person's — see `cdes.py`. The *bindings* are hand-authored too, which is what
+  `discovered_by = 'manual'` on all twelve of them means: the classification sweep that
+  would propose them from column names, value signatures and lineage does not exist yet.
 
 **Deliberately *not* synthesised:** violation samples for back-projected breaches.
 Fabricating evidence rows for a breach that never happened is the one shortcut worth
@@ -130,6 +141,31 @@ The injection rewrites COH-A's second approval so both come from the same identi
 Adding a *third* approval row would not breach anything — the control is on distinct
 identities, not row count, and that distinction is exactly what the test exists to catch.
 
+## What profiling found on its own
+
+`results.cde_profile` describes the twelve bound columns without asserting anything
+about them, and two defects fall out of the description before any rule is consulted.
+
+**Date of birth carries two shapes.** 986 values are `9{4}-9{2}-9{2}_9{2}:9{2}:9{2}` and
+14 are `9{2}-9{2}-9{4}` — DD-MM-YYYY where everything else is ISO. The minority signature
+*is* the `CTCT_BRTH_PARSEABLE` breach, visible as a shape rather than as a verdict.
+
+**The landline column contains letters.** 976 values are `9{10}`, and 24 are
+`9{2}X{3}9{5}`. That is `CTCT_PHN_FMT`, described rather than judged.
+
+The email column is the useful counter-example. Its 217 distinct shapes are dominated by
+name-length variation, so no single signature is informative — but `signature_match_pct`
+is 75.98%, which on 999 populated values is exactly the 240 addresses `CTCT_EML_FMT`
+reports. The expected signature in `cdes.py` is deliberately the same expression as that
+rule, so the profile and the verdict agree to the row instead of differing by 80 with
+nothing to explain the gap.
+
+Signatures are masked shapes, never values: digits become `9`, letters `X`, whitespace
+`_`, punctuation survives, and runs collapse to a class and a length. For an element
+flagged `pii`, shapes seen on fewer than five rows are folded into a `<rare>` bucket that
+keeps the count and discards the shape — 30% of the email column ends up there, and both
+defects above survive the threshold comfortably.
+
 ## Limitations
 
 - **No volume history.** `rows_scanned` is constant across all 40 runs, so
@@ -140,6 +176,12 @@ identities, not row count, and that distinction is exactly what the test exists 
   not exist locally. The named downstream tables are plausible, not observed.
 - **Identities are synthetic**, on `example.com`. On Databricks every one arrives from
   `x-forwarded-access-token` and cannot be typed in.
+- **CDE criticality tiers are one person's judgement.** They are a starting point for a
+  conversation with the business, not an agreed taxonomy. Addendum A lists it as an open
+  question.
+- **No CDE has zero rules**, so the `no_rule` coverage finding is unexercised in this
+  fixture — the twelve bound columns all attract at least one rule. `scope_mismatch`,
+  `unvalidated` and `covered` all occur and are asserted by the app's conformance test.
 - **The CSVs are read from `~/Downloads`** and are not committed. Change the paths at the
   top of `build_fixtures.py` if they move.
 

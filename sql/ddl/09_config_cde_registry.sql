@@ -1,0 +1,97 @@
+-- cde_registry — the critical data elements, registered before anything profiles them
+--
+-- Substitute {catalog} before execution.
+--
+-- Ownership boundary: this repo owns the SHAPE of the table. Databricks owns its
+-- CONTENTS — CDE rows are inserted at runtime, never checked in here.
+--
+-- WHY THIS TABLE EXISTS AT ALL. Without it, "which columns matter?" is answered by
+-- whichever rules someone happened to write, so coverage can only ever be measured
+-- against itself. Registering the elements first gives every coverage number a
+-- denominator that does not move when the rule set does. A CDE with no rule is the
+-- finding; a rule set with no CDEs cannot produce that finding.
+--
+-- REGISTERED BEFORE DISCOVERY. The order is the point. A CDE is registered as a
+-- DEFINITION — a business term, a data class, an expected signature — and only then
+-- does anything profile it. `results.cde_profile` takes its worklist from
+-- v_cde_registry_current, so an unregistered column cannot be profiled, and only a
+-- bound column can produce a proposed rule. That ordering is what stops discovery
+-- from quietly deciding what is critical.
+--
+-- APPEND-ONLY, LIKE THE RULE REGISTRY AND THE REGISTER. Re-tiering a CDE, adding a
+-- binding or retiring one INSERTS a new (cde_id, cde_version) row. There is
+-- deliberately no stored effective_to — it is derived with LEAD() in
+-- v_cde_registry_current (11_views_cde.sql), for the same reason as the rule
+-- registry: closing the prior row would need UPDATE, which would widen the app's
+-- grant and break the uniform "only ever appends" story.
+--
+-- BINDINGS ARE AN ARRAY, NOT A BRIDGE TABLE. One business element lands in many
+-- physical columns — the same call results.cohort made for member_result_ids, and
+-- for the same reasons: criticality, PII status and ownership are properties of the
+-- ELEMENT, not of each copy of it, and CDE registers are tens of rows, not
+-- thousands. Revisit only if a binding needs a lifecycle of its own.
+--
+-- binding_status and discovered_by are seeded 'bound' / 'manual' throughout the PoC,
+-- where bindings are hand-authored. They are here so that automated binding
+-- discovery — name matching, value signatures, Unity Catalog lineage — lands later
+-- as NEW ROWS in a 'candidate' state rather than as a schema migration on a table
+-- that by then carries history.
+--
+-- EXPECTED_SCOPE_FILTER IS A CLAIM ABOUT THE DATA, AND IT IS CHECKABLE. Where an
+-- element is only populated for some rows — IMEI only for handset services, billing
+-- account only for postpaid — the binding says so in SQL. v_cde_coverage compares
+-- that against the scope_filter on every rule attached to the binding and reports a
+-- mismatch. That is how a rule defect becomes visible without anyone having to
+-- notice it by hand.
+
+CREATE TABLE IF NOT EXISTS {catalog}.config.cde_registry (
+  cde_id             STRING    NOT NULL COMMENT 'stable identifier, survives versioning, e.g. CDE_CUST_EMAIL',
+  cde_version        INT       NOT NULL COMMENT 'incremented on every change; (cde_id, cde_version) is the logical key',
+  cde_name           STRING    NOT NULL COMMENT 'human-readable, shown in the CDE register and the coverage panel',
+  business_term      STRING             COMMENT 'the glossary term this element realises, where a glossary exists',
+  data_class         STRING    NOT NULL COMMENT 'email_address | person_name | date_of_birth | phone_number | msisdn | national_id | device_id | account_id | other',
+  definition         STRING             COMMENT 'what the element means in business terms — the thing a steward is agreeing to when they register it',
+  expected_signature STRING             COMMENT 'regex the values are expected to match. Drives signature_match_pct in the profile. NULL where the element has no fixed shape (a person name has none)',
+  criticality        STRING    NOT NULL COMMENT 'critical | high | medium | low. Feeds cohort.rank_score — NEVER check_run.severity, which is copied verbatim from the rule registry and adjusted downstream by nothing',
+  pii                BOOLEAN   NOT NULL COMMENT 'TRUE where values identify a person. Where TRUE, cde_profile stores masked signatures and counts only, never an exemplar value',
+  regulatory_basis   STRING             COMMENT 'why it is critical in compliance terms, free text, e.g. KYC identity evidence',
+  bindings           ARRAY<STRUCT<
+                       target_table:          STRING,
+                       target_column:         STRING,
+                       populated_when:        STRING,
+                       expected_scope_filter: STRING,
+                       binding_status:        STRING,
+                       discovered_by:         STRING,
+                       confidence:            DOUBLE
+                     >> NOT NULL COMMENT 'where this element physically lives. populated_when is prose for a human; expected_scope_filter is the same claim in SQL, checked against rule scope by v_cde_coverage. binding_status: candidate | bound | unbound. discovered_by: manual | name_match | value_signature | lineage | uc_tag',
+  business_domain    STRING             COMMENT 'owning domain, used for the coverage breakout',
+  owner_group        STRING             COMMENT 'accountable team; ideally a Databricks group name so it resolves to people',
+  status             STRING    NOT NULL COMMENT 'proposed | registered | retired. Only a registered CDE is profiled; retiring is an insert, not a delete',
+  effective_from     TIMESTAMP NOT NULL COMMENT 'when this version took effect. There is no effective_to — it is derived, see header',
+  registered_by      STRING             COMMENT 'authoring identity, from OBO where the app wrote the row',
+  registered_at      TIMESTAMP          COMMENT 'when this version was registered',
+  note               STRING             COMMENT 'why this element is critical, or why this version changed. Free text, read by humans in the CDE register'
+)
+USING DELTA
+CLUSTER BY (business_domain, cde_id)
+COMMENT 'The critical data element register. Registered BEFORE anything profiles or proposes rules, so coverage has a denominator that does not move when the rule set does. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE {catalog}.config.cde_registry
+  ADD CONSTRAINT cde_registry_criticality_enum
+  CHECK (criticality IN ('critical', 'high', 'medium', 'low'));
+
+ALTER TABLE {catalog}.config.cde_registry
+  ADD CONSTRAINT cde_registry_status_enum
+  CHECK (status IN ('proposed', 'registered', 'retired'));
+
+ALTER TABLE {catalog}.config.cde_registry
+  ADD CONSTRAINT cde_registry_version_positive
+  CHECK (cde_version >= 1);
+
+-- A registered CDE with no bindings is a definition nothing can act on. Proposed
+-- rows are allowed to be empty — that is exactly the state between registering an
+-- element and discovering where it lives.
+ALTER TABLE {catalog}.config.cde_registry
+  ADD CONSTRAINT cde_registry_registered_has_bindings
+  CHECK (status <> 'registered' OR size(bindings) >= 1);

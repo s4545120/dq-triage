@@ -176,3 +176,119 @@ correction is a new row rather than an edit.
 - **Suggested first release:** cohort model, queue, disposition register and verification. Recommendation
   can follow one release later if the advice endpoint needs tuning — the register is valuable on its own,
   and it is the piece that makes the scorecard honest.
+
+---
+
+# Addendum A — Critical data elements (v1.1 draft, 2026-09-07)
+
+**Status:** additive to v1.0. Nothing in the body above changes. This addendum introduces one config
+table, one results table, two views and a fifth surface. Every requirement, non-goal and open
+question in v1.0 stands as written.
+
+## Why
+
+v1.0 measures the rule set: how many checks pass, how many cohorts closed, how fast. All of it is
+measured against the rules that happen to exist, so it can say how the checks are doing and cannot
+say whether anything is watching the fields the business cares about. Coverage against the rule set
+is 100% by construction.
+
+A **critical data element (CDE)** is a field the business has registered as mattering — date of
+birth, name, email, identity document number, service number. Registered as a list, before the rules
+were written, it becomes a denominator the rule set does not control, and "what proportion of what
+matters has anything checking it?" becomes answerable.
+
+## Requirements
+
+### Must-Have (P0)
+
+**CDE register — `dq.config.cde_registry`**
+- Append-only and versioned exactly as `rule_registry` is: a re-tier, a new binding or a retirement
+  is a new `(cde_id, cde_version)` row, and `effective_to` is derived by `v_cde_registry_current`.
+- An element carries a business meaning, a data class, a criticality tier, a PII flag, an optional
+  expected signature, and its **bindings** — the physical columns it lands in, as an array.
+  - *AC:* Given an element registered with three bindings, when the coverage view is queried, then
+    three rows are returned and each is assessed independently.
+
+**Registration precedes discovery**
+- The profile job takes its worklist from `v_cde_registry_current`. An unregistered column is never
+  profiled and can never produce a proposed rule.
+  - *AC:* Given a column not bound to any registered element, when the profile job runs, then no
+    `cde_profile` row exists for it.
+
+**Profiling — `dq.results.cde_profile`**
+- One row per binding per pass: rows in scope, null and blank rates, cardinality, length range,
+  sentinel count, distinct shape count, top masked signatures, and match rate against the element's
+  expected signature.
+- Not a `check_run` row. A profile describes and reaches no verdict; the verdict layer's status enum
+  and thresholds do not apply to it, and admitting one would put non-verdicts into denominators that
+  mean "checks that ran".
+  - *AC:* Given a column whose values carry two distinct shapes, when it is profiled, then both
+    appear in `top_signatures` with their row counts, and the minority shape is visible without any
+    rule having been written.
+
+**Privacy — values are never retained for a PII element**
+- Where `pii = TRUE`, the profile stores counts, distributions and masked signatures only. Shapes
+  occurring on fewer than five rows are folded into a `<rare>` bucket that keeps the count and
+  discards the shape, and `value_stats_withheld` records that this happened.
+- `violation_sample` remains the one accepted PII surface in the design. The profile does not open a
+  second.
+  - *AC:* Given a PII element, when its profile is written, then `value_stats_withheld` is TRUE and
+    no stored signature has a row count below five.
+
+**Coverage — `dq.results.v_cde_coverage`**
+- One row per bound column, classified worst-first: `no_rule`, `scope_mismatch`, `unvalidated`,
+  `covered`.
+- A rule attaches to a binding by matching its column **or** by naming the element in
+  `rule_registry.cde_id`. The second exists for cross-table rules, which carry `target_column = NULL`
+  by design and no column join can reach.
+  - *AC:* Given a cross-table rule tagged with a `cde_id`, when coverage is computed, then it counts
+    toward that element's rule count.
+
+**Scope mismatch is a rule defect, detected structurally**
+- Where a binding declares `expected_scope_filter` and an attached rule carries no `scope_filter`,
+  that rule measures rows the register says never held a value, and the view names it.
+  - *AC:* Given the pilot data, when coverage is computed, then `SUBS_IMEI_NOT_NULL` and
+    `SUBS_PRIM_ACCT_NOT_ZERO` are each named against their binding — the two rules behind cohort
+    COH-B.
+
+**Surface — CDE Register (read-only)**
+- A fifth surface listing registered elements, their bindings, their latest profile and their
+  coverage findings, plus a coverage panel on the Scorecard.
+
+### Non-Goals for this addendum
+
+- **In-app registration.** Registering an element would be a third write for an app whose claim is
+  that it makes two. The register is seeded and read-only in the app; `sql/ddl/07_grants.sql` is
+  unchanged. Making registration an in-app act is a grants decision, not a UI change, and it has not
+  been taken.
+- **Automated binding discovery.** The classification sweep — column-name tokens, value signatures,
+  Unity Catalog lineage — is designed but not built. Every binding is hand-authored, marked
+  `discovered_by = 'manual'`. `binding_status` and `discovered_by` exist now so discovery later lands
+  as new rows in a `candidate` state rather than as a migration.
+- **Automatic rule promotion.** Unchanged from v1.0. Profiling may propose a rule; it lands as
+  `shadow` and a human promotes it through the existing path.
+- **Criticality driving severity.** Criticality belongs to the element, severity to the rule. It may
+  feed `cohort.rank_score`, which is advisory, and inform a human authoring a rule. It never adjusts
+  a severity downstream — `check_run.severity` is copied verbatim and nothing recomputes it.
+
+## Metrics this adds
+
+- **CDE coverage:** bound columns with at least one value-examining rule ÷ bound columns. The one
+  number on the Scorecard whose denominator the rule set does not control.
+- **Critical gaps:** registered `critical` or `high` elements carrying any finding. Target zero.
+- **Scope mismatches:** rules contradicting a binding's declared scope. Each is a rule defect and
+  each inflates breach counts until it is fixed.
+- **Profile freshness:** bound columns not profiled within the agreed window.
+
+## Open Questions this adds
+
+- **(Data governance)** Who may register a CDE, and who may retire one? Retirement is the sharp edge:
+  it silently drops coverage and nothing in the current design would notice. Related to, and probably
+  answered with, the v1.0 question on who signs off a rule promotion.
+- **(Data governance)** Should confirmed bindings also be written to Unity Catalog column tags, so
+  the binding is visible to tooling outside this app? The register would remain the versioned audit
+  record; the tag would be an operational copy.
+- **(Stakeholder)** Who owns the criticality tiers, and against what scale? The seeded tiers are a
+  starting point, not an agreed taxonomy.
+- **(Engineering)** What is the classification sweep's cost and cadence over a full warehouse, and
+  does it need sampling rather than a full pass?

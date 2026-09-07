@@ -46,6 +46,9 @@ from pathlib import Path
 
 import pandas as pd
 
+import cdes
+import coverage
+import profile as cde_profiler
 import rules
 from rules import CTCT_TABLE, SUBS_TABLE, Ctx
 
@@ -173,6 +176,12 @@ def evaluate_all(ctx: Ctx) -> dict[str, Snapshot]:
 # config.rule_registry
 # ---------------------------------------------------------------------------
 
+# rule_id -> cde_id, for the rules a column join cannot reach. Every other rule
+# is attached by v_cde_coverage on (target_table, target_column) with no tagging
+# at all -- see the note in fixtures/cdes.py on why both paths exist.
+CDE_FOR_RULE = cdes.rule_cde_map()
+
+
 def build_rule_registry() -> pd.DataFrame:
     rows = []
     base_authored = SNAPSHOT - timedelta(days=180)
@@ -184,6 +193,7 @@ def build_rule_registry() -> pd.DataFrame:
                 rule_name=r.rule_name,
                 target_table=r.target_table,
                 target_column=r.target_column,
+                cde_id=CDE_FOR_RULE.get(r.rule_id),
                 rule_type=r.rule_type,
                 rule_expr=r.rule_expr,
                 scope_filter=prior.get("scope_filter"),
@@ -207,6 +217,7 @@ def build_rule_registry() -> pd.DataFrame:
             rule_name=r.rule_name,
             target_table=r.target_table,
             target_column=r.target_column,
+            cde_id=CDE_FOR_RULE.get(r.rule_id),
             rule_type=r.rule_type,
             rule_expr=r.rule_expr,
             scope_filter=r.scope_filter,
@@ -885,14 +896,26 @@ def main() -> None:
     playbook = enrich_playbook(disp)
     current = cohort_current(cohort, disp)
 
+    # CDEs are registered before anything profiles them, and the fixture keeps that
+    # order literally: the register is authored 200 days ago -- earlier than the
+    # oldest rule version -- and the profile pass takes its worklist from it.
+    cde_registry = cde_profiler.build_cde_registry(
+        effective_from=SNAPSHOT - timedelta(days=200), registered_by=STEWARD_C[0])
+    cde_profile = cde_profiler.build_cde_profile(
+        ctx, SNAPSHOT, det_uuid, random.Random(20260902))
+    cde_cov = coverage.cde_coverage(cde_registry, registry, runs, cde_profile)
+
     tables = {
         "config.rule_registry": registry,
         "config.playbook": playbook,
+        "config.cde_registry": cde_registry,
         "results.check_run": runs,
         "results.violation_sample": samples,
         "results.cohort": cohort,
         "results.disposition": disp,
+        "results.cde_profile": cde_profile,
         "results.v_cohort_current": current,
+        "results.v_cde_coverage": cde_cov,
     }
     for name, df in tables.items():
         df.to_parquet(out / f"{name}.parquet", index=False)

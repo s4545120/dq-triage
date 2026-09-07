@@ -102,6 +102,21 @@ def playbook() -> pd.DataFrame:
     return _q(f"SELECT * FROM {DQ_CATALOG}.config.playbook")
 
 
+def cde_registry() -> pd.DataFrame:
+    """Every version of every critical data element.
+
+    The base table, not v_cde_registry_current, for the same reason rule_registry()
+    reads the base table: the app derives current state itself so a rule promoted in
+    this session is reflected immediately, and the CDE register is folded by the same
+    code path. The view remains the definition — see domain/coverage.py.
+    """
+    return _q(f"SELECT * FROM {DQ_CATALOG}.config.cde_registry")
+
+
+def cde_profile() -> pd.DataFrame:
+    return _q(f"SELECT * FROM {DQ_CATALOG}.results.cde_profile")
+
+
 # --- Writes -----------------------------------------------------------------
 
 _DISPOSITION_COLUMNS = [

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS {catalog}.config.rule_registry (
   rule_name          STRING    NOT NULL COMMENT 'human-readable, shown in the queue and scorecard',
   target_table       STRING    NOT NULL COMMENT 'catalog.schema.table being checked',
   target_column      STRING             COMMENT 'NULL for table-level and cross-table rules',
+  cde_id             STRING             COMMENT 'the critical data element this rule covers, from config.cde_registry. NULL is legitimate — most rules check structural columns nobody registered as a CDE. Its job is to attach cross-table rules, whose target_column is NULL by design, to the element they actually cover; v_cde_coverage joins on this OR on the column match'
   rule_type          STRING    NOT NULL COMMENT 'not_null | format | uniqueness | consistency | referential | sentinel | variance | freshness | volume',
   rule_expr          STRING    NOT NULL COMMENT 'SQL boolean expression that is TRUE for a VIOLATING row; the check runner counts where this holds',
   scope_filter       STRING             COMMENT 'SQL predicate narrowing the rows in scope, e.g. PROD_TYPE_KEY <> 0. NULL means the whole table — see header note',

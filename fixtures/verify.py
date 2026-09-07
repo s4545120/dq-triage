@@ -23,6 +23,8 @@ out = Path(sys.argv[1] if len(sys.argv) > 1 else "out")
 T = {p.stem: pd.read_parquet(p) for p in out.glob("*.parquet")}
 coh, disp = T["results.cohort"], T["results.disposition"]
 runs, samp = T["results.check_run"], T["results.violation_sample"]
+cde, prof = T["config.cde_registry"], T["results.cde_profile"]
+cov = T["results.v_cde_coverage"]
 
 findings: list[str] = []
 
@@ -35,6 +37,8 @@ DDL_FOR = {
     "results.violation_sample": "04_results_violation_sample.sql",
     "results.cohort": "05_results_cohort.sql",
     "results.disposition": "06_results_disposition.sql",
+    "config.cde_registry": "09_config_cde_registry.sql",
+    "results.cde_profile": "10_results_cde_profile.sql",
 }
 
 
@@ -109,6 +113,55 @@ for _, c in coh.iterrows():
         assert res.loc[rid, "status"] in ("breach", "skipped"), \
             f"{c.cohort_id} member {res.loc[rid,'rule_id']} is not a breach"
 
+# --- CDE register, profile and coverage -------------------------------------
+# The ordering claim, checked rather than asserted in prose: an element is
+# registered before anything profiles it, and only a registered element is
+# profiled. If the profile job ever takes a worklist from somewhere other than
+# v_cde_registry_current, this is what notices.
+assert cde.groupby("cde_id").cde_version.apply(lambda s: s.is_unique).all(), \
+    "cde_version reused within a cde_id"
+registered = set(cde[cde.status == "registered"].cde_id)
+unregistered = set(prof.cde_id) - registered
+assert not unregistered, f"profiled without being registered: {sorted(unregistered)}"
+for _, c in cde.iterrows():
+    assert c.status != "registered" or len(c.bindings) >= 1, \
+        f"{c.cde_id} is registered with no bindings"
+    for b in c.bindings:
+        assert b["binding_status"] in ("candidate", "bound", "unbound"), \
+            f"{c.cde_id} binding has status {b['binding_status']!r}"
+
+first_registration = cde.effective_from.min()
+assert first_registration <= T["config.rule_registry"].effective_from.min(), \
+    "a rule predates the CDE register -- registration is supposed to come first"
+
+# The privacy invariant, matching cde_profile_pii_withholds_values in the DDL.
+assert prof[prof.pii].value_stats_withheld.all(), \
+    "a PII element was profiled without declaring that values were withheld"
+# and the k-anonymity floor it exists to enforce.
+for _, r in prof[prof.pii].iterrows():
+    for sig in r.top_signatures:
+        assert sig["signature"] == "<rare>" or sig["row_count"] >= 5, \
+            f"{r.cde_id}/{r.target_column} exposes a signature seen on {sig['row_count']} row(s)"
+
+# Coverage is derived, so it must not invent or lose a binding.
+bound_count = sum(1 for _, c in cde.iterrows() if c.status == "registered"
+                  for b in c.bindings if b["binding_status"] == "bound")
+assert len(cov) == bound_count, \
+    f"v_cde_coverage has {len(cov)} rows for {bound_count} bound columns"
+assert cov.coverage_gap.isin(
+    ["no_rule", "scope_mismatch", "unvalidated", "covered"]).all(), \
+    "unknown coverage_gap value"
+# A scope mismatch names the rules it is accusing, or it is not a finding.
+mism = cov[cov.has_scope_mismatch]
+assert mism.unscoped_rule_ids.map(len).gt(0).all(), "scope mismatch with no rule named"
+known_rules = set(T["config.rule_registry"].rule_id)
+for _, r in cov.iterrows():
+    for rid in r.unscoped_rule_ids:
+        assert rid in known_rules, f"{r.cde_id} names unknown rule {rid}"
+
+print(f"cde: {len(cde)} elements  {bound_count} bound columns  "
+      f"{len(prof)} profiles  gaps: "
+      + ", ".join(f"{k}={v}" for k, v in cov.coverage_gap.value_counts().items()))
 print(f"tables: {len(T)}  cohorts: {len(coh)}  events: {len(disp)}  "
       f"check_runs: {len(runs)}  samples: {len(samp)}")
 print(f"schema: {len(DDL_FOR)} tables diffed against sql/ddl/")

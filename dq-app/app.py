@@ -28,6 +28,10 @@ st.set_page_config(
 PAGES = {
     "scorecard": st.Page("dq_app/ui/pages/scorecard.py", title="Scorecard",
                          icon=":material/monitoring:", default=True),
+    "monitors": st.Page("dq_app/ui/pages/monitored_tables.py", title="All monitored tables",
+                        icon=":material/table_chart:"),
+    "monitor_detail": st.Page("dq_app/ui/pages/monitor_detail.py", title="Monitor detail",
+                              icon=":material/frame_inspect:"),
     "queue": st.Page("dq_app/ui/pages/cohort_queue.py", title="Cohorts",
                      icon=":material/inbox:"),
     "detail": st.Page("dq_app/ui/pages/cohort_detail.py", title="Detail",
@@ -36,13 +40,15 @@ PAGES = {
                         icon=":material/receipt_long:"),
     "registry": st.Page("dq_app/ui/pages/rule_registry.py", title="Rules",
                         icon=":material/rule:"),
+    "cde": st.Page("dq_app/ui/pages/cde_registry.py", title="Data elements",
+                   icon=":material/label_important:"),
 }
 
 nav = st.navigation(
     {
-        "Monitor": [PAGES["scorecard"]],
+        "Monitor": [PAGES["scorecard"], PAGES["monitors"], PAGES["monitor_detail"]],
         "Triage": [PAGES["queue"], PAGES["detail"]],
-        "Evidence": [PAGES["register"], PAGES["registry"]],
+        "Evidence": [PAGES["register"], PAGES["registry"], PAGES["cde"]],
     }
 )
 

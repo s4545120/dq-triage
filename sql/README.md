@@ -29,7 +29,8 @@ for f in sql/ddl/0*.sql; do
 done > /tmp/dq_ddl.sql
 ```
 
-Run `00`–`06` as the catalog owner, `07` as a metastore admin, `08` last.
+Run `00`–`06` and `09`–`10` as the catalog owner, `07` as a metastore admin, then
+`08` and `11` last — the views read tables created by every file before them.
 
 | File | Table | Written by |
 |---|---|---|
@@ -42,6 +43,9 @@ Run `00`–`06` as the catalog owner, `07` as a metastore admin, `08` last.
 | `06_results_disposition.sql` | `results.disposition` | **the app** (append-only) |
 | `07_grants.sql` | — | metastore admin |
 | `08_views.sql` | three views | — |
+| `09_config_cde_registry.sql` | `config.cde_registry` | stewards (seeded; the app only reads it) |
+| `10_results_cde_profile.sql` | `results.cde_profile` | profile job |
+| `11_views_cde.sql` | `v_cde_registry_current`, `v_cde_coverage` | — |
 
 ## Three decisions worth knowing before you review this
 
@@ -108,12 +112,16 @@ order of how likely they are to need a change:
 | Construct | Where | Why it might not work first time |
 |---|---|---|
 | `CLUSTER BY` (liquid clustering) | every table | Needs DBR 13.3+ and a UC managed table. On an older runtime, swap for `PARTITIONED BY` or drop it — it is a performance choice, nothing depends on it. |
-| `ALTER TABLE … ADD CONSTRAINT … CHECK` | 01, 02, 03, 05, 06 | Triggers a Delta writer-protocol upgrade. Fine on an empty table; if a constraint is ever added to a populated table it validates every existing row first. |
-| `delta.appendOnly = true` | 01, 06 | Load-bearing — this is the enforcement the grant model cannot express. Confirm with `DESCRIBE DETAIL` after creation; if it did not stick, the audit story is weaker than the README claims. |
+| `ALTER TABLE … ADD CONSTRAINT … CHECK` | 01, 02, 03, 05, 06, 09, 10 | Triggers a Delta writer-protocol upgrade. Fine on an empty table; if a constraint is ever added to a populated table it validates every existing row first. |
+| `delta.appendOnly = true` | 01, 06, 09 | Load-bearing — this is the enforcement the grant model cannot express. Confirm with `DESCRIBE DETAIL` after creation; if it did not stick, the audit story is weaker than the README claims. |
 | `MAX_BY(x, CASE WHEN … THEN event_seq END)` | 08, `v_cohort_current` | Behaviour when every ordering value is NULL (a cohort with no `reviewed` event) needs confirming. COH-F in the fixture is exactly that case — check it returns NULL rather than erroring. |
 | `system.information_schema.schema_privileges` | 07 §3c | Confirm the view exists and is readable by whoever runs the proof queries. |
 | `split_part(str, '@', -1)` | 01, `CTCT_EML_DOMAIN_TLD` | Relies on negative `partNum` counting from the end. |
-| `SELECT * EXCEPT (rn)` | 08, `v_rule_registry_current` | Databricks-specific syntax. |
+| `SELECT * EXCEPT (rn)` | 08, `v_rule_registry_current` | Databricks-specific syntax. Also 11, `v_cde_registry_current`. |
+| `ARRAY<STRUCT<…>>` column | 09, `cde_registry.bindings` | Named-field struct syntax in a `CREATE TABLE`. Confirm the field names survive; `v_cde_coverage` addresses them by name after `explode`. |
+| `LATERAL VIEW explode(...)` | 11, `v_cde_coverage` | Hive-compatible syntax. If the runtime prefers it, the equivalent is a `LATERAL (SELECT explode(...))` join. |
+| `array_intersect` / `array_except` / `array_sort` | 11, `v_cde_coverage` | Standard Spark array functions; check they are available at the runtime version in use. |
+| `size(bindings) >= 1` inside a `CHECK` | 09 | A constraint over an array's length. If the writer protocol rejects it, the same rule is asserted in `fixtures/verify.py`. |
 
 ### The rule expressions have never been parsed by anything
 

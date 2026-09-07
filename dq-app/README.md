@@ -48,7 +48,9 @@ worth:
 
 | Page | What it is for |
 |---|---|
-| **Scorecard** | The health of the data, and nothing else. Headline figures for the latest run, **what changed** (checks that were clean and are not any more, with the date they turned), then per-table insights — and from each table, the problems behind its failing checks with a **Diagnose** button straight into them. |
+| **Scorecard** | The health of the data, and nothing else. Headline figures for the latest run, data-quality dimensions, critical element coverage, and recent run outcomes. |
+| **All monitored tables** | The table-monitor inventory. Shows the full list of watched catalog items with current quality, findings, trend and rule counts. |
+| **Monitor detail** | The selected table's checks, problem cohorts, trend, and domain breakdown. Reached from the inventory, with a back path to the monitor list. |
 | **Cohorts** | One row per problem. Leads with the grouping — *21 failing checks → 6 problems* — because that ratio is the queue's whole claim, and closes with **Resolution**: whether problems reach a recorded outcome and whether fixes hold. |
 | **Cohort detail** | Evidence → recommendation → register → act, in that order. Member rules carry their own 40-run history; the hypothesis sits next to the profiling that produced it. The playbook entry behind a recommendation appears here, with its prior-use count and recurrence rate. |
 | **Register** | The append-only event log as an audit artefact: period filter, CSV export, cohorts with nothing recorded listed explicitly, and the control test. |
@@ -95,11 +97,9 @@ under every widget makes a dense tool read like a tutorial.
 
 **The Scorecard is about the data; the Cohorts page is about the work.** Detection
 figures and resolution figures answer different questions for different people, and
-mixing them produced a page that was neither. The one thread between them is the
-**Diagnose** button: when the Scorecard shows a table failing its checks, it also
-shows the problems those failures belong to and links straight into them. Detection
-that cannot hand you to the diagnosis is where a data-quality tool usually stops
-being useful.
+mixing them produced a page that was neither. Table-level diagnosis starts on **All
+monitored tables** with the watched catalog items, then continues on **Monitor
+detail** for the checks and problem cohorts behind one selected table.
 
 **Plain words on screen, the spec's words in the tooltip.** A steward should not need
 to know what `P1_block`, `disposition coverage` or a `rule_expr` is. Severities read
