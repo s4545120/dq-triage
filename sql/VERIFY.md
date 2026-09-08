@@ -241,6 +241,102 @@ meant.
 
 ---
 
+## Variant: one schema, no catalog or grant privileges
+
+If you can create tables in an existing sandpit schema but cannot create a catalog or
+issue grants, most of this runbook still applies. The two schemas collapse into name
+prefixes and two files drop out.
+
+### First, probe what you actually have
+
+```sql
+SELECT current_catalog(), current_schema();
+
+-- Can you create a view? a function? Run these; both should succeed and are cheap.
+CREATE OR REPLACE VIEW  <schema>._probe_v AS SELECT 1 AS x;
+CREATE OR REPLACE FUNCTION <schema>._probe_f(a INT) RETURNS INT RETURN a + 1;
+DROP VIEW <schema>._probe_v;  DROP FUNCTION <schema>._probe_f;
+```
+
+If `CREATE FUNCTION` is refused, skip `12` entirely — the four helpers are additive
+and no rule references them yet. If `CREATE VIEW` is refused, you lose Step 7 and with
+it the check that `v_cohort_current` and `v_cde_coverage` agree with their Python
+twins, which is a real loss but not a blocking one.
+
+### Flatten schema to prefix
+
+```bash
+CAT=<your_catalog>; SCH=<your_schema>
+for f in sql/ddl/*.sql; do
+  sed -e "s/{catalog}\.config\./$CAT.$SCH.config_/g" \
+      -e "s/{catalog}\.results\./$CAT.$SCH.results_/g" \
+      -e "s/{catalog}\.fn\./$CAT.$SCH.fn_/g" "$f" > /tmp/flat_$(basename $f)
+done
+
+# Everything left is in 00, 07, and two lines of 12 — all skipped below.
+grep -n "{catalog}" /tmp/flat_*.sql | grep -v ":[0-9]*:--"
+```
+
+The trailing dot in each pattern is what makes this safe: `CREATE SCHEMA
+{catalog}.config` has none, so `00` is untouched rather than half-rewritten.
+
+Object names become `config_rule_registry`, `results_check_run`,
+`results_v_cohort_current`, `fn_is_blank_v1` and so on — 8 tables, 5 views, 4
+functions, all in one schema.
+
+### What to run, and what to skip
+
+| File | Action |
+|---|---|
+| `00_schemas.sql` | **Skip** — the schema already exists |
+| `01`–`06`, `09`, `10` | Run |
+| `07_grants.sql` | **Skip entirely** — see below |
+| `12_functions.sql` | Run the four `CREATE FUNCTION` statements only; skip the `CREATE SCHEMA` at the top and the grants block at the foot |
+| `08`, `11` | Run last |
+
+### Which checks still work
+
+| Step | Works? | |
+|---|---|---|
+| 3 — Inventory | Yes | 8 tables, 5 views, 4 functions, one schema |
+| 4 — 23 constraints | Yes | unchanged |
+| 5 — appendOnly on 3 tables | Yes | a table property, set by whoever creates the table |
+| 6 — Negative tests | **Yes** | the most valuable step, fully available |
+| 7 — Query every view | Yes, if you can create views | |
+| 8 — Functions and NULLs | Yes, if you can create functions | |
+| 9 — Grant proofs | **No** | |
+
+Use `<catalog>.information_schema` rather than `system.information_schema` for Steps 3
+and 4 — the former is readable with `USE CATALOG`, the latter often is not.
+
+### What this variant does not prove — and it is the important half
+
+**The entire control claim is untestable here.** `07_grants.sql` §3 is the evidence
+that the app service principal can write two tables and nothing else, and holds nothing
+outside the catalog. Without grant privileges you cannot run it, cannot create the
+service principals, and therefore cannot demonstrate the one claim the whole design
+makes.
+
+So be precise about what a green run means: **the shape is right and the constraints
+bite.** It says nothing about whether the permission model holds. Do not let a
+successful sandpit run be reported as "the DDL is verified" without that qualifier —
+the grants are not a deployment detail, they are the control.
+
+Two smaller consequences:
+
+- `appendOnly` is testable, so you can still show the register refuses `UPDATE` and
+  `DELETE`. That is genuinely half the audit story, and worth capturing.
+- The `config` / `results` split becomes cosmetic. `07_grants.sql` argues the split is
+  what makes the grant model expressible in two statements rather than ten; flattened,
+  that argument is deferred rather than disproved, and must be re-tested when a real
+  catalog is available.
+
+Everything in Stage 2 of `ROADMAP.md` — uploading the pilot CSVs, running the
+`rule_expr` strings, diffing against the fixture — works fine in this variant, and is
+the highest-value thing available to you here.
+
+---
+
 ## What this does not prove
 
 Passing every step above means the **shape** is right. It says nothing about whether
