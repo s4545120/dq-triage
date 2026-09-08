@@ -23,6 +23,7 @@ grants, not by code review.
 |---|---|---|
 | [`dq-triage-agent-spec.md`](dq-triage-agent-spec.md) | The authoritative spec, v1.0 | Current |
 | [`dq-architecture-diagram.md`](dq-architecture-diagram.md) | How the pieces fit together | Current |
+| [`ROADMAP.md`](ROADMAP.md) | Six stages from DDL to the AI layer, with the gate at each | Current |
 | [`sql/`](sql/) | Unity Catalog DDL, grants and views | Written and reviewed, **never executed** — no workspace access yet |
 | [`fixtures/`](fixtures/) | A complete local `dq.*` dataset generated from the pilot CSVs | Current, verified |
 | [`dq-app/`](dq-app/) | The Streamlit app, built to spec v1.0 | Runs locally on the fixture; never run against a workspace |
