@@ -250,18 +250,20 @@ prefixes and two files drop out.
 ### First, probe what you actually have
 
 ```sql
-SELECT current_catalog(), current_schema();
-
--- Can you create a view? a function? Run these; both should succeed and are cheap.
-CREATE OR REPLACE VIEW  <schema>._probe_v AS SELECT 1 AS x;
-CREATE OR REPLACE FUNCTION <schema>._probe_f(a INT) RETURNS INT RETURN a + 1;
-DROP VIEW <schema>._probe_v;  DROP FUNCTION <schema>._probe_f;
+-- Cheap, and they tell you which parts of the run are even available.
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_probe_v AS SELECT 1 AS x;
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_probe_f(a INT)
+  RETURNS INT RETURN a + 1;
 ```
 
-If `CREATE FUNCTION` is refused, skip `12` entirely — the four helpers are additive
-and no rule references them yet. If `CREATE VIEW` is refused, you lose Step 7 and with
-it the check that `v_cohort_current` and `v_cde_coverage` agree with their Python
-twins, which is a real loss but not a blocking one.
+Leave them in place until S7 cleans them up — if you drop them now and a later step
+fails, you will not know whether the privilege went away or the statement was wrong.
+
+If `CREATE FUNCTION` is refused, skip banner `[9/11]` (`08_functions.sql`) — the four
+helpers are additive and no rule references them yet. If `CREATE VIEW` is refused you
+lose banners `[10/11]` and `[11/11]`, and with them S5 and the check that
+`v_cohort_current` and `v_cde_coverage` agree with their Python twins. A real loss, but
+not a blocking one.
 
 ### Render the sandpit SQL
 
@@ -275,10 +277,28 @@ python3 sql/render.py
 ```
 
 Defaults to `sdpt_data_trnf.udp_brnz` with prefix `dq_`. It exits non-zero if any
-statement still carries an unsubstituted placeholder, so a clean exit means every
-file will parse.
+statement still carries an unsubstituted placeholder, so a clean exit means every file
+will parse.
 
-Names become:
+It writes 11 numbered files **and** `sql/out/ALL.sql`, all of them concatenated in run
+order with a numbered banner before each:
+
+```sql
+-- =====================================================================
+-- [5/11]  04_results_cohort.sql
+-- =====================================================================
+```
+
+Paste `ALL.sql` into a SQL editor and run it, or run the 11 files individually if you
+want a tighter failure point. Either way **run once** — `ADD CONSTRAINT` is not
+idempotent, and a second pass fails on all 23. If it stops partway, fix the one
+statement and continue from that banner rather than restarting.
+
+If you want a safety margin, stop after banner `[8/11]` — that is all 8 tables and
+every constraint — check it landed, then run `[9/11]`–`[11/11]` for the functions and
+views. Those three are the ones most likely to hit a privilege wall.
+
+### Names in the sandpit
 
 ```
 {catalog}.config.rule_registry  ->  sdpt_data_trnf.udp_brnz.dq_config_rule_registry
@@ -288,39 +308,196 @@ Names become:
 
 `config_` / `results_` / `fn_` are kept rather than flattened away. Nine characters,
 and they preserve — in the only place left to preserve it — the split that
-`07_grants.sql` argues is what makes the grant model expressible at all. They also
-stop these tables colliding with anything else in a shared bronze schema.
-
-Output is renumbered into run order, so run `sql/out/*.sql` in filename order:
-
-| Rendered | From | |
-|---|---|---|
-| `00`–`07` | `01`–`06`, `09`, `10` | the 8 tables and 23 constraints |
-| `08_functions.sql` | `12` | the 4 helpers, minus its schema and grants |
-| `09_views.sql`, `10_views_cde.sql` | `08`, `11` | the 5 views, last |
+`07_grants.sql` argues is what makes the grant model expressible at all. They also stop
+these tables colliding with anything else in a shared bronze schema.
 
 Two files are dropped and the script says so:
 
 - **`00_schemas.sql`** — the schema exists, and `CREATE CATALOG` is out of reach.
-- **`07_grants.sql`** — you cannot grant. This one is the control; see below.
+- **`07_grants.sql`** — you cannot grant. This one is the control; see the end of this
+  section.
 
 Everything else is byte-identical to `sql/ddl/` apart from object names. Columns,
 constraints, comments and view bodies are untouched.
 
-### Which checks still work
+---
 
-| Step | Works? | |
-|---|---|---|
-| 3 — Inventory | Yes | 8 tables, 5 views, 4 functions, one schema |
-| 4 — 23 constraints | Yes | unchanged |
-| 5 — appendOnly on 3 tables | Yes | a table property, set by whoever creates the table |
-| 6 — Negative tests | **Yes** | the most valuable step, fully available |
-| 7 — Query every view | Yes, if you can create views | |
-| 8 — Functions and NULLs | Yes, if you can create functions | |
-| 9 — Grant proofs | **No** | |
+## Sandpit checks — S1 to S7
 
-Use `<catalog>.information_schema` rather than `system.information_schema` for Steps 3
-and 4 — the former is readable with `USE CATALOG`, the latter often is not.
+Steps 3–9 above are written in two-schema names. These are the same checks against the
+flattened names, ready to paste. There is no S8: grants are not available.
+
+### S1 — Inventory: expect 17 objects
+
+```sql
+SELECT table_name, table_type
+FROM   sdpt_data_trnf.information_schema.tables
+WHERE  table_schema = 'udp_brnz' AND table_name LIKE 'dq\_%' ESCAPE '\'
+ORDER  BY table_name;
+
+SELECT routine_name
+FROM   sdpt_data_trnf.information_schema.routines
+WHERE  routine_schema = 'udp_brnz' AND routine_name LIKE 'dq\_%' ESCAPE '\';
+```
+
+Expect **8 tables**: `dq_config_rule_registry`, `dq_config_playbook`,
+`dq_config_cde_registry`, `dq_results_check_run`, `dq_results_violation_sample`,
+`dq_results_cohort`, `dq_results_disposition`, `dq_results_cde_profile`.
+
+**5 views**: `dq_config_v_rule_registry_current`, `dq_config_v_cde_registry_current`,
+`dq_results_v_cohort_current`, `dq_results_v_disposition_integrity`,
+`dq_results_v_cde_coverage`.
+
+**4 functions**: `dq_fn_is_blank_v1`, `dq_fn_is_valid_email_v1`, `dq_fn_is_au_mobile_v1`,
+`dq_fn_is_sentinel_v1`.
+
+Use `sdpt_data_trnf.information_schema`, not `system.information_schema` — the former
+is readable with `USE CATALOG`, the latter often is not.
+
+### S2 — Constraints: expect 23
+
+```sql
+SELECT tc.table_name, tc.constraint_name
+FROM   sdpt_data_trnf.information_schema.table_constraints tc
+WHERE  tc.table_schema = 'udp_brnz' AND tc.table_name LIKE 'dq\_%' ESCAPE '\'
+ORDER  BY tc.table_name, tc.constraint_name;
+```
+
+| Table | Constraints |
+|---|---|
+| `dq_config_rule_registry` | 3 |
+| `dq_config_playbook` | 2 |
+| `dq_config_cde_registry` | 4 |
+| `dq_results_check_run` | 2 |
+| `dq_results_violation_sample` | 0 |
+| `dq_results_cohort` | 3 |
+| `dq_results_disposition` | 7 |
+| `dq_results_cde_profile` | 2 |
+
+`violation_sample` having none is correct. A table that is short means its `CREATE
+TABLE` succeeded and an `ALTER` did not — which the concatenated run makes easy to
+miss, so do not skip this.
+
+### S3 — appendOnly on three tables
+
+```sql
+DESCRIBE DETAIL sdpt_data_trnf.udp_brnz.dq_config_rule_registry;
+DESCRIBE DETAIL sdpt_data_trnf.udp_brnz.dq_config_cde_registry;
+DESCRIBE DETAIL sdpt_data_trnf.udp_brnz.dq_results_disposition;
+```
+
+All three must show `delta.appendOnly = true` in `properties`.
+
+### S4 — Negative tests
+
+The most valuable step available to you, and fully available. **Every statement here
+must fail.**
+
+```sql
+-- severity enum
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_results_check_run
+  (result_id, run_id, run_ts, rule_id, rule_version, target_table, status, severity)
+VALUES ('t','t',current_timestamp(),'t',1,'t','pass','P4_nope');
+
+-- a cohort with no members
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_results_cohort
+  (cohort_id, raised_run_id, raised_ts, member_result_ids, member_rule_ids,
+   member_count, affected_tables, severity, recommendation_source)
+VALUES ('t','t',current_timestamp(),array(),array(),0,array(),'P1_block','none');
+
+-- a human event without OBO identity — the control the register rests on
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_results_disposition
+  (disposition_id, cohort_id, event_seq, event_type, actor_identity,
+   actor_source, event_ts, ingest_ts)
+VALUES ('t','t',1,'approved','someone@example.com','local_standin',
+        current_timestamp(), current_timestamp());
+
+-- a deferral with no reason
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_results_disposition
+  (disposition_id, cohort_id, event_seq, event_type, decision, reason,
+   actor_identity, actor_source, event_ts, ingest_ts)
+VALUES ('t2','t',2,'reviewed','deferred',NULL,'s@example.com','obo_user',
+        current_timestamp(), current_timestamp());
+
+-- a PII profile that retained values
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_results_cde_profile
+  (profile_id, profile_run_id, profile_ts, cde_id, cde_version,
+   target_table, target_column, pii, value_stats_withheld)
+VALUES ('t','t',current_timestamp(),'t',1,'t','t',TRUE,FALSE);
+```
+
+Then append-only. Insert one **valid** row, then confirm both of these are rejected —
+for you as the table owner, not just for some other principal:
+
+```sql
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_results_disposition
+  (disposition_id, cohort_id, event_seq, event_type, actor_source, event_ts, ingest_ts)
+VALUES ('probe-1','probe',1,'recommended','triage_job',
+        current_timestamp(), current_timestamp());
+
+UPDATE sdpt_data_trnf.udp_brnz.dq_results_disposition
+   SET reason = 'edited' WHERE disposition_id = 'probe-1';     -- must fail
+
+DELETE FROM sdpt_data_trnf.udp_brnz.dq_results_disposition
+ WHERE disposition_id = 'probe-1';                             -- must fail
+```
+
+**Keep this output.** Without grants it is the only part of the control story you can
+demonstrate, and it is a real part of it: the register refuses to be rewritten, by
+anyone, including its owner.
+
+Note the probe row is now permanent — that is the point of an append-only table, and a
+reason to do this in a sandpit rather than anywhere that matters.
+
+### S5 — Query every view
+
+`CREATE OR REPLACE VIEW` does not always validate column references at creation, so a
+view can succeed and fail on first read.
+
+```sql
+SELECT * FROM sdpt_data_trnf.udp_brnz.dq_config_v_rule_registry_current  LIMIT 1;
+SELECT * FROM sdpt_data_trnf.udp_brnz.dq_config_v_cde_registry_current   LIMIT 1;
+SELECT * FROM sdpt_data_trnf.udp_brnz.dq_results_v_cohort_current        LIMIT 1;
+SELECT * FROM sdpt_data_trnf.udp_brnz.dq_results_v_disposition_integrity LIMIT 1;
+SELECT * FROM sdpt_data_trnf.udp_brnz.dq_results_v_cde_coverage          LIMIT 1;
+```
+
+Empty results are fine — this tests that they compile against real column names. Then
+diff the column lists against `fixtures/out/results.v_cohort_current.parquet` and
+`results.v_cde_coverage.parquet`; the SQL and its Python twin must agree.
+
+### S6 — Functions, and the NULL behaviour in particular
+
+```sql
+SELECT sdpt_data_trnf.udp_brnz.dq_fn_is_blank_v1(NULL)             AS t_blank_null,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_blank_v1('  ')             AS t_blank_ws,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_blank_v1('x')              AS f_blank_value,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_valid_email_v1(NULL)       AS n_email_null,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_valid_email_v1('a@b.com')  AS t_email_good,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_valid_email_v1('a@b')      AS f_email_no_tld,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_au_mobile_v1(NULL)         AS n_mobile_null,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_au_mobile_v1('0412345678') AS t_mobile_good,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_au_mobile_v1('61412345678')AS f_mobile_intl,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_sentinel_v1('N/A')         AS t_sentinel,
+       sdpt_data_trnf.udp_brnz.dq_fn_is_sentinel_v1(NULL)          AS n_sentinel_null;
+```
+
+Expected: `TRUE, TRUE, FALSE, NULL, TRUE, FALSE, NULL, TRUE, FALSE, TRUE, NULL`.
+
+**The three NULLs are the ones that matter.** If any returns FALSE instead, the regex
+escaping did not survive rendering, and every format rule's `violation_count` will
+shift the moment a rule references the function. See the header of
+`ddl/12_functions.sql` for why the asymmetry is deliberate.
+
+### S7 — Clean up the probes
+
+```sql
+DROP VIEW IF EXISTS sdpt_data_trnf.udp_brnz.dq_probe_v;
+DROP FUNCTION IF EXISTS sdpt_data_trnf.udp_brnz.dq_probe_f;
+```
+
+The `probe-1` disposition row cannot be deleted — see S4. Leave it, and remember it is
+there when you seed real data.
 
 ### What this variant does not prove — and it is the important half
 
@@ -330,15 +507,15 @@ outside the catalog. Without grant privileges you cannot run it, cannot create t
 service principals, and therefore cannot demonstrate the one claim the whole design
 makes.
 
-So be precise about what a green run means: **the shape is right and the constraints
+Be precise about what a green run means: **the shape is right and the constraints
 bite.** It says nothing about whether the permission model holds. Do not let a
 successful sandpit run be reported as "the DDL is verified" without that qualifier —
 the grants are not a deployment detail, they are the control.
 
 Two smaller consequences:
 
-- `appendOnly` is testable, so you can still show the register refuses `UPDATE` and
-  `DELETE`. That is genuinely half the audit story, and worth capturing.
+- `appendOnly` is testable, so S4 still shows the register refusing `UPDATE` and
+  `DELETE`. That is genuinely half the audit story and worth capturing.
 - The `config` / `results` split becomes cosmetic. `07_grants.sql` argues the split is
   what makes the grant model expressible in two statements rather than ten; flattened,
   that argument is deferred rather than disproved, and must be re-tested when a real
@@ -347,8 +524,6 @@ Two smaller consequences:
 Everything in Stage 2 of `ROADMAP.md` — uploading the pilot CSVs, running the
 `rule_expr` strings, diffing against the fixture — works fine in this variant, and is
 the highest-value thing available to you here.
-
----
 
 ## What this does not prove
 
