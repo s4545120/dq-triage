@@ -744,12 +744,14 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cde_profile
 --
 --   window uniqueness   3 rules   count(*) OVER (PARTITION BY x) > 1
 --   table-level variance 2 rules  (SELECT count(DISTINCT c) FROM {table}) <= 1
---   cross-table          5 rules  aliased s. / c. — needs a join the registry
+--   cross-table          3 rules  aliased s. / c. — needs a join the registry
 --                                 does not currently store
 --
--- Those need execution paths in the check runner, not helpers. The cross-table five
--- are the open one: XREF_NAME_AGREEMENT has no target_column and references two
--- aliases with nothing in the registry saying what they bind to.
+-- Those need execution paths in the check runner, not helpers. The cross-table three
+-- are the open one: XREF_NAME_AGREEMENT has no target_column and references aliases
+-- s. and c. with nothing in the registry saying what they bind to. The joins DO exist
+-- — fixtures/rules.py carries a join_sql per rule — but config.rule_registry has no
+-- column to hold one, so they reach Databricks only via sql/checkrun.py.
 
 -- (CREATE SCHEMA dropped by render.py — the sandpit schema already exists)
 

@@ -119,9 +119,11 @@ def main() -> int:
         dst.write_text(body)
         written.append(dst.name)
 
-    # Anything left is a placeholder we did not handle.
+    # Anything left is a placeholder we did not handle. Scan only what THIS script
+    # wrote: seed.sql legitimately carries `{table}` inside two variance rule_expr
+    # values, which the check runner substitutes at run time and must not lose here.
     leaks = []
-    for f in OUT.glob("*.sql"):
+    for f in [OUT / w for w in written]:
         for n, line in enumerate(f.read_text().splitlines(), 1):
             if "{" in line and re.search(r"\{[a-z_]+\}", line) and not line.lstrip().startswith("--"):
                 leaks.append(f"{f.name}:{n}: {line.strip()}")

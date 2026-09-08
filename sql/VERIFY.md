@@ -537,6 +537,8 @@ than empty tables:
   `fixtures/out/` came from the Python evaluators. Running each expression against
   the pilot data and diffing against `results.check_run.parquet` is a separate
   exercise, and it is the one most likely to find something.
-- **Ten of the 35 registry rows need execution paths that do not exist** — 3 window
-  uniqueness, 2 table-level variance, 5 cross-table. The cross-table five reference
-  aliases `s.` and `c.` with nothing in the registry recording what they bind to.
+- **Eight of the 34 current rules are not row-level predicates** — 3 window uniqueness,
+  2 table-level variance, 3 cross-table. `sql/checkrun.py` emits all four shapes, so
+  they are runnable; the gap is that `config.rule_registry` has no column for a join.
+  The joins exist in `fixtures/rules.py` as `join_sql` and reach Databricks only
+  through that generator, which is a dependency the schema should be carrying.

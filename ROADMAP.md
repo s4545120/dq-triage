@@ -68,11 +68,13 @@ Then the rule shapes. Of 35 registry rows, ~25 are row-level predicates that a
 |---|---|---|
 | Window uniqueness | 3 | `OVER (PARTITION BY …)` wrapper |
 | Table-level variance | 2 | aggregate over the whole table, `{table}` placeholder |
-| Cross-table | 5 | a join the registry does not currently store |
+| Cross-table | 3 | a join the registry does not currently store |
 
-The cross-table five are the open problem. `XREF_NAME_AGREEMENT` has no
-`target_column` and references aliases `s.` and `c.` with nothing recording what they
-bind to. That is a schema question, and it surfaces here.
+The cross-table three are the open problem — but narrower than it first looks. The
+joins are defined: `fixtures/rules.py` carries a `join_sql` per rule, and they are
+correct. What is missing is a column on `config.rule_registry` to hold one, so they
+reach Databricks only through `sql/checkrun.py`. Adding that column is the fix, and
+the content to populate it already exists.
 
 **Only after the diff is clean**, introduce the helper functions from
 `sql/ddl/12_functions.sql` as new rule versions — 13 rules, all v1→v2 — and prove the
