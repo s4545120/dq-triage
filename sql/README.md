@@ -10,6 +10,8 @@ source of truth for these six tables.
 
 Nothing in this directory has been executed — there is no workspace connection yet.
 It is written to be run as-is once there is one, and reviewed on a laptop before then.
+**When there is a workspace, follow `VERIFY.md`** — it is the procedure for that first
+run, and the output of its negative tests is the evidence behind the control claim.
 
 ## Running it
 
