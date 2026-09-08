@@ -50,6 +50,11 @@ The check runner writes `results.check_run`. This is the first stage that needs 
 and it settles the repo's oldest open gap: **no `rule_expr` string has ever been parsed
 by anything.** Every figure in `fixtures/out/` came from the Python evaluators.
 
+Seed the config tables first: `python3 sql/seed.py` writes 51 rows (35 rules, 6
+playbook, 10 CDEs) with `target_table` rewritten from `prod.customer.*` to the
+sandpit source tables, plus a `verify_seed.sql` that checks the `rule_expr`
+backslashes survived the round trip. Load the two pilot CSVs alongside them.
+
 Run each expression **exactly as stored** and diff against
 `fixtures/out/results.check_run.parquet`. Where they disagree, resolve it before doing
 anything else — the fixture is either validated or invalidated here, and every number

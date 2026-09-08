@@ -14,7 +14,9 @@ It is written to be run as-is once there is one, and reviewed on a laptop before
 run, and the output of its negative tests is the evidence behind the control claim.
 For a sandpit with no catalog or grant privileges, `python3 sql/render.py` writes a
 runnable single-schema copy to `sql/out/`; `VERIFY.md` § *Variant* says what that run
-proves and what it cannot.
+proves and what it cannot. Once the tables exist, `python3 sql/seed.py` generates the
+51 config rows from the fixture, with `target_table` rewritten to the sandpit source
+tables — plus `verify_seed.sql`, which checks the escaping survived.
 
 ## Running it
 

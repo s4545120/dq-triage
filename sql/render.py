@@ -97,8 +97,11 @@ def main() -> int:
     a = ap.parse_args()
 
     OUT.mkdir(exist_ok=True)
-    for stale in OUT.glob("*.sql"):
-        stale.unlink()
+    # Only clear what THIS script generates. sql/out/ is shared with seed.py, and a
+    # blanket glob here silently deleted its output depending on which ran last.
+    for stale in list(OUT.glob("[0-9][0-9]_*.sql")) + [OUT / "ALL.sql"]:
+        if stale.exists():
+            stale.unlink()
 
     written, skipped = [], []
     for src in sorted(DDL.glob("*.sql")):
