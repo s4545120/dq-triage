@@ -12,6 +12,9 @@ Nothing in this directory has been executed — there is no workspace connection
 It is written to be run as-is once there is one, and reviewed on a laptop before then.
 **When there is a workspace, follow `VERIFY.md`** — it is the procedure for that first
 run, and the output of its negative tests is the evidence behind the control claim.
+For a sandpit with no catalog or grant privileges, `python3 sql/render.py` writes a
+runnable single-schema copy to `sql/out/`; `VERIFY.md` § *Variant* says what that run
+proves and what it cannot.
 
 ## Running it
 

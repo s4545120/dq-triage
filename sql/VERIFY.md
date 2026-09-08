@@ -263,36 +263,49 @@ and no rule references them yet. If `CREATE VIEW` is refused, you lose Step 7 an
 it the check that `v_cohort_current` and `v_cde_coverage` agree with their Python
 twins, which is a real loss but not a blocking one.
 
-### Flatten schema to prefix
+### Render the sandpit SQL
+
+`sql/render.py` writes a runnable copy to `sql/out/`. `sql/ddl/` stays the source of
+truth and keeps its placeholders — `sql/out/` is generated and gitignored, the same
+way `fixtures/out/` is.
 
 ```bash
-CAT=<your_catalog>; SCH=<your_schema>
-for f in sql/ddl/*.sql; do
-  sed -e "s/{catalog}\.config\./$CAT.$SCH.config_/g" \
-      -e "s/{catalog}\.results\./$CAT.$SCH.results_/g" \
-      -e "s/{catalog}\.fn\./$CAT.$SCH.fn_/g" "$f" > /tmp/flat_$(basename $f)
-done
-
-# Everything left is in 00, 07, and two lines of 12 — all skipped below.
-grep -n "{catalog}" /tmp/flat_*.sql | grep -v ":[0-9]*:--"
+python3 sql/render.py
+# or: python3 sql/render.py --catalog c --schema s --prefix dq_
 ```
 
-The trailing dot in each pattern is what makes this safe: `CREATE SCHEMA
-{catalog}.config` has none, so `00` is untouched rather than half-rewritten.
+Defaults to `sdpt_data_trnf.udp_brnz` with prefix `dq_`. It exits non-zero if any
+statement still carries an unsubstituted placeholder, so a clean exit means every
+file will parse.
 
-Object names become `config_rule_registry`, `results_check_run`,
-`results_v_cohort_current`, `fn_is_blank_v1` and so on — 8 tables, 5 views, 4
-functions, all in one schema.
+Names become:
 
-### What to run, and what to skip
+```
+{catalog}.config.rule_registry  ->  sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+{catalog}.results.check_run     ->  sdpt_data_trnf.udp_brnz.dq_results_check_run
+{catalog}.fn.is_blank_v1        ->  sdpt_data_trnf.udp_brnz.dq_fn_is_blank_v1
+```
 
-| File | Action |
-|---|---|
-| `00_schemas.sql` | **Skip** — the schema already exists |
-| `01`–`06`, `09`, `10` | Run |
-| `07_grants.sql` | **Skip entirely** — see below |
-| `12_functions.sql` | Run the four `CREATE FUNCTION` statements only; skip the `CREATE SCHEMA` at the top and the grants block at the foot |
-| `08`, `11` | Run last |
+`config_` / `results_` / `fn_` are kept rather than flattened away. Nine characters,
+and they preserve — in the only place left to preserve it — the split that
+`07_grants.sql` argues is what makes the grant model expressible at all. They also
+stop these tables colliding with anything else in a shared bronze schema.
+
+Output is renumbered into run order, so run `sql/out/*.sql` in filename order:
+
+| Rendered | From | |
+|---|---|---|
+| `00`–`07` | `01`–`06`, `09`, `10` | the 8 tables and 23 constraints |
+| `08_functions.sql` | `12` | the 4 helpers, minus its schema and grants |
+| `09_views.sql`, `10_views_cde.sql` | `08`, `11` | the 5 views, last |
+
+Two files are dropped and the script says so:
+
+- **`00_schemas.sql`** — the schema exists, and `CREATE CATALOG` is out of reach.
+- **`07_grants.sql`** — you cannot grant. This one is the control; see below.
+
+Everything else is byte-identical to `sql/ddl/` apart from object names. Columns,
+constraints, comments and view bodies are untouched.
 
 ### Which checks still work
 

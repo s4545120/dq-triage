@@ -8,3 +8,4 @@ fixtures/out_bad/
 *.csv
 .pytest_cache/
 .claude/
+sql/out/
