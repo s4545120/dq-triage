@@ -4,10 +4,14 @@ Local, against the generated fixture (the default — no workspace needed):
 
     ../.venv/bin/streamlit run app.py
 
-Against a real workspace:
+Deployed as a Databricks App, still on the fixture — `app.yaml` keeps
+DQ_APP_DATA_SOURCE=local and the app carries its own copy of the dataset at
+dq_app/fixture_data/, because only this directory ships. No catalog, no warehouse:
 
-    databricks auth login --configure-serverless --host <workspace-url>
-    DQ_APP_DATA_SOURCE=databricks ../.venv/bin/streamlit run app.py
+    databricks sync . /Workspace/Users/<you>/dq-app-src
+    databricks apps deploy dq-triage --source-code-path /Workspace/Users/<you>/dq-app-src
+
+Workspace mode exists and is wired, but has never been run. See README.md, Deploy.
 
 Built to `dq-triage-agent-spec.md` v1.0. The retired v0.1 execution spec is gone from
 this app along with everything it implied: no executor, no mutable incident state, no

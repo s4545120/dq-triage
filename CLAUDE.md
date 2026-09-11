@@ -65,6 +65,16 @@ that test tells you whether the copy kept up.
 **Local writes are session-only.** `fixtures/out/` is generated and gated by `verify.py`,
 so the app never edits it. Events recorded in the UI live in `st.session_state`.
 
+**The deployed app is the fixture with a URL.** `dq-app/app.yaml` sets
+`DQ_APP_DATA_SOURCE=local`, so a Databricks App deploy reads mock data and reaches no
+catalog at all. Only `dq-app/` ships, and `fixtures/out/` is gitignored and sits above
+it, so there is a committed copy at `dq-app/dq_app/fixture_data/` — the one place
+generated fixture output is checked in, and it exists because nothing else can reach
+the container. `local_source.fixture_dir()` prefers `fixtures/out/` and falls back to
+the bundle. Rebuild the fixture and you must `cp out/*.parquet` over the bundle;
+`dq-app/tests/test_bundled_fixture.py` compares them byte for byte and fails if you
+forget. Workspace mode is still never-executed: see the commented block in `app.yaml`.
+
 ## Invariants — things that look like bugs and are not
 
 **Execution is the defining non-goal.** No `UPDATE`/`MERGE`/`DELETE` on business data, no

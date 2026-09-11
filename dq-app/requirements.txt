@@ -2,7 +2,8 @@ streamlit>=1.40
 pandas>=2.0
 pyarrow>=15.0          # reads fixtures/out/*.parquet in local mode
 
-# Stage 2 only — uncomment once you have workspace access and have run
-# `databricks auth login --configure-serverless --host <workspace-url>`.
-# databricks-connect==15.4.*
+# Workspace mode only (DQ_APP_DATA_SOURCE=databricks). Left commented so the
+# deployed app, which reads the bundled fixture, does not build two client
+# libraries it never imports. Uncomment alongside the workspace block in app.yaml.
+# databricks-sql-connector>=3.4
 # databricks-sdk>=0.30

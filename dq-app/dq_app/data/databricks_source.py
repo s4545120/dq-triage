@@ -22,30 +22,91 @@ from Unity Catalog alone, without reading this file. See `sql/README.md` for why
 
 from __future__ import annotations
 
-import functools
+import contextlib
 import os
 
 import pandas as pd
 
 DQ_CATALOG = os.getenv("DQ_CATALOG", "dq")
 
+# Sandpit naming. The DDL assumes a catalog of its own with a `config` and a
+# `results` schema; a sandpit gives you one schema in someone else's catalog, so
+# `sql/render.py` folds the schema split into a name prefix. Set DQ_SCHEMA and the
+# app reads the rendered layout instead:
+#
+#     DQ_SCHEMA unset   ->  dq.results.check_run
+#     DQ_SCHEMA=udp_brnz ->  <catalog>.udp_brnz.dq_results_check_run
+#
+# This is the same substitution render.py performs, and it has to stay the same one.
+# Change the prefix rule in one place and the app queries objects the DDL never
+# created. Nothing else about the SQL differs between the two layouts.
+DQ_SCHEMA = os.getenv("DQ_SCHEMA", "").strip()
+DQ_PREFIX = os.getenv("DQ_PREFIX", "dq_")
 
-@functools.lru_cache(maxsize=1)
-def _session():
-    """Lazily built, so importing this module never fails on a machine with no
-    credentials — the local source has to stay usable regardless."""
+
+def _t(schema: str, table: str) -> str:
+    """Qualify one object for whichever of the two layouts is configured."""
+    if not DQ_SCHEMA:
+        return f"{DQ_CATALOG}.{schema}.{table}"
+    return f"{DQ_CATALOG}.{DQ_SCHEMA}.{DQ_PREFIX}{schema}_{table}"
+
+
+# --- Connection -------------------------------------------------------------
+#
+# Databricks Apps injects the app's own service principal credentials into the
+# container, and the SDK's Config picks them up with no arguments. The warehouse is
+# not discovered: it is attached to the app as a resource and surfaced under
+# DATABRICKS_WAREHOUSE_ID by the `valueFrom` entry in app.yaml. An app with no
+# warehouse attached fails here with a readable message, not a connection timeout.
+#
+# A fresh connection per statement, not a cached one. A warehouse drops idle
+# sessions, and a module-level connection that has been dropped fails every query
+# afterwards until the app restarts. Reads are wrapped in st.cache_data upstream, so
+# the connect cost is paid rarely; correctness under an idle timeout is worth more.
+
+WAREHOUSE_ID = os.getenv("DATABRICKS_WAREHOUSE_ID", "").strip()
+
+
+@contextlib.contextmanager
+def _cursor():
+    """One cursor on the app's SQL warehouse, closed with its connection."""
     try:
-        from databricks.connect import DatabricksSession
+        from databricks import sql as dbsql
+        from databricks.sdk.core import Config
     except ImportError as exc:  # pragma: no cover — environment-dependent
         raise RuntimeError(
-            "databricks-connect is not installed. Add it to requirements.txt and "
-            "pip install, or run with DQ_APP_DATA_SOURCE=local."
+            "databricks-sql-connector and databricks-sdk are not installed. Add them "
+            "to requirements.txt, or run with DQ_APP_DATA_SOURCE=local."
         ) from exc
-    return DatabricksSession.builder.serverless().getOrCreate()
+
+    if not WAREHOUSE_ID:
+        raise RuntimeError(
+            "DATABRICKS_WAREHOUSE_ID is empty. Attach a SQL warehouse to the app as a "
+            "resource, then map it in app.yaml with `valueFrom: <the resource key>`."
+        )
+
+    cfg = Config()
+    with dbsql.connect(
+        server_hostname=cfg.host,
+        http_path=f"/sql/1.0/warehouses/{WAREHOUSE_ID}",
+        credentials_provider=lambda: cfg.authenticate,
+    ) as conn:
+        with conn.cursor() as cur:
+            yield cur
 
 
 def _q(sql: str) -> pd.DataFrame:
-    return _session().sql(sql).toPandas()
+    with _cursor() as cur:
+        cur.execute(sql)
+        return cur.fetchall_arrow().to_pandas()
+
+
+def _exec(sql: str) -> None:
+    """A statement with no result set. The two INSERTs at the foot of this file are
+    the only callers, and the grant rather than this docstring is what keeps that
+    true — see the module docstring."""
+    with _cursor() as cur:
+        cur.execute(sql)
 
 
 def _lit(value) -> str:
@@ -64,11 +125,11 @@ def _lit(value) -> str:
 
 
 def cohorts() -> pd.DataFrame:
-    return _q(f"SELECT * FROM {DQ_CATALOG}.results.cohort")
+    return _q(f"SELECT * FROM {_t('results', 'cohort')}")
 
 
 def dispositions() -> pd.DataFrame:
-    return _q(f"SELECT * FROM {DQ_CATALOG}.results.disposition")
+    return _q(f"SELECT * FROM {_t('results', 'disposition')}")
 
 
 def check_runs() -> pd.DataFrame:
@@ -76,7 +137,7 @@ def check_runs() -> pd.DataFrame:
     # per-rule sparklines draw. Widen this and the app pulls the whole table.
     return _q(
         f"""
-        SELECT * FROM {DQ_CATALOG}.results.check_run
+        SELECT * FROM {_t('results', 'check_run')}
         WHERE run_ts >= current_timestamp() - INTERVAL 60 DAYS
         """
     )
@@ -85,8 +146,8 @@ def check_runs() -> pd.DataFrame:
 def violation_samples() -> pd.DataFrame:
     return _q(
         f"""
-        SELECT s.* FROM {DQ_CATALOG}.results.violation_sample s
-        JOIN {DQ_CATALOG}.results.check_run r ON r.result_id = s.result_id
+        SELECT s.* FROM {_t('results', 'violation_sample')} s
+        JOIN {_t('results', 'check_run')} r ON r.result_id = s.result_id
         WHERE r.run_ts >= current_timestamp() - INTERVAL 60 DAYS
         """
     )
@@ -95,11 +156,11 @@ def violation_samples() -> pd.DataFrame:
 def rule_registry() -> pd.DataFrame:
     # Full history, every version. The app derives `effective_to` the same way
     # v_rule_registry_current does — the registry is append-only and stores none.
-    return _q(f"SELECT * FROM {DQ_CATALOG}.config.rule_registry")
+    return _q(f"SELECT * FROM {_t('config', 'rule_registry')}")
 
 
 def playbook() -> pd.DataFrame:
-    return _q(f"SELECT * FROM {DQ_CATALOG}.config.playbook")
+    return _q(f"SELECT * FROM {_t('config', 'playbook')}")
 
 
 def cde_registry() -> pd.DataFrame:
@@ -110,11 +171,11 @@ def cde_registry() -> pd.DataFrame:
     this session is reflected immediately, and the CDE register is folded by the same
     code path. The view remains the definition — see domain/coverage.py.
     """
-    return _q(f"SELECT * FROM {DQ_CATALOG}.config.cde_registry")
+    return _q(f"SELECT * FROM {_t('config', 'cde_registry')}")
 
 
 def cde_profile() -> pd.DataFrame:
-    return _q(f"SELECT * FROM {DQ_CATALOG}.results.cde_profile")
+    return _q(f"SELECT * FROM {_t('results', 'cde_profile')}")
 
 
 # --- Writes -----------------------------------------------------------------
@@ -140,7 +201,7 @@ def write_disposition(row: dict) -> None:
     """
     cols = ", ".join(_DISPOSITION_COLUMNS)
     vals = ", ".join(_lit(row.get(c)) for c in _DISPOSITION_COLUMNS)
-    _session().sql(f"INSERT INTO {DQ_CATALOG}.results.disposition ({cols}) VALUES ({vals})")
+    _exec(f"INSERT INTO {_t('results', 'disposition')} ({cols}) VALUES ({vals})")
 
 
 def promote_rule(row: dict) -> None:
@@ -152,7 +213,7 @@ def promote_rule(row: dict) -> None:
     """
     cols = ", ".join(row.keys())
     vals = ", ".join(_lit(v) for v in row.values())
-    _session().sql(f"INSERT INTO {DQ_CATALOG}.config.rule_registry ({cols}) VALUES ({vals})")
+    _exec(f"INSERT INTO {_t('config', 'rule_registry')} ({cols}) VALUES ({vals})")
 
 
 def durable() -> bool:

@@ -164,17 +164,53 @@ state re-derived — it simply is not durable, and the sidebar says so.
 ## Deploy
 
 ```bash
-databricks sync --watch . /Workspace/Users/<you>/dq-app
-databricks apps deploy dq-triage
+databricks sync --watch . /Workspace/Users/<you>/dq-app-src
+databricks apps deploy dq-triage --source-code-path /Workspace/Users/<you>/dq-app-src
 ```
 
-`app.yaml` sets `DQ_APP_DATA_SOURCE=databricks` for the deployed environment. Uncomment
-`databricks-connect` in `requirements.txt` first.
+The source path must be the folder holding `app.yaml`, which is this one and not the
+repo root. Deploying from a Git folder is the same thing by another route: clone the
+repo into a workspace Git folder and point the app at `dq-app` inside it. Either way
+only this directory ships, which is the whole reason for the next section.
 
-> **Before investing time in workspace mode:** OAuth login to a corporate Databricks
-> workspace often sits behind conditional-access or device-compliance policy, which can
-> block a non-enrolled machine. Confirm with the platform team. Local mode is
-> unaffected either way.
+### The deployed app reads the fixture, not a workspace
+
+`app.yaml` sets `DQ_APP_DATA_SOURCE=local`. The deployed app is the mock dataset with
+a URL: same numbers as the local run, session-only writes, no catalog, no warehouse,
+no grants, and no way for it to touch a production table even by mistake.
+
+`fixtures/out/` is generated, gitignored, and sits above this directory, so none of it
+reaches the container. The app therefore carries its own copy at
+`dq_app/fixture_data/`, and `local_source.fixture_dir()` prefers `fixtures/out/` when
+the repo is there and falls back to the bundle when it is not. Locally you keep
+reading the generator's output; deployed, you read the copy.
+
+Two copies of the same data drift, so refresh the bundle whenever you rebuild:
+
+```bash
+cd fixtures && ../.venv/bin/python build_fixtures.py && ../.venv/bin/python verify.py
+cp out/*.parquet ../dq-app/dq_app/fixture_data/
+```
+
+`tests/test_bundled_fixture.py` fails if you forget. It compares the two directories
+byte for byte and skips only on a clone where `fixtures/out/` has never been built.
+
+### Switching it to a workspace later
+
+The workspace path is written and reviewed but has never been executed. Turning it on
+is four changes and three prerequisites, all noted inline:
+
+1. Set `DQ_APP_DATA_SOURCE=databricks` and uncomment the workspace block in
+   `app.yaml`; uncomment the two client libraries in `requirements.txt`.
+2. **Attach a SQL warehouse to the app as a resource** under the key named by
+   `valueFrom`. The app connects as its own service principal, with no user login.
+3. **Set `DQ_CATALOG`, and `DQ_SCHEMA` only for a sandpit** rendered by
+   `sql/render.py`, which folds the config/results split into a name prefix. Leave
+   `DQ_SCHEMA` out for the two-schema layout `sql/ddl/` declares.
+4. **Grant the service principal** `SELECT` on the eight tables it reads and `MODIFY`
+   on the two it appends to. `sql/ddl/07_grants.sql` is the statement of record, and
+   `sql/render.py` drops it deliberately, so in a sandpit this step is manual and is
+   the one most likely to be missing.
 
 ## Known gaps
 

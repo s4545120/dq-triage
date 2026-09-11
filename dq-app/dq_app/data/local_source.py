@@ -28,12 +28,23 @@ _PENDING_KEY = "_pending_disposition_events"
 _PENDING_RULES_KEY = "_pending_rule_versions"
 
 
+# Deployed, only `dq-app/` is shipped — the app source path is the folder holding
+# app.yaml, and `fixtures/` sits above it and is gitignored besides. So the app also
+# carries its own copy of the fixture inside the package. The bundled-fixture test
+# fails if that copy has drifted from `fixtures/out/`.
+_BUNDLED = Path(__file__).resolve().parents[1] / "fixture_data"
+
+
 def fixture_dir() -> Path:
-    """`DQ_FIXTURE_DIR`, else `fixtures/out` beside the repo's dq-app/ directory."""
+    """`DQ_FIXTURE_DIR`, else `fixtures/out` above the repo's dq-app/ directory, else
+    the copy bundled in the package — which is what a deployed app reads."""
     env = os.getenv("DQ_FIXTURE_DIR")
     if env:
         return Path(env).expanduser().resolve()
-    return (Path(__file__).resolve().parents[3] / "fixtures" / "out").resolve()
+    repo = (Path(__file__).resolve().parents[3] / "fixtures" / "out").resolve()
+    if repo.is_dir():
+        return repo
+    return _BUNDLED.resolve()
 
 
 def _read(table: str) -> pd.DataFrame:

@@ -4,7 +4,24 @@ command:
   - app.py
 
 env:
+  # The deployed app reads the generated fixture bundled at
+  # dq_app/fixture_data/, not Unity Catalog. Writes are session-only and the
+  # sidebar says so. Nothing here touches a workspace table.
   - name: DQ_APP_DATA_SOURCE
-    value: databricks
-  - name: DQ_CATALOG
-    value: dq
+    value: local
+
+  # Workspace mode, when the DDL has been run and the app is given a warehouse.
+  # Uncomment these, set DQ_APP_DATA_SOURCE to `databricks`, uncomment the two
+  # client libraries in requirements.txt, and attach a SQL warehouse to the app
+  # under the resource key named by `valueFrom`.
+  #
+  # DQ_SCHEMA is only for a sandpit rendered by sql/render.py, which folds the
+  # config/results schema split into a name prefix. Leave it out for the
+  # two-schema layout sql/ddl/ actually declares.
+  #
+  # - name: DQ_CATALOG
+  #   value: dq
+  # - name: DQ_SCHEMA
+  #   value: udp_brnz
+  # - name: DATABRICKS_WAREHOUSE_ID
+  #   valueFrom: sql-warehouse
