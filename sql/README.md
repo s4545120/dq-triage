@@ -1,7 +1,13 @@
 # DDL for the DQ Triage Agent
 
-Schema contracts for `dq-triage-agent-spec.md` v1.0. **This repo owns the SHAPE of
-these tables; Databricks owns their CONTENTS.** No data rows are checked in here.
+Schema contracts for `dq-triage-agent-spec.md` v1.0. **`ddl/` owns the SHAPE of
+these tables; Databricks owns their CONTENTS.** No data rows are checked into `ddl/`.
+
+`out/` is the exception, and a deliberate one: it holds generated, environment-specific
+SQL — including `seed.sql`, which carries the 51 config rows verbatim. It is committed
+so the sandpit can be rebuilt without the pilot CSVs, which are not in this repo and
+without which none of it can be regenerated. Everything in `out/` is disposable output
+of `render.py`, `seed.py`, `checkrun.py` and `mocktables.py`; edit those, not it.
 
 Naming follows the triage spec and its architecture diagram throughout —
 `config.rule_registry`, `results.check_run`, severities `P1_block` / `P2_alert` /
