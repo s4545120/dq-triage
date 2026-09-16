@@ -1,15 +1,19 @@
 # Streamlit's defaults are recognisable on sight — the red primary especially.
-# This is the app's own palette: a cool neutral scale with a single petrol accent,
-# reserving red/amber for severity so nothing decorative competes with a status.
+# This is the app's own palette and it must stay in step with `dq_app/ui/theme.py`:
+# the framework paints buttons, toggles, focus rings and links from here, the custom
+# CSS paints everything else, and when the two disagree the page reads as two apps.
+# "Indigo signal" — an indigo accent on a faintly violet neutral scale, with red,
+# amber, teal and green reserved for severity so nothing decorative competes with a
+# status.
 
 [theme]
 base = "light"
-primaryColor = "#0d5c73"
+primaryColor = "#4f46e5"
 backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f6f7f9"
-textColor = "#101828"
-linkColor = "#0d5c73"
-borderColor = "#e4e7ec"
+secondaryBackgroundColor = "#f7f7fa"
+textColor = "#14142b"
+linkColor = "#4f46e5"
+borderColor = "#e5e5ee"
 baseRadius = "small"
 font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, 'Helvetica Neue', Arial, sans-serif"
 

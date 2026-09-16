@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 
 import pandas as pd
 import streamlit as st
@@ -107,6 +108,119 @@ def _sidebar_identity() -> None:
         "arrives in x-forwarded-access-token and cannot be chosen. Events written here "
         "are stamped local_standin, which the table's CHECK constraint rejects.",
     )
+
+
+# --- Row tables -------------------------------------------------------------
+# The scorecard and the triage queue are both drawn with these rather than with
+# `st.dataframe`, and for the same three reasons. A data-grid cell cannot hold a
+# tinted severity badge or a coloured phrase; the grid measures its own box and
+# occasionally lands at nothing; and — the one a reader notices — its row selection
+# fires only from the checkbox in its own gutter, so a page that says "select a row"
+# is asking for a click on a 14px target the reader has to find first.
+#
+# Here a row is a container holding its markup and a real button stretched over the
+# whole row at zero opacity. The row is clickable everywhere, hovers as one object,
+# and is still a button, so the keyboard reaches it. The CSS that makes that work is
+# the `st-key-dqrow_` block in theme.py, where each rule is labelled with what broke
+# without it.
+
+
+def row_head(heads: list, grid: str) -> None:
+    """The header line for a row table. `heads` are labels, or (label, "n") to align
+    a numeric column right."""
+    cells = "".join(
+        f'<span class="{h[1]}">{html.escape(h[0])}</span>' if isinstance(h, tuple)
+        else f"<span>{html.escape(h)}</span>"
+        for h in heads
+    )
+    st.markdown(
+        f'<div class="dq-rowgrid head" style="grid-template-columns:{grid}">'
+        f"{cells}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
+                   label, picked=None) -> str | None:
+    """A block of whole-row click targets. Returns the id clicked, or None.
+
+    `key` is a short name unique to this table on this page — it prefixes the
+    container keys, so two row tables on one page cannot collide. `cells` renders one
+    row's markup from its dict; `label` gives the hidden button its accessible name.
+
+    Plain dicts rather than `itertuples`, because half these column names carry a
+    space and `itertuples` silently renames those to positional `_7`.
+    """
+    got = None
+    for row in rows:
+        row_id = row[id_key]
+        with st.container(key=f"dqrow_{key}_{row_id}"):
+            st.markdown(
+                f'<div class="dq-rowgrid{" dq-row-on" if row_id == picked else ""}" '
+                f'style="grid-template-columns:{grid}">' + cells(row) + "</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button(label(row), key=f"_open_dqrow_{key}_{row_id}"):
+                got = row_id
+    return got
+
+
+_ASIDE = re.compile(r"\s+(--|—)\s.*?\s(--|—)\s+")
+
+
+# Whose turn it is, said on the page rather than only in a tooltip. Read off the
+# lifecycle state, which is the only thing that actually knows: `owner_group` is the
+# domain that owns the data and is the same for most of the register, so printing it
+# on every row would say nothing.
+WAITING_ON = {
+    "awaiting_triage": "the triage job",
+    "awaiting_review": "you",
+    "awaiting_approval": "an approver",
+    "awaiting_verification": "the next run",
+}
+
+
+def waiting_on(row) -> str:
+    """One phrase naming who the next move belongs to. Shared by the Triage queue and
+    the problem detail, so the two cannot answer it differently."""
+    state = row["lifecycle_state"]
+    if state in WAITING_ON:
+        return WAITING_ON[state]
+    if state in ("approved_awaiting_execution", "reopened"):
+        # With whoever is actioning it. The external reference is the concrete answer
+        # where one was recorded; the owning group is the fallback.
+        ref = opt(row["external_ref"])
+        return str(ref) if ref else str(row["owner_group"])
+    return "—"
+
+
+def problem_title(hypothesis, limit: int = 62) -> str:
+    """A cohort's opening claim, as a title.
+
+    There is no stored title column and adding one is a fixture and DDL change rather
+    than a UI one, so the title is derived — in one place, because the Scorecard, the
+    Triage queue and the detail page all show it, and three copies of a `split(".")`
+    are three chances for one problem to carry three different names.
+
+    Two cuts, in this order, because a root-cause hypothesis is written as an argument
+    and its first line is not a headline:
+
+      1. A dashed aside is dropped. "Twelve mobile subscriptions -- ten of them
+         active, two since cancelled -- carry the literal 'service-number-unknown'"
+         is a claim with a parenthetical wedged into it; the parenthetical is detail
+         for the detail page.
+      2. The sentence ends at the first `.` or `:`. The colon matters as much as the
+         stop — "Scattered contactability gaps with no shared driver: 18 contacts
+         with no mobile, 24 with a malformed landline" states the finding before the
+         colon and enumerates after it.
+
+    What this deliberately does not do is rewrite. The title is the author's own
+    words, cut — so a badly-written hypothesis yields a badly-written title, which is
+    the correct place for that problem to show up.
+    """
+    text = _ASIDE.sub(" ", str(hypothesis)).strip()
+    first = re.split(r"[.:]", text)[0].strip()
+    return first if len(first) <= limit else first[: limit - 1].rstrip(" ,;—-") + "…"
 
 
 # --- Tiles ------------------------------------------------------------------

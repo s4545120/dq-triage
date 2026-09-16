@@ -449,6 +449,68 @@ def segments(parts: list[tuple[float, str]]) -> str:
 def dot(tone: str) -> str:
     return f'<span class="dq-dot" style="background:{TONE.get(tone, TONE["neutral"])["fg"]}"></span>'
 
+def trend_chart(points: list[tuple], y_lo: float = 0.0, y_hi: float = 100.0) -> str:
+    """The headline figure's own history, drawn as a filled line under it.
+
+    A different drawing from `area_chart`, and deliberately: that one carries a value
+    axis and gridlines because it is read for a level. This one sits directly beneath
+    the number it belongs to, where the level is already on the page in 40px type, so
+    the only thing left to say is the shape and where the two ends sit. Gridlines and
+    a repeated y-axis at that size are noise, and the axis labels were competing with
+    the figure for the reader's first look.
+
+    Both ends are labelled with their date AND their value, so the chart still answers
+    "from what, to what" without a hover — nothing in a Streamlit markdown block can
+    be hovered for a tooltip.
+
+    The end dot is red when the series finished below where it started. That is the
+    one place colour carries anything here, and it is doubled by the signed delta
+    written beside the figure above.
+    """
+    vals = [v for _, v in points if v is not None]
+    if len(vals) < 2:
+        return '<div class="dq-quiet">Not enough history to draw a trend.</div>'
+
+    w, h = 560.0, 126.0
+    pad_l, pad_r, pad_t, pad_b = 6.0, 6.0, 10.0, 22.0
+    span = (y_hi - y_lo) or 1.0
+    plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
+    step = plot_w / (len(points) - 1)
+
+    coords = [
+        (pad_l + i * step,
+         pad_t + plot_h - (float(v) - y_lo) / span * plot_h)
+        for i, (_, v) in enumerate(points)
+    ]
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+    floor = pad_t + plot_h
+    area = (f"{coords[0][0]:.1f},{floor:.1f} " + line
+            + f" {coords[-1][0]:.1f},{floor:.1f}")
+
+    fell = vals[-1] < vals[0]
+    end = TONE["critical"]["fg"] if fell else ACCENT
+    first_lab = f"{points[0][0]} {pct_text(vals[0], 1)}%"
+    last_lab = f"{points[-1][0]} {pct_text(vals[-1], 1)}%"
+    lx, ly = coords[-1]
+
+    return (
+        f'<svg viewBox="0 0 {w:.0f} {h:.0f}" class="dq-trend" role="img" '
+        f'aria-label="Quality from {html.escape(first_lab)} to {html.escape(last_lab)}">'
+        f'<defs><linearGradient id="dqTrendFill" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="{ACCENT}" stop-opacity=".22"/>'
+        f'<stop offset="100%" stop-color="{ACCENT}" stop-opacity=".02"/>'
+        "</linearGradient></defs>"
+        f'<polygon points="{area}" fill="url(#dqTrendFill)"/>'
+        f'<polyline points="{line}" fill="none" stroke="{ACCENT}" stroke-width="2" '
+        'stroke-linejoin="round" stroke-linecap="round"/>'
+        f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="3.4" fill="{end}"/>'
+        f'<text x="{pad_l:.1f}" y="{h - 6:.1f}" text-anchor="start" class="ax">'
+        f"{html.escape(first_lab)}</text>"
+        f'<text x="{w - pad_r:.1f}" y="{h - 6:.1f}" text-anchor="end" class="ax">'
+        f"{html.escape(last_lab)}</text>"
+        "</svg>"
+    )
+
 
 def area_chart(points: list[tuple], y_lo: float = 0.0, y_hi: float = 100.0) -> str:
     """A filled trend line with its own axes, as inline SVG.
@@ -629,7 +691,10 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   background: var(--dq-accent); opacity: .16; border-radius: 2px;
 }}
 .dq-tbl td.bar .lbl {{ position: relative; }}
-.dq-spark {{ vertical-align: middle; display: block; }}
+/* Inline, so a sparkline sits ON the line of text that introduces it. As a
+   block it broke the line and left the clause after it — " · first breached
+   25 Jul" — starting with an orphaned separator. */
+.dq-spark {{ vertical-align: middle; display: inline-block; }}
 
 .dq-monitor-hd {{
   display: flex; align-items: center; justify-content: space-between; gap: .75rem;
@@ -672,7 +737,81 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   max-width: 78ch; }}
 .dq-because b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
 
-/* --- Estate tiles and the dimension grouping. ------------------------------- */
+/* --- Estate tiles: six counts of what is watched. ---------------------------
+   Their own card rather than `.dq-kpi`, which is borderless and reads as loose text
+   in a six-up row. Bordered, they read as one object per figure — which is what they
+   are, since no two of them share a denominator. */
+.dq-tile {{
+  background: {NEUTRAL["surface"]}; border: 1px solid var(--dq-border);
+  border-radius: 10px; padding: .65rem .75rem; height: 100%; min-width: 0;
+  display: flex; flex-direction: column; gap: 0; box-sizing: border-box;
+}}
+.dq-tile .lab {{ font-size: .7rem; font-weight: 600; color: var(--dq-text-2);
+  line-height: 1.3; display: flex; align-items: flex-start; gap: .3rem;
+  /* Two lines reserved, for the same reason `.dq-kpi` reserves them: a label that
+     wraps must not push its figure out of line with the tile beside it. */
+  min-height: 2.1em; }}
+.dq-tile .val {{ font-size: 1.55rem; font-weight: 620; line-height: 1.2;
+  margin-top: .1rem; font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+  color: {NEUTRAL["text"]}; }}
+.dq-tile .sub {{ font-size: .69rem; color: var(--dq-text-3); line-height: 1.4;
+  margin-top: .2rem; }}
+/* The figure never wraps — "≥ 600" breaking after the ≥ reads as two numbers — but
+   the caption under it may, and the tile grows to fit rather than clipping it. */
+.dq-tile .val {{ white-space: nowrap; }}
+
+/* --- The check drill-down, as a drawer. -------------------------------------
+   Fixed to the right edge and slid in, rather than pushed into the page below the
+   table. The table is the thing being read; a panel that opens underneath it moves
+   the rows the reader just clicked, and on a long list pushes them off-screen
+   entirely. Everything inside is ordinary Streamlit — the Close button is a real
+   button — so only the positioning is borrowed from a modal. */
+.st-key-dq_check_drawer, .st-key-dq_element_drawer,
+.st-key-dq_decide_drawer {{
+  /* Below Streamlit's own toolbar, which is fixed, opaque and painted above this.
+     At top:0 the drawer's title row and its Close button rendered underneath it. */
+  position: fixed; top: 3.75rem; right: 0; bottom: 0; z-index: 999;
+  /* 720, not 660: the element panel puts five columns in here and the fifth —
+     the register's own statement of when the column is populated, which is the
+     crux of a scope mismatch — was the one pushed off the edge. */
+  width: min(720px, 94vw);
+  background: {NEUTRAL["surface"]};
+  border-left: 1px solid var(--dq-border-strong, {NEUTRAL["border_strong"]});
+  /* Two shadows, and the second one IS the veil. A 100vmax spread paints the dim
+     over the whole viewport and, because a box-shadow is drawn strictly outside the
+     border box, never over the drawer itself — which is the bug it replaces: the veil
+     was the drawer's own ::before, and `overflow-y: auto` here clips a pseudo-element
+     to the drawer's box, so the dim landed on the panel instead of on the page behind
+     it. A shadow is also not hit-testable, so it cannot swallow a click the page below
+     still needs. */
+  box-shadow: -22px 0 48px -26px rgba(20, 20, 43, .5),
+              0 0 0 100vmax rgba(20, 20, 43, .28);
+  padding: 0 1.25rem 2.5rem;
+  overflow-y: auto; overscroll-behavior: contain;
+  animation: dq-drawer-in .22s cubic-bezier(.22, .61, .36, 1);
+}}
+@keyframes dq-drawer-in {{
+  from {{ transform: translateX(100%);
+         box-shadow: -22px 0 48px -26px rgba(20, 20, 43, 0),
+                     0 0 0 100vmax rgba(20, 20, 43, 0); }}
+  to {{ transform: none; }}
+}}
+/* The title and Close ride along: a drawer this tall scrolls, and a Close button that
+   scrolls away leaves the reader with no way out but the browser. */
+.st-key-dq_check_drawer [data-testid="stHorizontalBlock"]:has(.dq-dim-panel-hd),
+.st-key-dq_element_drawer [data-testid="stHorizontalBlock"]:has(.dq-dim-panel-hd),
+.st-key-dq_decide_drawer [data-testid="stHorizontalBlock"]:has(.dq-dim-panel-hd) {{
+  position: sticky; top: 0; z-index: 3;
+  background: {NEUTRAL["surface"]};
+  padding: .85rem 0 .5rem;
+  border-bottom: 1px solid var(--dq-border); margin-bottom: .5rem;
+}}
+@media (prefers-reduced-motion: reduce) {{
+  .st-key-dq_check_drawer, .st-key-dq_element_drawer,
+  .st-key-dq_decide_drawer {{ animation: none; }}
+}}
+
+/* --- Dimension grouping. ---------------------------------------------------- */
 .dq-tilehd {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
   color: var(--dq-text-3); font-weight: 600; padding: .1rem 0 .3rem;
   display: flex; align-items: center; gap: .35rem; }}
@@ -709,6 +848,83 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   padding-top: .48rem; white-space: nowrap; }}
 .dq-strip-note {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); text-align: right;
   padding-top: .55rem; line-height: 1.5; }}
+
+/* --- The filter bar, as pills. ----------------------------------------------
+   Not a bordered band with labels floating outside the controls. That version drew
+   three horizontal lines across the top of the page — the band's own top and bottom,
+   plus the edge of every control sitting inside it — and none of them lined up with
+   each other, because a Streamlit selectbox is 40px tall, a button is 38px, and a
+   label rendered in its own column has neither height.
+
+   A pill carries its own label inside its own border, so there is exactly one line
+   per control and every one of them is the same height. Streamlit builds a selectbox
+   as `label` + `.react-aria-ComboBox`; making the wrapper the flex row, stripping the
+   field's own chrome and letting the pill draw the border turns those two into one
+   object without touching the widget's behaviour. */
+.st-key-dq_pillbar {{ margin: .35rem 0 var(--dq-pad); }}
+.st-key-dq_pillbar [data-testid="stHorizontalBlock"] {{ gap: .5rem; }}
+
+.st-key-dq_pillbar [data-testid="stSelectbox"] {{
+  display: flex; align-items: center; gap: .1rem; box-sizing: border-box;
+  height: 2.35rem; padding-left: .72rem;
+  border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["surface"]};
+  transition: border-color .1s ease, box-shadow .1s ease;
+}}
+.st-key-dq_pillbar [data-testid="stSelectbox"]:hover {{
+  border-color: {NEUTRAL["border_strong"]};
+}}
+/* The focus ring goes on the pill, because the control it belongs to no longer has a
+   visible edge of its own. */
+.st-key-dq_pillbar [data-testid="stSelectbox"]:focus-within {{
+  border-color: {ACCENT}; box-shadow: 0 0 0 1px {ACCENT};
+}}
+.st-key-dq_pillbar [data-testid="stSelectbox"] > label {{
+  margin: 0; padding: 0; flex: none; gap: .25rem;
+}}
+.st-key-dq_pillbar [data-testid="stSelectbox"] label p {{
+  font-size: .78rem; font-weight: 500; color: var(--dq-text-2);
+  margin: 0; white-space: nowrap;
+}}
+/* A help icon inside a pill has to read as part of the label, not as a divider
+   between the label and the value it belongs to. */
+.st-key-dq_pillbar [data-testid="stSelectbox"] label [data-testid="stTooltipIcon"] svg {{
+  width: 13px; height: 13px; opacity: .55;
+}}
+.st-key-dq_pillbar [data-testid="stSelectbox"] > .react-aria-ComboBox {{
+  flex: 1 1 auto; min-width: 0;
+}}
+/* The field keeps its behaviour and loses its chrome — the pill is drawing it now. */
+.st-key-dq_pillbar [data-testid="stSelectbox"] .react-aria-ComboBox > div {{
+  border: none; background: transparent; box-shadow: none;
+  min-height: 0; height: 2.1rem;
+}}
+.st-key-dq_pillbar [data-testid="stSelectbox"] input {{
+  font-size: .82rem; font-weight: 600; color: {NEUTRAL["text"]};
+  padding: 0 0 0 .3rem; text-overflow: ellipsis;
+}}
+
+/* A pill that is a button rather than a control: same height, same corner, so the
+   row reads as one set. */
+.st-key-dq_pillbar .stButton button {{
+  height: 2.35rem; min-height: 0; border-radius: 8px;
+  border: 1px solid var(--dq-border); background: {NEUTRAL["surface"]};
+  color: var(--dq-text-2); font-size: .82rem; font-weight: 500;
+}}
+.st-key-dq_pillbar .stButton button:hover {{
+  border-color: {NEUTRAL["border_strong"]}; color: {NEUTRAL["text"]};
+  background: {NEUTRAL["surface"]};
+}}
+/* The scope statement is tinted, because it is the one thing in the row that is not
+   a filter — it says what the figure below it is built on, and a reader who reads it
+   as a fourth dropdown will go looking for options that are not there. */
+.st-key-dq_pillbar .st-key-_scope_btn button {{
+  background: {ACCENT_TINT}; border-color: {TONE["info"]["bd"]}; color: {ACCENT};
+  font-weight: 550;
+}}
+.st-key-dq_pillbar .st-key-_scope_btn button:hover {{
+  background: #e6e8ff; border-color: {ACCENT}; color: {ACCENT};
+}}
 
 /* --- Cards ---------------------------------------------------------------- */
 .dq-card {{
@@ -783,6 +999,9 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 }}
 .dq-card .val .of {{ font-size: .58em; font-weight: 500; color: var(--dq-text-3);
   margin-left: .22rem; letter-spacing: 0; }}
+/* A unit reads as part of the number, not as a word beside it: "93.1%", not
+   "93.1 %". The gap above is for "/100", which is a separate phrase. */
+.dq-card .val .of.unit {{ margin-left: .04rem; }}
 .dq-card .sub {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); margin-top: .3rem; }}
 .dq-card .sub b {{ font-weight: 600; }}
 
@@ -801,12 +1020,12 @@ h1, h2, h3 {{ letter-spacing: 0; }}
    Scoped to the two card rows by the classes only they contain. The right-hand rail
    also holds .dq-card elements and must NOT stretch: its two cards are different
    things stacked, not a row to align. */
-[data-testid="stHorizontalBlock"]:is(:has(.dq-stat), :has(.dq-dim))
+[data-testid="stHorizontalBlock"]:is(:has(.dq-stat), :has(.dq-dim), :has(.dq-hero))
   > [data-testid="stColumn"] {{
   /* becomes a flex container, but keeps the width basis that sets the column ratios */
   display: flex; flex-direction: column;
 }}
-[data-testid="stHorizontalBlock"]:is(:has(.dq-stat), :has(.dq-dim)) :is(
+[data-testid="stHorizontalBlock"]:is(:has(.dq-stat), :has(.dq-dim), :has(.dq-hero)) :is(
   [data-testid="stVerticalBlock"],
   [data-testid="stElementContainer"],
   .stMarkdown,
@@ -848,19 +1067,53 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   flex: none; white-space: nowrap; }}
 .dq-delta.n {{ color: var(--dq-text-3); font-weight: 500; }}
 
-/* --- Hero: headline score beside its own trend. --------------------------- */
-/* .dq-card lays out down the page; the hero is the one card that lays out
-   across it, so it has to say so or it inherits the column direction. */
-.dq-hero {{ flex-direction: row; gap: clamp(.7rem, 1.4vw, 1.4rem);
-  align-items: stretch; min-height: clamp(7rem, 9.2vw, 8.6rem); }}
-.dq-hero .l {{ flex: 0 0 clamp(8.4rem, 11vw, 11.5rem); display: flex;
-  flex-direction: column; min-width: 0; }}
-.dq-hero .r {{ flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }}
-.dq-hero .val {{ font-size: var(--dq-fs-hero); margin-top: .15rem; }}
-.dq-hero .rl {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); text-align: right; }}
+/* --- Hero: the headline figure with its own history under it. --------------
+   It used to lay out across the card — figure on the left, chart on the right — and
+   the chart got whatever width the figure did not need, which at this column width
+   was about 180px for a month of runs. Stacked, the chart gets the full card and the
+   figure gets the full type size, and the reading order matches the sentence: how
+   good, out of what, and which way it has been going. */
+.dq-hero {{ flex-direction: column; gap: 0; justify-content: flex-start;
+  min-height: clamp(9rem, 12vw, 11.5rem); }}
+.dq-hero .lab {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--dq-text-3); font-weight: 600;
+  display: flex; align-items: center; gap: .35rem; }}
+.dq-hero .val {{ font-size: var(--dq-fs-hero); margin-top: .35rem; }}
+.dq-hero .sub {{ font-size: clamp(.72rem, .86vw, .8rem); color: var(--dq-text-2);
+  margin-top: .4rem; line-height: 1.55; }}
+/* The chart sits on the card floor whatever the subline above it wrapped to, so the
+   hero and the tile grid beside it keep the same outside height. */
+.dq-trend {{ width: 100%; height: auto; display: block; margin-top: auto;
+  padding-top: .6rem; overflow: visible; }}
+.dq-trend .ax {{ font-size: 11px; fill: {NEUTRAL["text_3"]};
+  font-family: inherit; font-variant-numeric: tabular-nums; }}
 .dq-area {{ width: 100%; height: clamp(76px, 7vw, 108px); display: block; }}
 .dq-area .ax {{ font-size: 9px; fill: {NEUTRAL["text_3"]};
   font-family: inherit; font-variant-numeric: tabular-nums; }}
+
+/* --- What is being watched: six counts of the estate. -----------------------
+   One markdown block holding a CSS grid, NOT two rows of st.columns. The columns
+   version is what put the tiles on top of the search field below them: the
+   equal-height rule further down makes every wrapper inside a card row a flex item
+   with min-height:0, and the two nested column rows inside the tile column were
+   flex items themselves — so they shrank below their content and the content spilled
+   out of the bottom of the block. A grid has no wrappers to shrink, and it equalises
+   the six heights for free, which is what the flex rule was there to do. */
+.dq-watch {{ display: flex; flex-direction: column; height: 100%; min-width: 0; }}
+.dq-watch .hd {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--dq-text-3); font-weight: 600; padding: .1rem 0 .45rem;
+  display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }}
+/* The denominator note rides in the heading, in sentence case, because the two
+   figures beside each other — 20 scored, 34 run — are the single thing a reader is
+   most likely to think is a bug on this page. */
+.dq-watch .hd .q {{ font-size: .72rem; letter-spacing: 0; text-transform: none;
+  font-weight: 400; color: var(--dq-text-3); }}
+.dq-tilegrid {{ flex: 1 1 auto; display: grid; gap: clamp(.45rem, .7vw, .7rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+/* On the scorecard the tile labels reserve two lines so six figures line up across
+   a row. In the drawer there are two tiles and every label is one line, so the
+   reserved second line is just a gap above the number. */
+.dq-tilegrid.compact .dq-tile .lab {{ min-height: 0; }}
 
 /* --- Recent runs --------------------------------------------------------- */
 /* Two lines per run, not one. The rail is a third of the page and a single row of
@@ -878,18 +1131,6 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-run .n {{ color: var(--dq-text-2); white-space: nowrap; flex: none;
   text-align: right; font-variant-numeric: tabular-nums; font-size: .8rem;
   font-weight: 550; }}
-
-/* Scale is clamp()'s job; REFLOW still needs a breakpoint. Below ~1250px the board
-   and the rail beside it cannot both hold their content — the finding badge and the
-   Review button get cut off — and no amount of proportional padding fixes that. One
-   breakpoint, and the rail drops under the board at full width. */
-@media (max-width: 1250px) {{
-  [data-testid="stHorizontalBlock"]:has(.st-key-dq_issue_board) {{ flex-wrap: wrap; }}
-  [data-testid="stHorizontalBlock"]:has(.st-key-dq_issue_board)
-    > [data-testid="stColumn"] {{
-    flex: 1 1 100%; width: 100%; max-width: 100%; min-width: 0;
-  }}
-}}
 
 /* --- Dimension cards and the panel behind them ---------------------------- */
 /* The card is a st.container, not a block of markup, because its last row is a real
@@ -938,6 +1179,17 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   margin-top: .5rem; }}
 .dq-dim-prose.q {{ font-size: .77rem; color: var(--dq-text-3); margin-top: .5rem; }}
 .dq-dim-prose code {{ font-size: .93em; }}
+/* A rule expression, given its own block. Wraps at any point rather than pushing a
+   long SQL string past the panel's padding, and sits on the canvas tint so it reads
+   as a quotation of the registry rather than as more prose. */
+.dq-expr {{
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .745rem; line-height: 1.65; color: {NEUTRAL["text"]};
+  background: {NEUTRAL["canvas"]}; border: 1px solid var(--dq-border);
+  border-radius: 6px; padding: .5rem .65rem; margin-top: .55rem;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}}
+.dq-expr.scope {{ color: var(--dq-text-2); margin-top: .35rem; }}
 /* The arithmetic block. Tabular numerals and a monospaced feel, because it is being
    read as a sum and the operands have to line up under each other. */
 .dq-dim-sum {{ background: {NEUTRAL["canvas"]}; border: 1px solid var(--dq-border);
@@ -954,54 +1206,267 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-note > svg {{ flex: none; margin-top: .12rem; color: {ACCENT}; }}
 .dq-note b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
 
-/* --- The issue list ------------------------------------------------------- */
-/* Rows are real Streamlit columns rather than a table, because the last cell is a
-   button and a button cannot live inside markup we generate. The borders and the
-   tightened gaps are what make a stack of column rows read as a table anyway. */
-.st-key-dq_issue_board {{
+/* --- Clickable rows: the failing checks, and the elements nothing watches. ---
+   These are not `st.dataframe`. Three things the data grid cannot do and this table
+   has to: put a tinted severity badge in a cell, colour a trend phrase, and — the
+   one the reader actually notices — open a row when the ROW is clicked. A dataframe
+   with `selection_mode="single-row"` only selects from the checkbox in its gutter,
+   which means a page that says "select a row" is asking for a click on a 14px target
+   the reader has to find first.
+
+   So each row is a container holding its own markup and a real Streamlit button,
+   and the button is stretched over the whole row at zero opacity. The row is
+   therefore clickable everywhere, keyboard-reachable (it is a button, and it keeps
+   its accessible name), and hovers as one object. Nothing is drawn by the button —
+   every pixel is the markup underneath it. */
+.dq-rowgrid {{
+  display: grid; align-items: center; gap: .55rem;
+  padding: .5rem .7rem; min-width: 0; box-sizing: border-box;
+}}
+.dq-rowgrid > * {{ min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }}
+.dq-rowgrid .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
+.dq-rowgrid .name {{ font-size: clamp(.76rem, .9vw, .84rem); color: {NEUTRAL["text"]};
+  font-weight: 500; }}
+.dq-rowgrid .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(.68rem, .8vw, .75rem); color: var(--dq-text-2); }}
+.dq-rowgrid .txt {{ font-size: clamp(.71rem, .84vw, .78rem); color: var(--dq-text-2); }}
+.dq-rowgrid .num {{ font-size: clamp(.73rem, .86vw, .8rem); color: {NEUTRAL["text"]};
+  text-align: right; font-variant-numeric: tabular-nums; }}
+.dq-rowgrid .of {{ font-size: clamp(.68rem, .8vw, .75rem); color: var(--dq-text-3);
+  text-align: right; font-variant-numeric: tabular-nums; }}
+.dq-rowgrid .link {{ font-size: clamp(.71rem, .84vw, .78rem); color: {ACCENT}; }}
+/* A row whose first cell is a title over a line of context. The cell opts out of the
+   grid's vertical centring so the two lines sit together rather than straddling the
+   row, and only the second line is allowed to be quiet. */
+.dq-rowgrid .stack {{ display: flex; flex-direction: column; gap: .12rem;
+  white-space: normal; overflow: hidden; }}
+.dq-rowgrid .stack .t1 {{ font-size: clamp(.78rem, .92vw, .86rem); font-weight: 600;
+  color: {NEUTRAL["text"]}; line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.dq-rowgrid .stack .t2 {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(.66rem, .78vw, .72rem); color: var(--dq-text-3); line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+/* The tags on that second line are words, not colours — "recurrence", "checks
+   breaching again". The tint is the second channel; the phrase is the first. */
+.dq-rowgrid .stack .t2 .mark {{ font-weight: 600; }}
+/* The header sits OUTSIDE the scroll box so it does not scroll away, which means
+   its cells have to line up with rows drawn inside it: the box's own side padding
+   plus the row's. `scrollbar-gutter` below holds that true once the list scrolls. */
+.dq-rowgrid.head {{ padding: .1rem calc(.7rem + 1px) .4rem; }}
+.dq-rowgrid.head > * {{
+  font-size: clamp(.62rem, .74vw, .68rem); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--dq-text-3);
+}}
+.dq-rowgrid.head .n {{ text-align: right; }}
+
+/* One row = one container. `position: relative` is what the stretched button
+   positions against. */
+[class*="st-key-dqrow_"] {{
+  position: relative; border-top: 1px solid var(--dq-border);
+  /* Square, because a row is a band across the table and not a card in a list. The
+     two rows that touch the container's corners get its radius back, below. */
+  border-radius: 0; transition: background .09s ease;
+  /* Three rules here are load-bearing, and all three are about Streamlit's own
+     layout rather than about this table:
+       * `flex: 0 0 auto` — the scroll box is a flex column and flex items shrink by
+         default, so twenty-one rows in a 252px box were each squeezed to 26px and
+         their content spilled into the row below.
+       * `min-height` — the row's height has to come from the ROW. Streamlit wraps
+         markdown in a centred row-flex box that reports its own height as one line
+         whatever it contains, so a taller grid inside it left the container short.
+       * `justify-content: center` — with the height set here, the content centres in
+         it rather than sitting on the top edge. */
+  flex: 0 0 auto; min-height: 2.6rem; justify-content: center;
+}}
+/* A row whose first cell stacks a title over a line of context needs more than the
+   single-line minimum, and asking for it here rather than on `.dq-rowgrid` keeps the
+   container and its contents the same height — see the note above about Streamlit
+   reporting a markdown box as one line whatever it holds. */
+[class*="st-key-dqrow_"]:has(.stack) {{ min-height: 3.35rem; }}
+/* Undo that centred row-flex wrapper, so the markdown box is as tall as the row it
+   draws. Without it the row is the right height and its contents are not. */
+[class*="st-key-dqrow_"] .stMarkdown, [class*="st-key-dqrow_"] .stMarkdown > div {{
+  display: block; height: auto;
+}}
+/* The hover response the reader is looking for: the whole row tints, in the same
+   accent the selected row uses, so hovering previews what clicking does. */
+[class*="st-key-dqrow_"]:hover {{
+  background: {ACCENT_TINT};
+}}
+/* Selected. Marked on two channels — the tint AND the accent edge — because the tint
+   alone is the same colour hover uses. */
+[class*="st-key-dqrow_"]:has(.dq-row-on) {{
+  background: {ACCENT_TINT};
+  box-shadow: inset 2px 0 0 {ACCENT};
+}}
+/* The button, stretched over the row and painted with nothing. `opacity: 0` rather
+   than `visibility: hidden` or `display: none`: it has to stay hit-testable and
+   focusable. The focus ring is drawn back on below, because an invisible control
+   that a keyboard can reach and not see is worse than no control. */
+/* `inset: 0` alone is not enough: Streamlit gives the element container an explicit
+   used width, and an explicit width beats an absolute box's inset stretching. Both
+   dimensions are therefore stated. */
+[class*="st-key-dqrow_"] [data-testid="stElementContainer"]:has(.stButton) {{
+  position: absolute; inset: 0; margin: 0; z-index: 2;
+  width: 100%; height: 100%; max-width: none;
+}}
+[class*="st-key-dqrow_"] [data-testid="stButton"] {{
+  height: 100%; width: 100%; max-width: none;
+}}
+[class*="st-key-dqrow_"] .stButton button {{
+  height: 100%; width: 100%; opacity: 0; padding: 0; min-height: 0;
+  border: none; background: transparent; cursor: pointer;
+}}
+[class*="st-key-dqrow_"] .stButton button:focus-visible {{
+  opacity: 1; background: transparent; color: transparent;
+  outline: 2px solid {ACCENT}; outline-offset: -2px; border-radius: 6px;
+}}
+/* The markup underneath must not eat the click meant for the button above it. */
+[class*="st-key-dqrow_"] .stMarkdown {{ pointer-events: none; }}
+
+/* The list scrolls rather than paginating. Every failing check stays reachable —
+   this page has to agree with the Triage queue, which works all of them — but the
+   band below it stays on screen instead of being pushed a thousand pixels down. */
+[class*="st-key-dqrows_"] {{
   border: 1px solid var(--dq-border); border-radius: 8px;
   background: {NEUTRAL["surface"]};
-  padding: var(--dq-pad-y) var(--dq-pad) calc(var(--dq-pad-y) + .2rem);
+  /* No padding. With a gutter here the rows floated inside the box: every separator
+     stopped short of both edges, and a hovered or selected row's tint stopped with
+     them, leaving a white margin down each side of the highlight. The gutter belongs
+     to the row (`.dq-rowgrid` pads its own cells), so the row itself can run edge to
+     edge. */
+  padding: 0;
+  /* Streamlit puts a 1rem gap between every block it stacks. Between table rows that
+     is not a gap, it is a hole — and the rows carry their own hairline. */
+  gap: 0;
+  /* Reserve the scrollbar whether or not it is showing, so the header above the box
+     does not shift by 15px the moment the list gets long enough to scroll. */
+  scrollbar-gutter: stable;
 }}
-.st-key-dq_issue_board [data-testid="stHorizontalBlock"] {{
-  gap: clamp(.35rem, .6vw, .65rem); align-items: center; }}
-/* No border-bottom here: a border per column is drawn per column, and the gaps
-   between them cut the rule into segments. The header line is one full-width
-   .dq-rowline emitted after the header cells. */
-.dq-th {{ font-size: clamp(.63rem, .76vw, .69rem); font-weight: 600; text-transform: uppercase;
-  color: var(--dq-text-3); padding-bottom: .25rem;
-  white-space: nowrap; overflow: hidden; text-overflow: clip; }}
-/* A badge sets white-space:nowrap, so in a column narrower than the badge it spills
-   over the next cell instead of being cut off. Clip at the cell, not at the column —
-   clipping the column also cuts the second line off the element cell. */
-.dq-cell {{ overflow: hidden; white-space: nowrap; }}
-.dq-td {{ font-size: clamp(.72rem, .88vw, .8rem); color: {NEUTRAL["text"]}; padding: .1rem 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-.dq-td.q {{ color: var(--dq-text-2); font-size: var(--dq-fs-sub); }}
-.dq-td.n {{ font-variant-numeric: tabular-nums; }}
-.st-key-dq_issue_board .stButton button {{
-  padding: .12rem .5rem; min-height: 0; font-size: .74rem; width: 100%;
-}}
-.dq-rowline {{ border-bottom: 1px solid var(--dq-border); margin: .1rem 0 .15rem; }}
-.dq-rowline.head {{ margin: 0 0 .4rem; }}
+/* The first row must not draw a line the container has already drawn, and the two
+   rows at the ends have to follow its corners — without `overflow: hidden`, which
+   cannot be used here: the failing-checks box scrolls, and this same selector would
+   win the cascade over Streamlit's own `overflow: auto` and kill the scrolling.
 
-/* 2. Rows are top-aligned, not centre-aligned. The element cell is two lines and
-   every other cell is one; centring each column in the row's height put the badge
-   halfway down the element name instead of level with it. Top alignment gives every
-   cell the same first baseline, and the .1rem nudges the shorter boxes onto it. */
-.st-key-dq_issue_board [data-testid="stHorizontalBlock"] {{ align-items: flex-start; }}
-/* Every cell on a row's first line shares one band and centres inside it. Nudging
-   each control by hand does not survive a font change: a badge, a number and a line
-   of text all have different intrinsic heights, so the only stable way to put them on
-   one line is to give them the same box and centre in it. The second line of the
-   element cell opts out. */
-.st-key-dq_issue_board .dq-td, .st-key-dq_issue_board .dq-cell {{
-  display: flex; align-items: center; min-height: 1.6rem; padding: 0;
+   Both forms of each selector are written out because Streamlit wraps some blocks in
+   a layout div and not others; matching only the wrapped shape breaks silently the
+   day that changes. */
+[class*="st-key-dqrows_"] > :first-child [class*="st-key-dqrow_"],
+[class*="st-key-dqrows_"] > [class*="st-key-dqrow_"]:first-child {{
+  border-top: none; border-radius: 7px 7px 0 0;
 }}
-.st-key-dq_issue_board .dq-td.q {{ min-height: 0; padding-top: .05rem; }}
-.st-key-dq_issue_board .dq-td.n {{ justify-content: flex-start; }}
-.st-key-dq_issue_board .stButton {{ display: flex; align-items: center;
-  min-height: 1.6rem; }}
+[class*="st-key-dqrows_"] > :last-child [class*="st-key-dqrow_"],
+[class*="st-key-dqrows_"] > [class*="st-key-dqrow_"]:last-child {{
+  border-radius: 0 0 7px 7px;
+}}
+.dq-tablefoot {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3);
+  padding: .5rem .1rem 0; }}
+
+/* --- The problem detail header and its state strip. -------------------------
+   The strip is not a card. It is the page saying whose turn it is, and it carries the
+   only control in this app that writes anything — so it sits above the tabs, where it
+   is visible on all four of them. The objection to the five tabs this page had until
+   2026-09-16 was never that tabs are bad; it was that the decision lived inside one.
+
+   Tinted by outcome, and every variant states that outcome in words as well: colour
+   is the second channel here, never the first. */
+.dq-factline {{
+  display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem;
+  font-size: clamp(.74rem, .88vw, .8rem); color: var(--dq-text-2); margin-top: .4rem;
+}}
+.dq-factline i {{ color: var(--dq-text-3); font-style: normal; }}
+.dq-factline b {{ color: {NEUTRAL["text"]}; font-weight: 600;
+  font-variant-numeric: tabular-nums; }}
+.dq-factline code {{ font-size: .93em; }}
+
+/* The box is one div of our own markup, so its height is set by its own two lines and
+   nothing else can shrink it. `padding-right` reserves the button's lane. */
+.dq-strip-box {{
+  border: 1px solid var(--dq-border); border-radius: 8px;
+  padding: var(--dq-pad-y) var(--dq-pad);
+}}
+.dq-strip-box.has-action {{ padding-right: 13rem; }}
+/* The button sits over that lane rather than in the flow beside it — out of flow, so
+   it cannot participate in sizing the box.
+
+   Positioned on the ELEMENT CONTAINER, not on `.stButton` inside it: Streamlit gives
+   every element container `position: relative`, so an absolute `.stButton` anchors to
+   its own wrapper and goes nowhere. Anchored one level up it lands in the lane. */
+/* `gap: 0` is the fix to the whole clipping problem, and it is worth knowing why.
+   Streamlit puts a 1rem gap between the blocks it stacks, and the gap is counted
+   against this container's height even though the only other child — the button — is
+   taken out of flow below. The container therefore measured exactly 16px short of the
+   box inside it, which cropped the gate line off the bottom edge. Every display,
+   flex, height and min-height override tried on the inner wrappers failed for the
+   same reason: none of them was where the 16px was going. */
+.st-key-dq_strip {{ position: relative; margin: .7rem 0 .2rem; gap: 0; }}
+.st-key-dq_strip [data-testid="stElementContainer"]:has(.stButton) {{
+  /* Aligned to the top of the box, on the first line of the sentence — not centred.
+     Centring would have to measure the container, and the container under-reports its
+     own height by a gap it never draws (see `gap: 0` above); anchoring to the top
+     depends on nothing but this box's own padding, and reads as deliberate whether
+     the sentence runs to one line or four. */
+  position: absolute; right: var(--dq-pad); top: var(--dq-pad-y);
+  width: auto; margin: 0; z-index: 1;
+}}
+.st-key-dq_strip .stButton, .st-key-dq_strip [data-testid="stButton"] {{
+  width: auto; max-width: none;
+}}
+.st-key-dq_strip .stButton button {{ white-space: nowrap; }}
+/* Below this width the lane costs more than it is worth: the button returns to the
+   flow under the sentence and both keep their full width. A truncated "Record a
+   review" is worse than a taller box. */
+@media (max-width: 900px) {{
+  .dq-strip-box.has-action {{ padding-right: var(--dq-pad); }}
+  .st-key-dq_strip [data-testid="stElementContainer"]:has(.stButton) {{
+    position: static; margin-top: .5rem;
+  }}
+}}
+.dq-strip-said {{ font-size: clamp(.79rem, .94vw, .86rem); line-height: 1.55;
+  color: var(--dq-text-2); }}
+.dq-strip-said b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
+.dq-strip-gate {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .71rem; color: var(--dq-text-3); margin-top: .22rem; }}
+/* The back link reads as a link, not as a fourth button competing with the strip. */
+.st-key-_back button {{
+  border: none; background: transparent; color: var(--dq-text-2);
+  padding: .1rem .2rem; min-height: 0; font-size: .78rem; justify-content: flex-start;
+}}
+.st-key-_back button:hover {{ background: transparent; color: {ACCENT}; }}
+
+/* Streamlit's tabs ship at body size and full weight; at that size they compete with
+   the title above them. The count rides in the label so a reader knows what is behind
+   a tab before opening it. */
+.stMain .stTabs [data-baseweb="tab-list"] {{ gap: .15rem; }}
+.stMain .stTabs [data-baseweb="tab"] {{
+  font-size: .85rem; padding: .45rem .7rem; color: var(--dq-text-2);
+}}
+.stMain .stTabs [aria-selected="true"] {{ font-weight: 600; }}
+.dq-kvline {{ display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem;
+  font-size: .82rem; color: var(--dq-text-2); margin-top: .3rem; }}
+.dq-kvline .k {{ color: var(--dq-text-3); }}
+
+/* --- Callout: a claim the page is making about itself. ----------------------
+   Not a tooltip and not a caption. The compression ratio is the queue's whole
+   argument — if it ever approaches 1:1 this page is an alert list with extra steps —
+   so it is stated at the foot in prose, at reading size, where it cannot be missed
+   by someone who never hovers anything. */
+.dq-callout {{
+  border-left: 3px solid {ACCENT}; background: {ACCENT_TINT};
+  border-radius: 0 8px 8px 0; padding: .7rem .9rem;
+  font-size: clamp(.78rem, .92vw, .85rem); line-height: 1.65;
+  color: var(--dq-text-2); margin-top: .9rem;
+}}
+.dq-callout strong, .dq-callout b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
+
+/* --- The section head: title left, controls right. ------------------------- */
+.dq-sectionhd {{ display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+  margin: clamp(1rem, 1.5vw, 1.5rem) 0 .5rem; }}
+.dq-sectionhd .t {{ font-size: clamp(.95rem, 1.1vw, 1.08rem); font-weight: 620;
+  color: {NEUTRAL["text"]}; letter-spacing: -.01em; }}
+.dq-sectionhd .q {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); }}
+
 </style>
 """
 

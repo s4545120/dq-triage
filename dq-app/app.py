@@ -17,7 +17,7 @@ Built to `dq-triage-agent-spec.md` v1.0. The retired v0.1 execution spec is gone
 this app along with everything it implied: no executor, no mutable incident state, no
 fix body, no execute button.
 
-**Five destinations, seven pages.** The nav lists what someone can decide to look at;
+**Four destinations, six pages.** The nav lists what someone can decide to look at;
 `Monitor detail` and `Problem detail` are not on that list because neither means
 anything without a selection made on the page above it. They are still registered —
 Streamlit can only `switch_page` to a page it knows about — so the sidebar is built by
@@ -27,6 +27,14 @@ to `PAGES` therefore does not put it in the sidebar; `SIDEBAR` does.
 The `Data elements` page was removed on 2026-09-16. The CDE model behind it was not:
 `v_cde_coverage` still owns the scorecard's denominator. What went is the browsing
 surface, replaced by the scope panel and the issue board on the scorecard.
+
+The `Register` page was removed on 2026-09-17. The register itself is untouched —
+`results.disposition` is still the append-only audit artefact, still the app's primary
+write, and every event chain is still readable on the problem it belongs to, under
+Decisions on the detail page. What went is the cross-cohort browsing view. One thing
+went with it and has not landed anywhere else: `domain/integrity.check`, the control
+test over the whole register, no longer has a surface. It still runs and
+`tests/test_integrity.py` still pins it.
 """
 
 from __future__ import annotations
@@ -47,8 +55,6 @@ PAGES = {
                       icon=":material/table_chart:"),
     "triage": st.Page("dq_app/ui/pages/triage.py", title="Triage",
                       icon=":material/inbox:"),
-    "register": st.Page("dq_app/ui/pages/register.py", title="Register",
-                        icon=":material/receipt_long:"),
     "rules": st.Page("dq_app/ui/pages/rule_registry.py", title="Rules",
                      icon=":material/rule:"),
     # Drill-downs. Registered so `st.switch_page` can reach them, deliberately absent
@@ -62,9 +68,12 @@ PAGES = {
 
 # Group → the pages linked under it. The only list that decides what the sidebar shows.
 SIDEBAR = {
-    "Monitor": ["scorecard", "tables"],
+    # `Rules` sits under Monitor because the group it used to share — Evidence — held
+    # the Register, and with that page gone a group label reading "Evidence" over a
+    # single rule-authoring link described nothing. What a rule IS is part of what is
+    # being watched, which is what Monitor already means here.
+    "Monitor": ["scorecard", "tables", "rules"],
     "Work": ["triage"],
-    "Evidence": ["register", "rules"],
 }
 
 

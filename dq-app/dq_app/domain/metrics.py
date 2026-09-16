@@ -285,6 +285,43 @@ def newly_failing(check_run: pd.DataFrame, table: str, days: int = 14) -> pd.Dat
 # --- Leading ----------------------------------------------------------------
 
 
+def live_cohorts(check_run: pd.DataFrame, cohort: pd.DataFrame) -> dict[str, str]:
+    """Breaching rule → the cohort that currently owns it. The queue, as a mapping.
+
+    For every rule breaching on the latest run, the most recent cohort containing it.
+    Later cohorts supersede earlier ones, which is what stops a rule that was closed
+    under an old problem and regrouped under a newer one from being counted twice —
+    `CTCT_PHN_FMT` closed under "Landline numbers loaded with inconsistent formatting"
+    in August and regrouped into "Scattered contactability gaps" is exactly that case.
+
+    This is the one definition of "the problems a steward is actually looking at", and
+    both readers of it have to agree: `cohort_compression` divides by the size of its
+    value set, and `ui/pages/triage.py` lists precisely those cohorts. Deriving the
+    queue separately — say, as "open states, plus closed ones that look breachy" —
+    would put a row on the page that the ratio underneath it does not count.
+
+    Note what it does NOT filter on: lifecycle state. A closed problem whose checks
+    are breaching again is live by this definition, and belongs at the top of a queue
+    rather than behind a filter.
+    """
+    if check_run.empty or cohort.empty:
+        return {}
+
+    latest_run = check_run.loc[check_run["run_ts"].idxmax(), "run_id"]
+    breaching = set(
+        check_run.loc[
+            (check_run["run_id"] == latest_run) & (check_run["status"] == "breach"), "rule_id"
+        ]
+    )
+
+    live: dict[str, str] = {}
+    for row in cohort.sort_values("raised_ts").itertuples():
+        for rule_id in row.member_rule_ids:
+            if rule_id in breaching:
+                live[rule_id] = row.cohort_id
+    return live
+
+
 def cohort_compression(check_run: pd.DataFrame, cohort: pd.DataFrame) -> Metric:
     """Breaches ÷ cohorts, on the breaches that are live right now. Target ≥5:1.
 
@@ -305,20 +342,8 @@ def cohort_compression(check_run: pd.DataFrame, cohort: pd.DataFrame) -> Metric:
     if check_run.empty or cohort.empty:
         return Metric("compression", "Cohort compression", None, "—", "≥ 5.0 : 1", None)
 
-    latest_run = check_run.loc[check_run["run_ts"].idxmax(), "run_id"]
-    breaching = set(
-        check_run.loc[
-            (check_run["run_id"] == latest_run) & (check_run["status"] == "breach"), "rule_id"
-        ]
-    )
-
-    live: dict[str, str] = {}
-    for row in cohort.sort_values("raised_ts").itertuples():
-        for rule_id in row.member_rule_ids:
-            if rule_id in breaching:
-                live[rule_id] = row.cohort_id  # later cohorts supersede earlier ones
-
-    n_breaches, n_cohorts = len(breaching), len(set(live.values()))
+    live = live_cohorts(check_run, cohort)
+    n_breaches, n_cohorts = len(live), len(set(live.values()))
     value = n_breaches / n_cohorts if n_cohorts else None
     return Metric(
         key="compression",

@@ -39,6 +39,21 @@ def _cohort_awaiting_review() -> str:
     return waiting.iloc[0]["cohort_id"]
 
 
+def _open_the_form(at):
+    """Click the control that opens the decision drawer, and return the reloaded app.
+
+    The form moved behind this button on 2026-09-17: the page's four tabs hold the
+    reading and the decision sits above them, in a drawer. Clicking rather than
+    setting the session flag by hand is deliberate — the strip button is now part of
+    the write path, and a test that skipped it would pass with the button unwired.
+    """
+    for button in at.button:
+        if str(button.label).startswith(("Record a", "Approve")):
+            return button.click().run()
+    raise AssertionError(
+        f"nothing on the page opens the decision form: {[b.label for b in at.button]}")
+
+
 def _submit(at):
     """The register's submit button, found by its label.
 
@@ -63,6 +78,8 @@ def test_recording_a_review_advances_the_derived_state():
     before = len(at.get("dataframe"))  # sanity: the page rendered its tables
     assert before
 
+    at = _open_the_form(at)
+    assert not at.exception, [e.message for e in at.exception]
     at.radio[0].set_value("accepted")
     at.text_area[0].set_value("Checked against the release calendar; the hypothesis holds.")
     _submit(at).click().run()
@@ -106,6 +123,7 @@ def test_a_deferral_without_a_reason_is_refused():
     at.session_state["selected_cohort"] = cohort_id
     at.run()
 
+    at = _open_the_form(at)
     at.radio[0].set_value("deferred")
     at.text_area[0].set_value("   ")
     _submit(at).click().run()

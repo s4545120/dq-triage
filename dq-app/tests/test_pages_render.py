@@ -22,7 +22,6 @@ PAGES = [
     "dq_app/ui/pages/table_detail.py",
     "dq_app/ui/pages/triage.py",
     "dq_app/ui/pages/triage_detail.py",
-    "dq_app/ui/pages/register.py",
     "dq_app/ui/pages/rule_registry.py",
 ]
 
@@ -48,7 +47,7 @@ def test_page_renders(page):
 
 
 def test_every_registered_page_exists_and_every_link_is_registered():
-    """`app.py` registers seven pages and links five. A drill-down that falls out of
+    """`app.py` registers six pages and links four. A drill-down that falls out of
     `PAGES` stops being reachable by `st.switch_page` with no error until someone
     clicks the button; a nav key with no page is an immediate crash on boot."""
     app = (APP_DIR / "app.py").read_text()
@@ -63,7 +62,7 @@ def test_every_registered_page_exists_and_every_link_is_registered():
                                                   re.S).group(1)))
     # Group labels are in that block too; only the ones that look like page keys matter.
     assert (linked & keys) <= keys
-    assert {"scorecard", "tables", "triage", "register", "rules"} <= keys
+    assert {"scorecard", "tables", "triage", "rules"} <= keys
 
     # The two drill-downs are registered and deliberately not linked.
     assert {"table_detail", "triage_detail"} <= keys
@@ -81,8 +80,9 @@ def test_detail_page_opens_the_problem_it_was_handed():
     """Triage hands the detail page a cohort id through session state. If that
     contract breaks, Open silently shows the wrong problem.
 
-    The title is now the hypothesis, not the id, so the id is asserted where it
-    actually appears — the facts line under the heading."""
+    The title is the hypothesis, not the id, so the id is asserted where it actually
+    appears — the facts line under the heading, which became part of the header markup
+    when the page moved to tabs."""
     import pandas as pd
 
     cohort_path = APP_DIR.parent / "fixtures" / "out" / "results.cohort.parquet"
@@ -91,8 +91,7 @@ def test_detail_page_opens_the_problem_it_was_handed():
     target = pd.read_parquet(cohort_path).sort_values("member_count").iloc[-1]["cohort_id"]
 
     at = _run("dq_app/ui/pages/triage_detail.py", selected_cohort=target)
-    shown = " ".join(str(c.value) for c in at.caption)
-    assert target[:8] in shown
+    assert target[:8] in _body(at)
 
 
 def test_detail_page_renders_every_lifecycle_state():

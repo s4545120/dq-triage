@@ -33,12 +33,13 @@ moved. Nothing about the data model, the grants or the write path changed.
 | Was | Now |
 |---|---|
 | `cohort_queue.py` | `triage.py` — "Cohorts" is our word for it, not the steward's |
-| `cohort_detail.py` | `triage_detail.py` — five tabs became three blocks |
+| `cohort_detail.py` | `triage_detail.py` — five tabs, then three blocks, now four tabs |
 | `monitored_tables.py` | `tables.py` |
 | `monitor_detail.py` | `table_detail.py` |
 | `cde_registry.py` | **deleted** — folded into two panels on the scorecard |
+| `register.py` | **deleted** 2026-09-17 — the chain is read on the problem it belongs to |
 
-**`app.py` registers seven pages and links five.** `table_detail` and `triage_detail`
+**`app.py` registers six pages and links four.** `table_detail` and `triage_detail`
 are drill-downs: neither means anything without a selection made on the page above it,
 so neither is in the sidebar. They stay registered because `st.switch_page` can only
 reach a page `st.navigation` knows about — which is why the nav is asked to render
@@ -49,10 +50,11 @@ nothing (`position="hidden"`) and `app.py` builds the sidebar itself from
 **Deleting the CDE page did not delete the CDE model.** `config.cde_registry`,
 `results.cde_profile` and `v_cde_coverage` are untouched, and so is every test pinned
 to them — the scorecard's quality figure still has the register for a denominator.
-What went is the browsing surface. What replaced it: the `Scope · 10 CDEs` button in
-the filter strip opens a panel listing every element, and the issue board's `Review`
-opens one element in place instead of switching page. The cross-table attachment
-assertion that used to live in the CDE page's tests moved to the check panel.
+What went is the browsing surface. What replaced it: the `Scored on 20 checks over 10
+critical elements` button in the filter strip opens a panel listing every element, and
+a row of the element table at the foot of the page opens that one element in a drawer
+instead of switching page. The cross-table attachment assertion that used to live in
+the CDE page's tests moved to the check panel.
 
 **The scorecard gained a drill-down.** Selecting a failing check opens a panel with
 the rule in plain words, the arithmetic, and the rows that actually failed —
@@ -61,6 +63,132 @@ the rule in plain words, the arithmetic, and the rows that actually failed —
 way to see them was from inside a cohort. `_check_pick` in session state is what the
 panel reads, so the selection survives a rerun the table did not cause — and a test
 can open a check without simulating a click.
+
+**The three queue-shaped tables are not `st.dataframe`s.** The scorecard's failing
+checks, the element gaps under them, and the Triage queue are drawn as clickable rows
+— one `st.container` per row holding its markup and a real button stretched over the
+whole row at zero opacity. Three reasons, and the third is the one a reader notices: a
+dataframe cell cannot hold a tinted severity badge, it cannot colour a phrase, and its
+row selection fires only from the checkbox in its own gutter — so "select a row" meant
+hunting for a 14px target. Here the whole row is the target, it tints on hover in the
+same accent the selected row uses, and it is still a real button, so the keyboard
+reaches it.
+
+`components.clickable_rows` and `components.row_head` are the one implementation, and
+every row container is keyed `dqrow_<table>_<id>` so a single `.dq-rowgrid` /
+`st-key-dqrow_` block in `theme.py` styles all three. Four rules in that block are
+load-bearing rather than cosmetic and each is labelled with what broke without it —
+the one worth knowing before you touch it is that Streamlit reports a markdown box as
+one line high whatever it contains, so a row's height has to be set on the row
+container, never on the grid inside it.
+
+**The problem detail page has tabs again, and that is not a reversal.** It had five
+until 2026-09-16 (Evidence, Suggested fix, Decisions, Impact, Stored record), then
+three stacked blocks, and since 2026-09-17 four tabs: Why we think this · Evidence ·
+Decisions · Stored record. The objection to the first set was never that tabs are bad
+— it was that they made a reader choose an order before knowing what was in each, and
+that the decision was buried inside one of them. Both are answered rather than
+avoided:
+
+* Every tab carries its count, so the label says what is behind it.
+* **Nothing you have to act on is inside a tab.** The header and a state strip sit
+  above the tab bar, visible on all four. The strip names the state, quotes the last
+  reason anyone wrote, says whose turn it is, and carries the one event
+  `lifecycle.available_events` permits — which opens the decision form in a drawer.
+  `tests/test_write_path.py` clicks that button rather than setting the session flag,
+  so the strip is part of the tested write path.
+* *Impact* stayed dissolved. Blast radius is one line at the foot of the first tab and
+  a phrase in the header. It never earned a tab and did not get one back.
+
+**The Register page was deleted on 2026-09-17; the register was not.**
+`results.disposition` is still the append-only audit artefact and still the app's
+primary write. Every event chain is still readable on the problem it belongs to, under
+`Decisions` on the detail page — what went is the cross-cohort browsing view, for the
+same reason the CDE page went: nobody browses a register.
+
+**One thing went with it and has nowhere to be.** `domain/integrity.check` — the
+control test over the whole register, the one that catches an approval with too few
+distinct approvers or an execution with none — no longer has a surface anywhere. The
+Triage resolution band that carried its badge went on 2026-09-16 and the page holding
+its detail went on 2026-09-17. The module still runs and `tests/test_integrity.py`
+still pins it, so this is a missing page rather than a missing control, but a control
+test nobody can see is not a control anyone is relying on. Putting it back is a panel,
+not a rebuild.
+
+**`Rules` moved into the Monitor group.** It shared `Evidence` with the Register, and
+a group label reading "Evidence" over a single rule-authoring link described nothing.
+What a rule *is* forms part of what is being watched, which is what Monitor already
+means here. Two groups now: Monitor (Scorecard, Tables, Rules) and Work (Triage).
+
+**A Streamlit container measures 1rem shorter than what is inside it.** Worth knowing
+before debugging any box on these pages that crops its own last line. Streamlit puts a
+1rem `gap` between the blocks it stacks, and that gap is counted against the
+container's height even when the gap is never drawn — so a `st.container` holding one
+tall markdown reports 16px less than its content and clips the bottom. It is not the
+markdown wrapper, not the element container and not flex shrinkage: overriding
+`display`, `height`, `min-height` or `flex` on any of those changes nothing, because
+none of them is where the 16px goes. Two pieces of the detail page's state strip come
+from this: the tinted box is markup of our own rather than a bordered container, and
+its button is absolutely positioned and anchored to the box's padding rather than
+centred against a container height that cannot be trusted.
+
+**Evidence on the detail page is master–detail.** The page used to print a sample
+table per failing check — nine stacked expanders for COH-A. The checks are now one
+`components.clickable_rows` table and the rows appear for the check selected, held in
+`_member_pick`. Same rows, same cap, same grants: what changed is how many are on
+screen at once, not what is on screen at all.
+
+**The strip quotes the last reason WRITTEN, not `latest_reason`.** That column travels
+with `latest_decision`, so on a reopened problem it returns the review that accepted
+it — printed under a headline saying verification failed. The detail page reads the
+last non-null `reason` in the event chain instead, which is the check runner's reopen
+reason and the one that explains the state being announced.
+
+**The Triage queue lists `metrics.live_cohorts`, not "open cohorts".** For every rule
+breaching on the latest run, the cohort that currently owns it — which is the same
+function `cohort_compression` divides by, so the row count and the ratio printed under
+the table can never disagree. Two consequences that look like bugs: a problem someone
+closed whose checks are breaching again is **in** the queue with its closed state
+showing, because that is exactly what should be put in front of a steward; and a rule
+regrouped into a newer problem is counted once, under the newer one, which is why
+`CTCT_PHN_FMT` does not drag its August cohort back into the list. Six rows, 21
+breaching checks, 3.5 : 1 — and the `Show` dropdown widens to Open / Waiting on me /
+Closed / All for anyone who wants the lifecycle view instead.
+
+**The queue rows carry no selected state, deliberately.** A row there is a link, not
+a selection: clicking one calls `st.switch_page`. `selected_cohort` survives the trip
+to the detail page and back, so passing it as the table's `picked` tinted a row every
+time the queue was opened, for a selection the reader had already finished with.
+
+**The spec's resolution metrics are not on a page.** Closure rate, MTTR, disposition
+coverage, recurrence, recommendation acceptance, the triage funnel and the
+decision-record control badge were removed from Triage on 2026-09-16 and have not
+landed anywhere else. `domain/metrics.py` still computes every one of them and
+`tests/test_metrics.py` still pins them, so putting them back is a page, not a
+rebuild. The decision-record control badge is in the same position and now has no
+Register page to defer to either — see above.
+
+**Whose turn it is, is derived in one place too.** `components.waiting_on` reads it
+off the lifecycle state — `owner_group` is the domain that owns the data and is the
+same for most of the register, so printing it would say nothing. The Triage queue's
+`Waiting on` column and the detail page's state strip both call it.
+
+**A problem's title is derived, in one place.** There is no stored title column and
+adding one is a fixture and DDL change, not a UI one, so `components.problem_title`
+cuts one out of the root-cause hypothesis: drop a dashed aside, stop at the first `.`
+or `:`. It does not rewrite — a badly-written hypothesis yields a badly-written title,
+which is the right place for that problem to surface. The Scorecard and the Triage
+queue both call it; neither has its own copy.
+
+**The scorecard's bottom band is a list of elements, not an issue queue.** The tabbed
+issue board and the two cards in the rail beside it — coverage segments and Recent
+runs — were removed on 2026-09-16. What replaced them is one table, `Critical
+elements nothing valid is watching`: the element, its criticality, the finding as a
+sentence, and where the fix is. One row per ELEMENT carrying its worst finding, which
+is the same count the `CDEs under watch` tile reports, so the two cannot disagree —
+three bindings of Customer name with nothing validating them is one element, not
+three findings. A scope mismatch points at the cohort that already carries the
+evidence (`see COH b42685aa`) rather than repeating the instruction.
 
 **The four dimension cards are gone.** Completeness / Validity / Consistency /
 Uniqueness became a `Group by dimension` toggle on the failing-checks table. The prose
@@ -77,10 +205,15 @@ without making the union computable across checks; only a stored key set or a
 union-able sketch answers the question the tile asks. Two tests assert the floor is a
 floor.
 
-**The palette is "Indigo signal".** `theme.py` moved off petrol teal onto an indigo
-accent. One change there is not cosmetic: `TONE["moderate"]` was amber and is now a
-cool teal, because amber never had enough contrast on a light ground and "monitor" is
-informational rather than a warning. `SEVERITY_TONE` is untouched — `P3_monitor ->
+**The palette is "Indigo signal", and it is declared in two files.** `theme.py` moved
+off petrol teal onto an indigo accent — and so must `dq-app/.streamlit/config.toml`,
+which is where the framework takes the colour for buttons, toggles, focus rings and
+links. The two were out of step for a while and the page read as two apps stapled
+together: indigo cards, teal controls. Change one, change the other.
+
+One change inside `theme.py` is not cosmetic either: `TONE["moderate"]` was amber and
+is now a cool teal, because amber never had enough contrast on a light ground and
+"monitor" is informational rather than a warning. `SEVERITY_TONE` is untouched — `P3_monitor ->
 moderate` still holds; only what `moderate` looks like changed.
 
 ### `dq-app/` was rewritten to v1.0 on 2026-09-02
@@ -166,7 +299,7 @@ that `tests/test_coverage_conformance.py` asserts is non-empty.
 denominators, deliberately, and each is stated where it sits.
 
 *Scoped to the 20 rules `v_cde_coverage` attached to a registered element:* the
-scorecard's headline quality figure and its Recent runs rail; every figure on
+scorecard's headline quality figure and the trend drawn under it; every figure on
 `ui/pages/tables.py` and `table_detail.py` — the monitor inventory, applied rules, the
 per-table score. The scorecard applies the filter itself; the two monitor pages get it
 from `ui/monitoring.domain_filter`, which is the only other place the filter is
@@ -184,10 +317,12 @@ would disagree with the Triage queue, which is where those checks get worked. Th
 tiles carry "What is being watched · every check that ran" above them; the quality
 figure carries its scope in the strip beside it.
 
-The scoping is drawn, not implied: the monitor pages carry a `10 CDEs` badge in the
-filter strip and the scorecard a `Scope · 10 CDEs` button that opens the element list,
-because a diagnostic page that quietly hides 14 of 34 checks is worse than one that
-shows fewer and says so.
+The scoping is drawn, not implied, and it is spelled out rather than abbreviated: the
+monitor pages carry a `10 CDEs` badge in the filter strip, and the scorecard a
+`Scored on 20 checks over 10 critical elements` button that opens the element list —
+a reader who does not already know the denominator cannot recover it from a badge
+reading `10 CDEs`. A diagnostic page that quietly hides 14 of 34 checks is worse than
+one that shows fewer and says so.
 
 Consequences a reader will otherwise trip over: the scorecard's quality figure is
 built on 20 checks while the tiles beside it say 34 ran; neither shadow rule is
