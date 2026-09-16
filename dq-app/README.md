@@ -46,15 +46,22 @@ worth:
 
 ## Pages
 
+Five in the sidebar, two reached by drilling in.
+
 | Page | What it is for |
 |---|---|
-| **Scorecard** | The health of the data, and nothing else. Headline figures for the latest run, data-quality dimensions, critical element coverage, and recent run outcomes. |
-| **All monitored tables** | The table-monitor inventory. Shows the full list of watched catalog items with current quality, findings, trend and rule counts. |
-| **Monitor detail** | The selected table's checks, problem cohorts, trend, and domain breakdown. Reached from the inventory, with a back path to the monitor list. |
-| **Cohorts** | One row per problem. Leads with the grouping — *21 failing checks → 6 problems* — because that ratio is the queue's whole claim, and closes with **Resolution**: whether problems reach a recorded outcome and whether fixes hold. |
-| **Cohort detail** | Evidence → recommendation → register → act, in that order. Member rules carry their own 40-run history; the hypothesis sits next to the profiling that produced it. The playbook entry behind a recommendation appears here, with its prior-use count and recurrence rate. |
-| **Register** | The append-only event log as an audit artefact: period filter, CSV export, cohorts with nothing recorded listed explicitly, and the control test. |
-| **Rule registry** | Current rules with derived `effective_to`, full version history, and shadow → active promotion — the app's only other write. |
+| **Scorecard** | The health of the data, and what is being watched. A row-weighted quality figure scoped to the registered elements, six counts of the estate, and every failing check — select one to see what it looks for and the rows that actually failed. Critical-element coverage and recent runs close the page. |
+| **Tables** | The table-monitor inventory: watched catalog items with current quality, findings, trend and rule counts. |
+| **Triage** | One row per problem. Opens with the grouping — *21 breaching checks, 6 live problems* — because that ratio is the queue's whole claim, and closes with **Resolution**: whether problems reach a recorded outcome and whether fixes hold. |
+| **Register** | The append-only event log as an audit artefact: period filter, CSV export, problems with nothing recorded listed explicitly, and the control test. |
+| **Rules** | Current rules with derived `effective_to`, full version history, and shadow → active promotion — the app's only other write. |
+| *Monitor detail* | The selected table's checks, problems, trend and domain breakdown. Reached from **Tables**, with a back path to it. Not in the sidebar: it needs a selection to mean anything. |
+| *Problem detail* | Three blocks in the order a steward works — what we think is wrong, what we're going by, what was decided — then the stored record. Reached from **Triage**. Not in the sidebar, for the same reason. |
+
+There is no **Data elements** page. It was deleted on 2026-09-16 and folded into the
+scorecard: the `Scope · 10 CDEs` button opens the element list, and the issue board's
+`Review` opens one element in place. The register behind it is untouched — it still
+owns the quality figure's denominator.
 
 ## Architecture
 
@@ -95,11 +102,15 @@ caveat on a denominator, why a control cannot be a table constraint — all of i
 in `help=`, reachable by anyone who wants it and invisible to everyone else. Prose
 under every widget makes a dense tool read like a tutorial.
 
-**The Scorecard is about the data; the Cohorts page is about the work.** Detection
-figures and resolution figures answer different questions for different people, and
-mixing them produced a page that was neither. Table-level diagnosis starts on **All
-monitored tables** with the watched catalog items, then continues on **Monitor
-detail** for the checks and problem cohorts behind one selected table.
+**The Scorecard is about the data; Triage is about the work.** Detection figures and
+resolution figures answer different questions for different people, and mixing them
+produced a page that was neither. Table-level diagnosis starts on **Tables** with the
+watched catalog items and continues in the monitor detail behind one of them.
+
+**A page that needs a selection is not a destination.** `Monitor detail` and `Problem
+detail` used to sit in the nav and open empty-handed. They are drill-downs now — still
+registered in `app.py`, because `st.switch_page` can only reach a registered page, but
+absent from the sidebar, which `app.py` builds itself from `st.page_link`.
 
 **Plain words on screen, the spec's words in the tooltip.** A steward should not need
 to know what `P1_block`, `disposition coverage` or a `rule_expr` is. Severities read
@@ -113,11 +124,11 @@ and a single bad row can produce several — the 240 malformed addresses trip si
 checks each. Counting distinct rows would need a key recorded on every finding, which
 the runner does only for samples it keeps, so the honest word is used instead.
 
-**"Cohort" is explained wherever it first appears.** It is the system's one invented
-word and nothing else makes sense without it, so the same one-line definition — written
-once, in `theme.COHORT_ONE_LINER` — sits under the Cohorts title, under the cohort band
-on the Scorecard, and under the cohort detail title, with a longer *What is a cohort?*
-expander on the first two.
+**"Cohort" is the stored word, "problem" is the spoken one.** It is the system's one
+invented word: the tables, the views and the domain code all say `cohort`, and the
+screen says *problem*. The one-line definition — written once, in
+`theme.COHORT_ONE_LINER` — is reachable from the Triage header, with a longer *How
+failing checks become one problem* expander under it.
 
 **Short static tables are HTML, not `st.dataframe`.** Streamlit's data grid measures its
 own box on first paint, and in some slots that measurement lands at a few pixels and

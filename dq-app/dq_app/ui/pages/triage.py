@@ -1,11 +1,16 @@
-"""Cohort queue — one row per problem, not one per breach.
+"""Triage — one row per problem, not one per breach.
 
 A table, not a stack of cards. The queue is something a steward scans and sorts, and
 a card list forces the hypothesis text on you before you have decided which row you
-care about. Selecting a row opens the detail page.
+care about. Selecting a row previews it; Open takes you to the detail.
 
-The compression figure leads because it is the queue's whole claim: if it approaches
-1:1 this page is an alert list with extra steps.
+The header used to carry four tiles — Breaching rules, Grouped into, Needing action,
+Raised in total. Three of them restate the same grouping, so they are now one
+sentence, and compression is stated in prose under the table rather than as a metric
+of its own. It still has to be said somewhere: if that ratio approaches 1:1 this page
+is an alert list with extra steps.
+
+Named "Cohorts" until 2026-09-16. A cohort is our word for it, not the steward's.
 """
 
 from __future__ import annotations
@@ -20,8 +25,7 @@ from dq_app.ui.components import as_list
 
 components.page_chrome()
 
-st.title("Cohorts")
-st.caption(theme.COHORT_ONE_LINER)
+st.title("Triage")
 
 current = adapter.get_cohort_current()
 cohorts = adapter.get_cohorts()
@@ -33,24 +37,18 @@ runs = adapter.get_check_runs()
 compression = metrics.cohort_compression(runs, cohorts)
 latest_ts = runs["run_ts"].max()
 
-components.kpi_row([
-    # The grouping stated as an arrow, because that is the claim: this many alerts
-    # became this many problems.
-    {"label": "Breaching rules", "value": f"{int(compression.numerator or 0)}",
-     "sub": f"latest run · {latest_ts:%d %b %H:%M}",
-     "help": "Rules failing on the most recent scheduled check run. Without grouping, "
-             "this is how many alerts a steward would be handed."},
-    {"label": "Grouped into", "value": f"{int(compression.denominator or 0)} cohorts",
-     "sub": f"{compression.display} · target {compression.target}",
-     "help": compression.help + " " + compression.footnote},
-    {"label": "Needing action", "value":
-     f"{int(current['lifecycle_state'].isin(lifecycle.OPEN_STATES).sum())}",
-     "sub": "waiting on a person or a run"},
-    {"label": "Raised in total", "value": f"{len(current)}",
-     "sub": "across the whole window"},
-])
+# The grouping stated as a sentence, because that is the claim: this many alerts
+# became this many problems. Four tiles said it four ways.
+open_count = int(current["lifecycle_state"].isin(lifecycle.OPEN_STATES).sum())
+st.caption(
+    f"**{int(compression.numerator or 0)} breaching checks, "
+    f"{int(compression.denominator or 0)} live problems** — one row here is one thing "
+    f"to decide, not one alert. {open_count} still open, {len(current)} raised in all. "
+    f"Latest run {latest_ts:%d %b %H:%M}.",
+    help=theme.COHORT_ONE_LINER + " " + compression.help + " " + compression.footnote,
+)
 
-with st.expander("What is a cohort?"):
+with st.expander("How failing checks become one problem"):
     st.markdown(theme.COHORT_EXPLAINER)
 
 # --- Filters ----------------------------------------------------------------
@@ -70,7 +68,7 @@ with f3:
     doms = st.multiselect("Domain", domains, default=domains)
 with f4:
     recurrence_only = st.checkbox("Recurrences only",
-                                  help="Cohorts where a rule came back after a verified close.")
+                                  help="Problems where a rule came back after a verified close.")
 
 view = current[
     current["severity"].isin(sev)
@@ -139,6 +137,12 @@ selection = st.dataframe(
 st.caption(
     f"{len(view)} of {len(current)} problems · most urgent first. Tick a row to "
     "preview it, then open it."
+)
+st.caption(
+    f"{int(compression.numerator or 0)} failing checks arrived; they belong to "
+    f"{int(compression.denominator or 0)} problems — **{compression.display}**, against "
+    f"a target of {compression.target}.",
+    help=compression.help + " " + compression.footnote,
 )
 
 # --- Are these problems actually getting resolved? ---------------------------
@@ -219,6 +223,6 @@ if rows:
         st.markdown(f"**{detail.loc[picked['cohort_id'], 'root_cause_hypothesis']}**")
     with act:
         if st.button("Open", type="primary", width="stretch"):
-            st.switch_page("dq_app/ui/pages/cohort_detail.py")
+            st.switch_page("dq_app/ui/pages/triage_detail.py")
 
 _resolution_panel()

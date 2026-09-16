@@ -1,33 +1,35 @@
-"""Scorecard — how healthy are the critical data elements right now.
+"""Scorecard — how healthy is the watched data, and what is being watched.
 
-**Every figure on this page is scoped to the registered elements.** A check counts
-here only if `v_cde_coverage` attached it to a critical data element — 20 of the 34
-rules in the fixture. The other 14 watch columns nobody has registered as mattering;
-they still run, still raise cohorts, and are still worked from the Cohorts page, but
-they do not move a number here. That is the whole point of the scoping: a quality
-score whose denominator is "every rule someone happened to write" moves whenever the
-rule set does, and cannot be compared across two months or two domains.
+**Two denominators live on this page, and both are stated where they sit.**
 
+The quality score is scoped: a check counts towards it only if `v_cde_coverage`
+attached it to a registered critical data element — 20 of the 34 rules in the fixture.
+A quality score whose denominator is "every rule someone happened to write" moves
+whenever the rule set does and cannot be compared across two months or two domains.
 `domain/coverage.attached_rule_ids` is the single definition of that set, read back
 off the coverage view so this page and the coverage panel can never disagree.
 
-This page is about the data, not about the work. It answers "how healthy is the
-watched estate, how complete is the rule coverage, and how recently did checks run".
-Table-level diagnosis lives on the All monitored tables page; triage work lives on
-the Cohorts and Register pages.
+Everything else — the estate tiles, the failing-checks table — counts the whole run.
+Reporting "2 tables monitored" over only the attached checks would understate what
+actually runs, and a diagnostic table that hides 14 of 34 failing checks is worse than
+one that shows them all. So the tiles carry "every check that ran" in their heading
+and the score carries its scope in the strip above it.
 
-Plain words throughout. A steward reading this should not have to know what
-`P1_block`, a `rule_expr` or a `check_run` is.
+**The elements themselves no longer have a page.** `Data elements` was removed on
+2026-09-16: nobody browses a register. What it was actually read for is here — the
+scope panel behind the strip badge lists every element and what watches it, and the
+issue board below lists the ones nothing valid is watching. The model is untouched;
+only the browsing surface went.
 
-**Layout.** Three bands, widest question first: a headline score with its own trend,
-the four dimensions that roll up into it, and the critical elements that have no
-valid rule looking at them, beside recent run outcomes.
+**Failing checks open.** Selecting one shows the rule in plain words, the arithmetic,
+and the rows that actually failed — parsed into columns, from
+`results.violation_sample`. The samples were always captured; until now they could
+only be seen from inside a cohort.
 
-**Each dimension opens.** "Validity" is a term of art and the figure on its card is
-weighted by rows while the figure two cards up counts checks, so the pair reads as a
-contradiction whenever a dimension is nearly clean. The panel behind each card is
-where that is settled: the dimension in plain words, the arithmetic with its actual
-operands, both denominators side by side, and every check that fed the number.
+**Dimensions are a grouping, not a headline.** Completeness / Validity / Consistency /
+Uniqueness used to be four cards at the top. They are now a toggle on the failing-checks
+table, which is where the question they answer ("which kind of thing is wrong") is
+actually being asked.
 
 **There is no Run button here and there will not be one.** The check runner is a
 scheduled job owned outside this app; this page reads its results. A control that
@@ -43,21 +45,19 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter
-from dq_app.domain import coverage, metrics
+from dq_app.domain import coverage, lifecycle, metrics
 from dq_app.ui import components, theme
 
 # --- Scoring ----------------------------------------------------------------
 # Two different quality numbers live on this page and they are not interchangeable:
 #
-#   * "Checks passing" counts CHECKS — 11 of 32. It is what a rule author cares
-#     about, and it treats a check over 2,000 rows and a check over 40 alike.
+#   * "Checks run" counts CHECKS. It is what a rule author cares about, and it treats
+#     a check over 2,000 rows and a check over 40 alike.
 #   * "Overall quality" weights by ROWS — evaluated rows that passed, over evaluated
-#     rows. It is what a consumer of the data cares about, and it is the figure the
-#     four dimension cards roll up into.
+#     rows. It is what a consumer of the data cares about.
 #
-# They diverge sharply here (34% against 92%) and that divergence is informative:
-# most checks fail, but they fail on a small share of rows. Showing only one of the
-# two would hide that.
+# They diverge sharply here and that divergence is informative: most checks fail, but
+# they fail on a small share of rows. Showing only one of the two would hide that.
 
 
 def _row_score(run: pd.DataFrame) -> float | None:
@@ -117,20 +117,9 @@ def _types_in(name: str) -> list[str]:
     return [t for t, d in _DIMENSION_OF.items() if d == name]
 
 
-# Four cards, and behind each one a panel you can open.
-#
-# The cards alone were not enough, for two reasons a reader hits immediately.
-# "Validity" is a term of art — not a word a steward uses about their own data — and
-# a one-line tooltip is not room enough to say which checks are in it. And the figure
-# on the card is weighted by ROWS while the figure two cards up is counted in CHECKS,
-# so whenever a dimension is nearly clean the two read as a flat contradiction:
-# Consistency scores 99.9%, which used to print as "100%", directly above the words
-# "1 failing". Nothing on the page told you which half to believe.
-#
-# So the panel is where the number is taken apart: what the dimension means in plain
-# words, the arithmetic with its actual operands, and every check that fed it. And
-# `theme.pct_text` makes sure a dimension with a failing check never prints a clean
-# 100 in the first place.
+# The prose survived the demotion from four cards to a grouping. "Validity" is a term
+# of art — not a word a steward uses about their own data — and the group header is
+# still the only place it gets defined.
 
 DIMENSIONS = [
     {
@@ -144,7 +133,6 @@ DIMENSIONS = [
             "says nothing about whether the value that is there is any good — that "
             "is Validity's job."
         ),
-        "example": "Contact email is present · SIM serial is present for SIM-bearing products",
     },
     {
         "name": "Validity",
@@ -158,7 +146,6 @@ DIMENSIONS = [
             "mean nothing — 0400000000, a row of nines — are caught here too. A "
             "valid value can still be the wrong value; no automated check can tell."
         ),
-        "example": "Contact email is well formed · Mobile service number is not a placeholder",
     },
     {
         "name": "Consistency",
@@ -172,7 +159,6 @@ DIMENSIONS = [
             "complete and perfectly valid and still disagree, which is why this is a "
             "dimension of its own."
         ),
-        "example": "Subscriber first name agrees with contact first name",
     },
     {
         "name": "Uniqueness",
@@ -184,10 +170,10 @@ DIMENSIONS = [
             "is not a wrong value in either row — both rows are individually fine, "
             "and the defect only exists in the pair."
         ),
-        "example": "Mobile service number is not reused across subscriptions",
     },
 ]
 DIMENSION_BY_NAME = {d["name"]: d for d in DIMENSIONS}
+DIMENSION_ORDER = [d["name"] for d in DIMENSIONS] + ["Other"]
 
 SCORING_NOTE = (
     "Scored by rows: evaluated rows that passed the active checks in this dimension, "
@@ -213,182 +199,307 @@ def _tagged(check_run: pd.DataFrame, registry: pd.DataFrame,
     return out
 
 
-def _dimension_facts(now: pd.DataFrame) -> dict:
-    """The operands behind one dimension's score, kept beside the score itself.
-
-    A percentage with its numerator and denominator thrown away is how a scorecard
-    starts lying — the same discipline `domain/metrics.Metric` applies to the spec
-    metrics, applied here.
-    """
-    raised = now[now["status"].isin(["pass", "breach"])]
-    breaching = raised[raised["status"] == "breach"]
-    evaluated = int(raised["rows_scanned"].sum())
-    failed = int(raised["violation_count"].sum())
-    return {
-        "score": _row_score(now),
-        "checks": int(len(raised)),
-        "passing": int((raised["status"] == "pass").sum()),
-        "failing": int(len(breaching)),
-        "shadow": int((now["status"] == "skipped").sum()),
-        "evaluated": evaluated,
-        "failed_rows": failed,
-        "findings": int(breaching["violation_count"].sum()),
-        "p1": int((breaching["severity"] == "P1_block").sum()),
-    }
+# --- The failing-checks table ------------------------------------------------
 
 
-def _dimension_cards(check_run: pd.DataFrame, registry: pd.DataFrame) -> list[dict]:
-    """Per-dimension score on the latest run, with the move since the run before it."""
-    runs = _run_index(check_run)
-    if runs.empty:
-        return []
-    latest = runs.iloc[-1]["run_id"]
-    prior = runs.iloc[-2]["run_id"] if len(runs) > 1 else None
-
-    tagged = _tagged(check_run, registry)
-
-    out = []
-    for spec in DIMENSIONS:
-        name = spec["name"]
-        now = tagged[(tagged["run_id"] == latest) & (tagged["Dimension"] == name)]
-        was = (
-            tagged[(tagged["run_id"] == prior) & (tagged["Dimension"] == name)]
-            if prior is not None else now.iloc[0:0]
-        )
-        before = _row_score(was)
-        card = dict(spec)
-        card.update(_dimension_facts(now))
-        card["delta"] = (None if card["score"] is None or before is None
-                         else card["score"] - before)
-        card["help"] = f"{spec['short']} {SCORING_NOTE}"
-        out.append(card)
+def _problem_titles(cohorts: pd.DataFrame) -> dict:
+    """cohort_id → the problem as a phrase, taken from the first clause of the
+    hypothesis. Same derivation as the Triage pages: there is no stored title column,
+    and adding one is a fixture and DDL change rather than a UI one."""
+    out = {}
+    for r in cohorts.itertuples():
+        first = str(r.root_cause_hypothesis).split(".")[0].strip()
+        out[r.cohort_id] = first if len(first) <= 60 else first[:57].rstrip(" ,;") + "…"
     return out
 
 
-def _dimension_panel(card: dict, rows: pd.DataFrame) -> None:
-    """The card, opened up: what the dimension means and how its number was made.
+def _failing_frame(tagged_now: pd.DataFrame, attached: set[str],
+                   cohort_of: dict) -> pd.DataFrame:
+    """One row per check failing on the run being shown, worst first.
 
-    `rows` is every check in this dimension on the run being scored, shadow ones
-    included — a check excluded from the score is still a check someone wrote, and a
-    panel that silently drops it invites the reader to conclude the list is the whole
-    rule set.
+    `Scored` says whether the check moves the quality figure above. Both kinds are
+    listed: a check on an unregistered column still runs, still raises a cohort and
+    still has bad rows behind it — hiding it would make the page disagree with the
+    Triage queue, which is where it gets worked.
     """
-    score = card["score"]
-    tone = ("neutral" if score is None else
-            "success" if score >= 98 else "moderate" if score >= 90 else "critical")
+    rows = []
+    for r in tagged_now[tagged_now["status"] == "breach"].itertuples():
+        rows.append({
+            "Check": r.rule_name,
+            "Where": (f"{r.target_table.split('.')[-1]}"
+                      + (f".{r.target_column}" if components.opt(r.target_column) else "")),
+            "Severity": theme.severity_text(r.severity),
+            "Dimension": r.Dimension,
+            "Bad rows": int(r.violation_count),
+            "Share": float(r.violation_pct),
+            "Scored": r.rule_id in attached,
+            "Problem": cohort_of.get(r.rule_id, ""),
+            "Rule id": r.rule_id,
+        })
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    return out.sort_values(["Bad rows", "Check"], ascending=[False, True]).reset_index(drop=True)
+
+
+FAILING_COLS = {
+    "Check": st.column_config.TextColumn("Check", width="large"),
+    "Where": st.column_config.TextColumn("Where", width="small"),
+    "Problem": st.column_config.TextColumn(
+        "Problem", width="medium",
+        help="The problem this check was grouped into, if one has been raised. "
+             "Open it from the panel below."),
+    "Severity": st.column_config.TextColumn("Severity", width="small"),
+    "Bad rows": st.column_config.NumberColumn("Bad rows", format="%d"),
+    "Share": st.column_config.NumberColumn("Share", format="%.2f%%"),
+    "Scored": st.column_config.CheckboxColumn(
+        "Scored", help="Ticked when this check is attached to a registered critical "
+                       "data element and therefore moves the quality figure above. "
+                       "Unticked checks still run and are still worked from Triage."),
+}
+
+
+def _check_panel(rule_id: str, tagged_now: pd.DataFrame, registry: pd.DataFrame,
+                 samples: pd.DataFrame, cde_cov: pd.DataFrame,
+                 cohort_of: dict, history: pd.DataFrame) -> None:
+    """One check, opened up: what it looks for, the arithmetic, and the actual rows.
+
+    The rows are the point. They were always captured — the runner samples up to a
+    hundred per check — and until this panel existed the only way to see them was to
+    open the cohort they belong to, which assumes a cohort was raised and that you
+    already believed the check.
+    """
+    row = tagged_now[tagged_now["rule_id"] == rule_id]
+    if row.empty:
+        return
+    row = row.iloc[0]
+    reg = registry[registry["rule_id"] == rule_id]
+    reg = reg.iloc[0] if not reg.empty else None
 
     head, close = st.columns([5, 1], vertical_alignment="center")
     with head:
         st.markdown(
             '<div class="dq-dim-panel-hd">'
-            f'<span class="ic">{theme.icon(card["icon"], 17)}</span>'
-            f'<span class="t">{card["name"]}</span>'
-            + theme.badge(f"{theme.pct_text(score, 1)}%" if score is not None
-                          else "Not scored", tone)
-            + f'<span class="q">{html.escape(card["short"])}</span></div>',
+            f'<span class="t">{html.escape(str(row["rule_name"]))}</span>'
+            + theme.severity_badge(row["severity"])
+            + theme.badge(row["Dimension"], "neutral")
+            + f'<span class="q"><code>{html.escape(rule_id)}</code> · '
+            f'{html.escape(str(row["target_table"]))}</span></div>',
             unsafe_allow_html=True,
         )
-    if close.button("Close", key="_dim_close", width="stretch"):
-        st.session_state.pop("_dim_pick", None)
+    if close.button("Close", key="_check_close", width="stretch"):
+        # Bumping the nonce rebuilds the table widget, which is the only way to clear
+        # a dataframe selection — leave it and the panel reopens on the next rerun.
+        st.session_state["_fail_nonce"] = st.session_state.get("_fail_nonce", 0) + 1
+        st.session_state.pop("_check_pick", None)
         st.rerun()
 
-    prose, sums = st.columns([1.55, 1])
+    facts, prose = st.columns([1, 1.5])
+    with facts:
+        # Two tiles, not three. At the width this column gets, a third put "24.02%"
+        # on two lines with the percent sign orphaned on the second.
+        components.kpi_row([
+            {"label": "Bad rows", "value": f"{int(row['violation_count']):,}",
+             "tone": "critical",
+             "sub": f"{float(row['violation_pct']):.2f}% of rows checked"},
+            {"label": "Rows checked", "value": f"{int(row['rows_scanned']):,}",
+             "sub": f"limit {float(row['threshold_pct']):.2f}%"},
+        ])
     with prose:
-        st.markdown(
-            f'<div class="dq-dim-prose">{html.escape(card["long"])}</div>'
-            '<div class="dq-dim-prose q"><b>Rule types in this dimension:</b> '
-            + ", ".join(f"<code>{t}</code>" for t in sorted(_types_in(card["name"])))
-            + f'.<br><b>For example:</b> {html.escape(card["example"])}.</div>',
-            unsafe_allow_html=True,
-        )
-    with sums:
-        # The arithmetic, with its operands. Both denominators, because the whole
-        # confusion this panel exists to settle is that the page carries two.
-        if card["evaluated"]:
+        if reg is not None:
+            note = components.opt(reg["note"])
             st.markdown(
-                '<div class="dq-dim-sum"><div class="k">How the score is made</div>'
-                f'<div class="m">{card["evaluated"]:,} rows evaluated '
-                f'&minus; {card["failed_rows"]:,} rows failed<br>'
-                f'&divide; {card["evaluated"]:,} rows evaluated '
-                f'= <b>{theme.pct_text(score, 1)}%</b></div>'
-                f'<div class="k" style="margin-top:.55rem">Counted in checks instead'
-                '</div>'
-                f'<div class="m">{card["passing"]} of {card["checks"]} checks passing '
-                f'= <b>{theme.pct_text(100.0 * card["passing"] / card["checks"], 0)}%'
-                "</b></div></div>",
+                f'<div class="dq-dim-prose"><b>What this check looks for.</b> '
+                f'{html.escape(str(reg["rule_name"]))}.'
+                + (f" {html.escape(str(note))}" if note else "")
+                + "</div>",
                 unsafe_allow_html=True,
             )
-        else:
+            scope = components.opt(reg["scope_filter"])
             st.markdown(
-                '<div class="dq-dim-sum"><div class="k">How the score is made</div>'
-                '<div class="m">No check in this dimension is attached to a '
-                "registered element, so there is nothing to score.</div></div>",
+                f'<div class="dq-dim-prose q"><code>{html.escape(str(reg["rule_expr"]))}</code>'
+                + (f'<br>scoped to <code>{html.escape(str(scope))}</code>' if scope else
+                   '<br><span style="color:' + theme.TONE["moderate"]["fg"] + '">no scope '
+                   "filter — this rule runs on every row of the table</span>")
+                + "</div>",
                 unsafe_allow_html=True,
             )
 
-    # The reconciliation. Only shown when the two figures actually disagree, because
-    # a note that appears under every dimension stops being read under any of them.
-    if card["failing"] and score is not None and score >= 98:
-        st.markdown(
-            '<div class="dq-note">'
-            f'{theme.icon("info", 14)}<div><b>Why this reads as almost perfect with '
-            f'{card["failing"]} check failing.</b> The score is weighted by rows, not '
-            f'by checks: {card["failed_rows"]:,} of {card["evaluated"]:,} evaluated '
-            f'rows failed. A check that breaches on a handful of rows barely moves a '
-            "row-weighted score, and that gap is the information — the data is nearly "
-            "clean, the rule set is not. Both numbers are on this page on purpose, "
-            "and neither is rounded up to a clean 100 while a check is failing."
-            "</div></div>",
-            unsafe_allow_html=True,
-        )
-
-    theme.section(f"Checks in {card['name'].lower()}")
-    if rows.empty:
+    watched = cde_cov[cde_cov["rule_ids"].apply(
+        lambda ids: rule_id in components.as_list(ids))]
+    if not watched.empty:
+        w = watched.iloc[0]
         st.caption(
-            "No check in this dimension is attached to a registered critical data "
-            "element, so none of them reaches this page. They may still run — see "
-            "the Rules page."
+            f"Watching **{w['cde_name']}** · {w['criticality']} criticality · "
+            f"{'PII' if w['pii'] else 'not PII'}",
+            help="Registered critical data element. This check is attached to it, "
+                 "which is why it moves the quality figure on this page.",
         )
-        return
+    else:
+        st.caption(
+            "Not attached to any registered critical data element, so this check does "
+            "not move the quality figure above.",
+            help="It still runs, still raises cohorts, and is still worked from "
+                 "Triage. What it does not do is change a number whose denominator "
+                 "is the register.",
+        )
 
-    table = rows.sort_values(["status", "violation_count"],
-                             ascending=[True, False]).copy()
-    RESULT = {"pass": ("Passed", "success"), "breach": ("Failed", "critical"),
-              "skipped": ("Shadow — not scored", "neutral")}
-    out = pd.DataFrame({
-        "Check": table["rule_name"],
-        # A consistency check can span columns and tables, so it has no single
-        # target column — XREF_NAME_AGREEMENT is the case. Printing the bare table
-        # name under a heading called "Column" would read as one.
-        "Where": table.apply(
-            lambda r: f'{str(r["target_table"]).split(".")[-1]}.{r["target_column"]}'
-            if pd.notna(r["target_column"])
-            else f'{str(r["target_table"]).split(".")[-1]} · across columns',
-            axis=1),
-        "Severity": [theme.severity_badge(s, words=False) for s in table["severity"]],
-        "Result": [theme.badge(*RESULT.get(s, (s, "neutral")))
-                   for s in table["status"]],
-        "Rows checked": table["rows_scanned"].astype(int),
-        "Findings": table["violation_count"].astype(int),
-        "Failure rate": [f"{v:.2f}%" for v in table["violation_pct"].astype(float)],
-    })
-    components.summary_table(out, raw={"Severity", "Result"})
-    st.markdown(
-        '<div class="dq-quiet" style="margin-top:.4rem">A finding is one row failing '
-        "one check, so a row with one bad value can appear under several checks here. "
-        "Severity belongs to the check and is copied from the rule registry — nothing "
-        "on this page recomputes it, and the criticality of the element it touches "
-        "never changes it. Like every figure on this page, this list is only the "
-        "checks attached to a registered critical data element — a check on a column "
-        "nobody registered still runs and still raises a cohort, but it is not "
-        "scored here.</div>",
-        unsafe_allow_html=True,
+    trend = history[history["rule_id"] == rule_id].sort_values("run_ts")
+    if len(trend) > 1:
+        st.markdown(
+            '<div class="dq-quiet">Bad rows per run '
+            + theme.sparkline(list(trend["violation_count"]), width=160, tone="critical")
+            + f" · first breached {trend[trend['status'] == 'breach']['run_ts'].min():%d %b}"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    theme.section("The rows that failed")
+    mine = samples[(samples["rule_id"] == rule_id) & (samples["run_id"] == row["run_id"])]
+    if mine.empty:
+        mine = samples[samples["rule_id"] == rule_id]
+        if not mine.empty:
+            st.caption("No samples from this run — showing the latest captured for "
+                       "this check.")
+    if mine.empty:
+        st.caption("No rows were sampled for this check. Historical breaches carry "
+                   "counts only.")
+    else:
+        st.caption(
+            f"{len(mine):,} of {int(row['violation_count']):,} captured"
+            + (" — the runner caps what it keeps per check, so this is a sample, not "
+               "the set." if len(mine) < int(row["violation_count"]) else "."),
+            help="The one accepted PII surface in this design. The element profile "
+                 "stores no values at all, and this panel does not widen what the "
+                 "cohort view already showed — same rows, same columns, same cap.",
+        )
+        components.sample_rows_view(mine)
+
+    cohort_id = cohort_of.get(rule_id)
+    if cohort_id:
+        if st.button(f"Open the problem this belongs to · {cohort_id[:8]}",
+                     key="_check_to_triage", type="primary"):
+            st.session_state["selected_cohort"] = cohort_id
+            st.switch_page("dq_app/ui/pages/triage_detail.py")
+    else:
+        st.caption("No problem has been raised for this check yet.")
+
+
+# --- The scope panel — what the old Data elements page was actually read for --
+
+
+def _scope_panel(cde_cov: pd.DataFrame, scoped: pd.DataFrame) -> None:
+    """Every registered element, what watches it, and whether that counts.
+
+    This is the whole of the deleted `Data elements` page that anyone used: the list,
+    the criticality, and the answer to "why is this check not in the score". The rest
+    of that page — definitions, expected signatures, profile histograms — was a
+    register being browsed, which is not a thing people do.
+    """
+    s = coverage.coverage_summary(cde_cov)
+    attached = coverage.attached_rule_ids(cde_cov)
+    head, close = st.columns([5, 1], vertical_alignment="center")
+    with head:
+        st.markdown(
+            '<div class="dq-dim-panel-hd"><span class="t">What the score is built on'
+            "</span>"
+            + theme.badge(f"{len(attached)} of {scoped['rule_id'].nunique()} checks", "info")
+            + f'<span class="q">{html.escape(theme.CDE_ONE_LINER)}</span></div>',
+            unsafe_allow_html=True,
+        )
+    if close.button("Close", key="_scope_close", width="stretch"):
+        st.session_state["_scope_open"] = False
+        st.rerun()
+
+    view = (
+        cde_cov.groupby(["cde_id", "cde_name", "criticality"], as_index=False)
+        .agg(Columns=("target_column", "nunique"),
+             Checks=("rule_count", "sum"),
+             Findings=("latest_violation_rows", "sum"),
+             Gaps=("coverage_gap", lambda g: sum(x != "covered" for x in g)))
+    )
+    view["Status"] = [
+        "Covered" if not gaps else "Needs work" for gaps in view["Gaps"]
+    ]
+    view = view.assign(
+        _c=view["criticality"].map({c: i for i, c in enumerate(theme.CRITICALITY_ORDER)})
+    ).sort_values(["_c", "cde_name"]).drop(columns=["_c", "Gaps"])
+
+    st.dataframe(
+        view.rename(columns={"cde_name": "Critical data element",
+                             "criticality": "Criticality"})
+        .drop(columns=["cde_id"]),
+        width="stretch", hide_index=True,
+        column_config={
+            "Findings": st.column_config.NumberColumn("Findings", format="%d"),
+        },
+    )
+    st.caption(
+        f"{s['elements']} elements over {s['bindings']} columns · "
+        f"{s['covered']} columns validated · {s['scope_mismatches']} rule(s) "
+        "contradicting a registered scope.",
+        help="A column counts as validated when an active rule examines its values. "
+             "Checking only that a value is present does not count.",
     )
 
 
-# ============================================================================
+def _element_panel(cde_cov: pd.DataFrame, registry: pd.DataFrame, cde_id: str) -> None:
+    """One element, for the reader who clicked Review on the issue board."""
+    rows = cde_cov[cde_cov["cde_id"] == cde_id]
+    if rows.empty:
+        return
+    first = rows.iloc[0]
+
+    head, close = st.columns([5, 1], vertical_alignment="center")
+    with head:
+        st.markdown(
+            '<div class="dq-dim-panel-hd">'
+            f'<span class="t">{html.escape(str(first["cde_name"]))}</span>'
+            + theme.criticality_badge(first["criticality"])
+            + (theme.badge("PII", "high", "shield") if first["pii"] else "")
+            + f'<span class="q">{html.escape(str(first["business_domain"]))} · '
+            f'{html.escape(str(first["owner_group"]))}</span></div>',
+            unsafe_allow_html=True,
+        )
+    if close.button("Close", key="_elem_close", width="stretch"):
+        st.session_state.pop("_cde_pick", None)
+        st.rerun()
+
+    rule_name = registry.set_index("rule_id")["rule_name"].to_dict()
+    body = []
+    for _, r in rows.iterrows():
+        ids = components.as_list(r["rule_ids"])
+        body.append({
+            "Column": f"{str(r['target_table']).split('.')[-1]}.{r['target_column']}",
+            "Finding": theme.COVERAGE_GAP_LABEL.get(r["coverage_gap"], r["coverage_gap"]),
+            "Checks": ", ".join(rule_name.get(i, i) for i in ids) or "nothing",
+            "Findings": int(r["latest_violation_rows"]),
+            "Populated when": components.opt(r["populated_when"]) or "always",
+        })
+    st.dataframe(pd.DataFrame(body), width="stretch", hide_index=True,
+                 column_config={"Findings": st.column_config.NumberColumn(format="%d")})
+
+    gap = first["coverage_gap"]
+    st.markdown(
+        f'<div class="dq-note">{theme.coverage_badge(gap)} '
+        f'{html.escape(theme.COVERAGE_GAP_MEANING.get(gap, ""))}</div>',
+        unsafe_allow_html=True,
+    )
+    unscoped = sorted({i for ids in rows["unscoped_rule_ids"]
+                       for i in components.as_list(ids)})
+    if unscoped:
+        st.caption(
+            "Rules contradicting this element's registered scope: "
+            + ", ".join(f"`{i}`" for i in unscoped)
+            + ". The register declares the scope these rules should have had, which "
+            "is how a rule defect becomes an assertion the model makes rather than "
+            "something a human noticed."
+        )
+
+
+# =============================================================================
 # Page
-# ============================================================================
+# =============================================================================
 
 components.page_chrome()
 
@@ -396,14 +507,12 @@ runs = adapter.get_check_runs()
 registry = adapter.get_rule_registry_current()
 cde_cov = adapter.get_cde_coverage()
 
-# --- Header -----------------------------------------------------------------
-
 hd, actions = st.columns([4, 1.15], vertical_alignment="center")
 with hd:
     st.markdown(
         '<div class="dq-page-hd"><div class="t">Data Quality Scorecard</div>'
-        '<div class="s">Quality, coverage, and recent run outcomes across the '
-        "critical data elements under watch.</div></div>",
+        '<div class="s">How healthy the watched data is, what is being watched, and '
+        "which checks are failing right now.</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -414,7 +523,7 @@ if runs.empty:
 # --- Filter strip -----------------------------------------------------------
 
 with st.container(key="dq_filter_strip"):
-    l1, f1, l2, f2, l3, note = st.columns([0.5, 2.4, 0.5, 1.35, 0.75, 2.1])
+    l1, f1, l2, f2, l3, note = st.columns([0.5, 2.0, 0.5, 1.3, 1.25, 1.85])
     with l1:
         st.markdown('<div class="dq-strip-lab">Domains</div>', unsafe_allow_html=True)
     with f1:
@@ -428,16 +537,19 @@ with st.container(key="dq_filter_strip"):
                               format_func=lambda d: f"Last {d} days",
                               label_visibility="collapsed")
     with l3:
-        # Not a picker. The environment is decided by DQ_APP_DATA_SOURCE before the
-        # process starts, and a dropdown here would imply this app can switch
-        # catalogs from the UI, which it cannot and should not.
-        st.markdown(
-            '<div style="padding-top:.42rem">'
-            + (theme.badge("Local fixture", "moderate", "table") if adapter.is_local()
-               else theme.badge("Unity Catalog", "success", "link"))
-            + "</div>",
-            unsafe_allow_html=True,
-        )
+        # The scoping is drawn, not implied. It is also the only way into the element
+        # list now that `Data elements` is gone, which is why it is a button and not
+        # the badge it used to be.
+        if st.button(
+            f"Scope · {cde_cov['cde_id'].nunique() if not cde_cov.empty else 0} CDEs",
+            key="_scope_btn", width="stretch", icon=":material/shield:",
+            help="Not a control. The quality figure counts only checks attached to a "
+                 "registered critical data element — the register owns that "
+                 "denominator, so it does not move when someone writes or retires an "
+                 "unrelated rule. Open it to see every element and what watches it.",
+        ):
+            st.session_state["_scope_open"] = not st.session_state.get("_scope_open")
+            st.rerun()
     with note:
         last_ts = runs["run_ts"].max()
         st.markdown(
@@ -446,8 +558,6 @@ with st.container(key="dq_filter_strip"):
             unsafe_allow_html=True,
         )
 
-# The one filter that is not a user control. Everything below counts only checks the
-# coverage view attached to a registered element; see the module docstring.
 cde_rules = coverage.attached_rule_ids(cde_cov)
 if not cde_rules:
     st.caption(
@@ -456,19 +566,22 @@ if not cde_rules:
     )
     st.stop()
 
-scoped = runs[runs["business_domain"].isin(picked) & runs["rule_id"].isin(cde_rules)]
+# `in_domain` is the whole run the reader asked for; `scoped` is the part the score is
+# built on. Every figure below draws from exactly one of the two, and says which.
+in_domain = runs[runs["business_domain"].isin(picked)]
+scoped = in_domain[in_domain["rule_id"].isin(cde_rules)]
 if scoped.empty:
     st.caption("No checks on registered elements in the selected domains.")
     st.stop()
 
-d = metrics.detection_summary(scoped)
 rule_name = registry.set_index("rule_id")["rule_name"].to_dict()
 run_index = _run_index(scoped)
+latest_run_id = metrics.latest_run_id(in_domain)
 
 with actions:
-    latest_run_id = metrics.latest_run_id(scoped)
-    export = scoped[scoped["run_id"] == latest_run_id].copy()
+    export = in_domain[in_domain["run_id"] == latest_run_id].copy()
     export.insert(0, "rule_name", export["rule_id"].map(rule_name))
+    export.insert(1, "scored", export["rule_id"].isin(cde_rules))
     st.download_button(
         "Export report",
         data=export.to_csv(index=False).encode(),
@@ -476,13 +589,16 @@ with actions:
         mime="text/csv",
         icon=":material/download:",
         width="stretch",
-        help="Every check result from the run shown, for the domains selected, as CSV. "
-             "A read of what is on this page — it starts nothing and changes nothing.",
+        help="Every check result from the run shown, for the domains selected, as CSV "
+             "— including the ones the score does not count, flagged. A read of what "
+             "is on this page: it starts nothing and changes nothing.",
     )
 
-# --- Headline: one score, its trend, and the four figures behind it ---------
-# Cards carry their explanation through theme.hint() rather than Streamlit's `help=`
-# — see that function for why.
+if st.session_state.get("_scope_open"):
+    with st.container(key="dq_scope_panel"):
+        _scope_panel(cde_cov, in_domain[in_domain["run_id"] == latest_run_id])
+
+# --- Headline: the score, and what is being watched -------------------------
 
 score = _row_score(scoped[scoped["run_id"] == run_index.iloc[-1]["run_id"]])
 prior_score = float(run_index.iloc[-2]["score"]) if len(run_index) > 1 else None
@@ -502,7 +618,7 @@ in_window = run_index[run_index["run_ts"] >= cutoff]
 history = [(f"{r.run_ts:%-d %b}", r.score) for r in in_window.itertuples()
            if r.score is not None]
 
-hero, k1, k2, k3, k4 = st.columns([3.9, 1.1, 1.1, 1.1, 1.15])
+hero, tiles = st.columns([2.05, 3.1])
 
 with hero:
     st.markdown(
@@ -511,10 +627,11 @@ with hero:
         + theme.hint(
             "Rows that passed their checks, over rows evaluated, on the latest "
             "scheduled run. Weighted by rows, so a check over 2,000 rows counts for "
-            "more than a check over 40 — which is why it reads far higher than the "
-            "share of checks passing next to it. Shadow checks are in neither half. "
-            "The trend is that same figure per run; the axis starts at 80 because the "
-            "whole story lives in the top fifth.", side="right")
+            "more than a check over 40. Shadow checks are in neither half. This is "
+            "the one figure on the page scoped to the registered elements — the "
+            "tiles beside it count the whole run. The trend is the same figure per "
+            "run; the axis starts at 80 because the whole story lives in the top "
+            "fifth.", side="right")
         + "</div>"
         f'<div class="val">{theme.pct_text(score)}'
         '<span class="of">/100</span></div>'
@@ -527,140 +644,158 @@ with hero:
         unsafe_allow_html=True,
     )
 
-pass_share = 100.0 * d["rules_passing"] / d["rules_raised"] if d["rules_raised"] else 0.0
-with k1:
+# Six counts of the estate. Deliberately unscoped — they describe everything that
+# runs, not the part the score is built on, and the heading says so. Counting
+# "tables monitored" over the attached checks only would understate the estate,
+# which is the opposite of what an inventory figure is for.
+d_all = metrics.detection_summary(in_domain)
+cde_sum = coverage.coverage_summary(cde_cov)
+affected = metrics.records_affected_floor(adapter.get_violation_samples(), in_domain,
+                                          latest_run_id)
+current = adapter.get_cohort_current()
+open_now = current[current["lifecycle_state"].isin(lifecycle.OPEN_STATES)]
+waiting_on_a_person = open_now[
+    open_now["lifecycle_state"].isin(["reopened", "awaiting_review", "awaiting_approval"])
+]
+
+with tiles:
     st.markdown(
-        '<div class="dq-card dq-stat">'
-        f'<div class="hd">{theme.icon("check_circle", 14)} Checks passing'
+        '<div class="dq-tilehd">What is being watched'
         + theme.hint(
-            "Checks that passed on the most recent scheduled run, counted one per "
-            "check, and only checks attached to a registered element. "
-            + (f"{d['rules_skipped']} more ran in shadow mode and are excluded — they "
-               "record results but raise nothing until someone promotes them. "
-               if d["rules_skipped"] else
-               "Shadow checks would be excluded, but none of the shadow rules is "
-               "attached to a registered element, so none reaches this figure. ")
-            + "Measured on that one run, not averaged: a problem that started four "
-            "days ago would be diluted sevenfold by a monthly average.")
-        + "</div>"
-        f'<div class="val">{d["rules_passing"]}<span class="of">of '
-        f'{d["rules_raised"]}</span></div>'
-        f'<div class="sub">{theme.pct_text(pass_share)}% passing</div>'
-        f'{theme.meter(pass_share, "success" if pass_share >= 80 else "moderate")}'
-        "</div>",
+            "Every check that ran in the domains selected — not only the ones the "
+            "quality figure is built on. An inventory that counted just the scored "
+            "checks would report a smaller estate than the one being monitored.",
+            side="left")
+        + "</div>",
         unsafe_allow_html=True,
     )
-with k2:
-    fail_share = 100.0 * d["rules_breaching"] / d["rules_raised"] if d["rules_raised"] else 0.0
-    st.markdown(
-        '<div class="dq-card dq-stat">'
-        f'<div class="hd">{theme.icon("alert", 14)} Failed checks'
-        + theme.hint(
-            "Checks whose failure rate is over the limit set for them. 'Critical' is "
-            "P1 — severity belongs to the check, and nothing on this page recomputes it.")
-        + "</div>"
-        f'<div class="val" style="color:{theme.TONE["critical"]["fg"]}">'
-        f'{d["rules_breaching"]}</div>'
-        f'<div class="sub" style="color:{theme.TONE["critical"]["fg"]}">'
-        f'<b>{d["p1_breaching"]} critical</b></div>'
-        f'{theme.meter(fail_share, "critical")}'
-        "</div>",
-        unsafe_allow_html=True,
+    TILES = [
+        {"label": "Tables monitored", "value": f"{d_all['tables']}",
+         "sub": ", ".join(sorted({t.split(".")[-1] for t in
+                                  in_domain["target_table"].dropna().unique()}))[:48],
+         "help": "Distinct tables a check ran against on the latest run."},
+        {"label": "Columns watched", "value": f"{d_all['columns']}",
+         "sub": "across those tables",
+         "help": "Distinct columns a check ran against. Cross-table rules carry no "
+                 "target column and are not counted here."},
+        {"label": "CDEs under watch", "value": f"{cde_sum['elements']}",
+         "sub": f"{cde_sum['covered']} of {cde_sum['bindings']} columns validated",
+         "help": theme.CDE_ONE_LINER},
+        {"label": "Checks run", "value": f"{d_all['rules_run']}",
+         "sub": f"{d_all['rules_breaching']} failing · {d_all['rules_passing']} passing"
+                + (f" · {d_all['rules_skipped']} shadow" if d_all["rules_skipped"] else ""),
+         "help": "Every rule the runner evaluated on the latest run. Shadow rules "
+                 "record a count and raise nothing until someone promotes them."},
+        {"label": "Records affected", "value": f"≥ {affected['floor']:,}",
+         "tone": "critical" if affected["floor"] else None,
+         "sub": " · ".join(f"{n:,} in {t.split('.')[-1]}"
+                           for t, n in affected["by_table"].items()) or "none",
+         "help": "A floor, not a count, and shown with the ≥ for that reason. "
+                 "results.check_run stores a violation count and no keys, and the "
+                 "runner caps the rows it samples per check — so for "
+                 f"{len(affected['truncated'])} of the {affected['checks']} failing "
+                 "checks the keys held are a sample. This is the union of the keys "
+                 "actually on hand. Making it exact is a change to the runner: a "
+                 "distinct_entity_count column would make each check exact without "
+                 "making the union computable, and only a stored key set does both."},
+        {"label": "Problems open", "value": f"{len(open_now)}",
+         "sub": f"{len(waiting_on_a_person)} waiting on a person",
+         "help": "Problems still live. The rest are closed, deferred, or waiting on "
+                 "the next scheduled run to verify them."},
+    ]
+    for chunk in (TILES[:3], TILES[3:]):
+        components.kpi_row(chunk)
+
+# --- Failing checks ---------------------------------------------------------
+
+theme.section("Failing checks")
+
+tagged_now = _tagged(in_domain, registry, latest_run_id)
+all_cohorts = adapter.get_cohorts()
+cohort_of = metrics.cohort_for_rules(all_cohorts, set(tagged_now["rule_id"]))
+titles = _problem_titles(all_cohorts)
+failing = _failing_frame(tagged_now, cde_rules,
+                         {r: titles.get(c, c) for r, c in cohort_of.items()})
+
+ctl1, ctl2 = st.columns([1.15, 3])
+with ctl1:
+    grouped = st.toggle(
+        "Group by dimension", value=False, key="_fail_group",
+        help="Completeness, Validity, Consistency, Uniqueness — the four questions a "
+             "quality programme asks of a column. These used to be four cards at the "
+             "top of the page; they answer 'which kind of thing is wrong', which is a "
+             "question about this table.",
     )
-with k3:
+with ctl2:
+    term = st.text_input("Search checks", placeholder="Search check, column, problem…",
+                         label_visibility="collapsed", key="_fail_q").strip().lower()
+
+if failing.empty:
+    st.caption("No check is failing on the latest run in the selected domains.")
+else:
+    view = failing
+    if term:
+        hay = view[["Check", "Where", "Dimension", "Problem", "Rule id"]] \
+            .astype(str).agg(" ".join, axis=1).str.lower()
+        view = view[hay.str.contains(term, regex=False, na=False)]
+
     st.markdown(
-        '<div class="dq-card dq-stat">'
-        f'<div class="hd">{theme.icon("table", 14)} Findings'
-        + theme.hint(
-            "One finding is one row failing one check. A single bad row can produce "
-            "several findings — the 240 malformed email addresses trip six separate "
-            "format checks — so this is always more than the number of bad rows, and "
-            "it is never labelled 'records affected'. Counting distinct rows would "
-            "need the runner to record a key for every finding, which it currently "
-            "does only for the samples it keeps.")
-        + "</div>"
-        f'<div class="val">{d["violations"]:,}</div>'
-        '<div class="sub">across all failing checks</div>'
-        "</div>",
-        unsafe_allow_html=True,
-    )
-with k4:
-    cde_sum = coverage.coverage_summary(cde_cov)
-    st.markdown(
-        '<div class="dq-card dq-stat">'
-        f'<div class="hd">{theme.icon("eye", 14)} Under watch'
-        + theme.hint(
-            "Elements the business registered as critical, which is what this whole "
-            "page is scored against. The count comes from the register, not from the "
-            f"rule set: all {cde_sum['bindings']} columns are counted here whether or "
-            "not a rule looks at them, which is why this figure does not move when "
-            "someone writes or retires a check. Rows are counted once per table, not "
-            "once per check.")
-        + "</div>"
-        f'<div class="val">{cde_sum["elements"]}<span class="of">CDEs</span></div>'
-        f'<div class="sub">{cde_sum["bindings"]} columns · {d["rows_scanned"]:,} rows</div>'
+        '<div class="dq-quiet" style="margin:-.2rem 0 .5rem">'
+        f"{len(view)} failing of {d_all['rules_run']} checks run · select a row to see "
+        "what it looks for and the rows that failed"
         "</div>",
         unsafe_allow_html=True,
     )
 
-# --- Dimensions -------------------------------------------------------------
-# Each card is a `st.container` rather than a block of markup, because its last row
-# has to be a real button and a button cannot live inside markup this app generates —
-# the same reason the issue board below is built from columns instead of a table. The
-# border is drawn on the container; the markup inside carries `.dq-dim` so the
-# equal-height rule in `theme` still finds this row.
+    nonce = st.session_state.get("_fail_nonce", 0)
 
-theme.section("Data quality dimensions")
-st.markdown(
-    '<div class="dq-quiet" style="margin:-.35rem 0 .55rem">The four questions a '
-    "quality programme asks of a column. Open one to see what it means, how its score "
-    "was made, and every check behind it.</div>",
-    unsafe_allow_html=True,
-)
+    def _table(frame: pd.DataFrame, key: str):
+        """One dataframe, one selection. Returns the rule id picked, or None."""
+        drop = ["Rule id", "Dimension"]
+        event = st.dataframe(
+            frame.drop(columns=drop),
+            width="stretch", hide_index=True, on_select="rerun",
+            selection_mode="single-row", key=key, column_config=FAILING_COLS,
+        )
+        picks = event.selection.rows if event and event.selection else []
+        return frame.iloc[picks[0]]["Rule id"] if picks else None
 
-dim_cards = _dimension_cards(scoped, registry)
-picked_dim = st.session_state.get("_dim_pick")
-
-for i, (col, dim) in enumerate(zip(st.columns(len(dim_cards)), dim_cards)):
-    if dim["score"] is None:
-        value, tone, sub = "—", "neutral", "no check attached to an element"
-    else:
-        value = f"{theme.pct_text(dim['score'])}%"
-        tone = ("success" if dim["score"] >= 98
-                else "moderate" if dim["score"] >= 90 else "critical")
-        sub = f"{dim['failing']} failing · {dim['findings']:,} findings"
-    on = picked_dim == dim["name"]
-    with col:
-        with st.container(key=f"dq_dim_{dim['name'].lower()}"):
+    if grouped:
+        for name in DIMENSION_ORDER:
+            part = view[view["Dimension"] == name]
+            if part.empty:
+                continue
+            spec = DIMENSION_BY_NAME.get(name)
+            dim_rows = tagged_now[tagged_now["Dimension"] == name]
+            dim_score = _row_score(dim_rows[dim_rows["rule_id"].isin(cde_rules)])
             st.markdown(
-                '<div class="dq-dim">'
-                + ('<span class="dq-dim-on"></span>' if on else "")
-                + f'<div class="hd">{theme.icon(dim["icon"], 15)} {dim["name"]}'
-                # The leftmost card has no room to its left for a bubble — stMain
-                # is the scroll container and clips anything that leaves it.
-                + theme.hint(dim["help"], side="right" if i == 0 else "left")
-                + '<span class="sp"></span>'
-                f'{theme.delta(dim["delta"], "%", 1)}</div>'
-                f'<div class="val" style="color:{theme.TONE[tone]["fg"]}">{value}</div>'
-                f'{theme.meter(dim["score"], tone)}'
-                f'<div class="sub">{sub}</div>'
-                "</div>",
+                f'<div class="dq-dimgrp">{theme.icon(spec["icon"], 15) if spec else ""}'
+                f"<b>{name}</b>"
+                + theme.badge(f"{theme.pct_text(dim_score, 1)}% scored"
+                              if dim_score is not None else "not scored",
+                              "neutral")
+                + f'<span class="q">{html.escape(spec["short"]) if spec else ""}</span>'
+                + (theme.hint(spec["long"] + " " + SCORING_NOTE) if spec else "")
+                + "</div>",
                 unsafe_allow_html=True,
             )
-            # The label says what opening it gets you, and how much of it there is.
-            # "Details" would say neither.
-            label = ("Hide breakdown" if on
-                     else f"What this means · {dim['checks']} checks")
-            if st.button(label, key=f"_dim_{dim['name']}", width="stretch"):
-                st.session_state["_dim_pick"] = None if on else dim["name"]
-                st.rerun()
+            got = _table(part, f"_fail_{name}_{nonce}")
+            if got:
+                st.session_state["_check_pick"] = got
+    else:
+        got = _table(view, f"_fail_all_{nonce}")
+        if got:
+            st.session_state["_check_pick"] = got
 
-if picked_dim in DIMENSION_BY_NAME:
-    card = next(c for c in dim_cards if c["name"] == picked_dim)
-    latest_id = run_index.iloc[-1]["run_id"]
-    tagged_now = _tagged(scoped, registry, latest_id)
-    with st.container(key="dq_dimension_panel"):
-        _dimension_panel(card, tagged_now[tagged_now["Dimension"] == picked_dim])
+    # Held in session rather than read straight off the selection, so the panel
+    # survives a rerun the table did not cause — and so a link, or a test, can open
+    # a check without clicking one.
+    picked_rule = st.session_state.get("_check_pick")
+    if picked_rule in set(failing["Rule id"]):
+        with st.container(key="dq_check_panel"):
+            _check_panel(picked_rule, tagged_now, registry,
+                         adapter.get_violation_samples(), cde_cov, cohort_of,
+                         in_domain[["rule_id", "run_ts", "violation_count", "status"]])
 
 # --- Issues requiring attention, and what the register says about coverage ---
 # Everything above this line is measured against the rules that exist, so it can only
@@ -726,23 +861,23 @@ with board:
                  "be visible here."),
             ]):
                 with tab:
-                    term = st.text_input(
+                    q = st.text_input(
                         "Search issues",
                         placeholder="Search element, column, owner…",
                         label_visibility="collapsed",
                         key=f"_issue_q_{n}",
                     ).strip().lower()
                     rows = subset
-                    if term:
+                    if q:
                         hay = (
                             rows[["cde_name", "target_column", "owner_group",
                                   "criticality", "coverage_gap"]]
                             .astype(str).agg(" ".join, axis=1).str.lower()
                         )
-                        rows = rows[hay.str.contains(term, regex=False, na=False)]
+                        rows = rows[hay.str.contains(q, regex=False, na=False)]
 
                     if rows.empty:
-                        st.caption(blank if not term else "Nothing matches this search.")
+                        st.caption(blank if not q else "Nothing matches this search.")
                         continue
 
                     for col, (head, tip) in zip(st.columns(ISSUE_COLS), ISSUE_HEADS):
@@ -777,12 +912,14 @@ with board:
                             f'<div class="dq-td n">'
                             f'{int(r["latest_violation_rows"]):,}</div>',
                             unsafe_allow_html=True)
+                        # Used to switch to the Data elements page. That page is gone;
+                        # the element opens in a panel below this board instead.
                         if cells[4].button(
                             "Review", key=f"_rev_{n}_{r['cde_id']}_{r['target_column']}",
                             width="stretch",
                         ):
                             st.session_state["_cde_pick"] = r["cde_id"]
-                            st.switch_page("dq_app/ui/pages/cde_registry.py")
+                            st.rerun()
                         st.markdown('<div class="dq-rowline"></div>',
                                     unsafe_allow_html=True)
 
@@ -793,7 +930,8 @@ with board:
                         "the data</div>",
                         unsafe_allow_html=True)
                     if link.button("View all elements", key=f"_all_{n}", width="stretch"):
-                        st.switch_page("dq_app/ui/pages/cde_registry.py")
+                        st.session_state["_scope_open"] = True
+                        st.rerun()
 
 with rail:
     if cde_cov.empty:
@@ -857,9 +995,14 @@ with rail:
         '<div class="dq-card"><div class="ttl">Recent runs'
         + theme.hint(
             "The runner records no job status of its own, so these are check outcomes, "
-            "not job outcomes. The mark is red when any P1 check failed.")
+            "not job outcomes. The mark is red when any P1 check failed. Scored "
+            "checks only — this rail reads the same set as the figure above it.")
         + "</div>"
         + "".join(rows_html)
         + "</div>",
         unsafe_allow_html=True,
     )
+
+if st.session_state.get("_cde_pick"):
+    with st.container(key="dq_element_panel"):
+        _element_panel(cde_cov, registry, st.session_state["_cde_pick"])

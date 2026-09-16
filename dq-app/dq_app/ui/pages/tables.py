@@ -1,4 +1,8 @@
-"""All monitored tables — high-level inventory."""
+"""Tables — the monitored-table inventory.
+
+Called "All monitored tables" in the nav until 2026-09-16. Its detail page is no
+longer a nav entry either: it needs a table selected on this one to mean anything.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +62,7 @@ registry = adapter.get_rule_registry_current()
 hd, actions = st.columns([4, 1.15], vertical_alignment="center")
 with hd:
     st.markdown(
-        '<div class="dq-page-hd"><div class="t">All Monitored Tables</div>'
+        '<div class="dq-page-hd"><div class="t">Monitored Tables</div>'
         '<div class="s">Every watched catalog item, with current quality, trend, '
         "findings and rule coverage — counted over the registered critical data "
         "elements.</div></div>",
@@ -73,7 +77,7 @@ scoped, window = monitoring.domain_filter(runs, "monitor_list")
 if scoped.empty:
     st.caption(
         "No checks on registered critical data elements in the selected domains. "
-        "Unregistered columns may still be checked — those are worked from Cohorts."
+        "Unregistered columns may still be checked — those are worked from Triage."
     )
     st.stop()
 
@@ -159,4 +163,4 @@ with footer:
 with action:
     if st.button("Open monitor", type="primary", width="stretch",
                  icon=":material/arrow_forward:"):
-        st.switch_page("dq_app/ui/pages/monitor_detail.py")
+        st.switch_page("dq_app/ui/pages/table_detail.py")

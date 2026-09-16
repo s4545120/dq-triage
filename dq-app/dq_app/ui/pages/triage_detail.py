@@ -1,14 +1,27 @@
-"""Cohort detail — the evidence, the advice, the chain, and the one place a steward
-adds to the record.
+"""Problem detail — the reasoning, the evidence, and the decision log.
 
-Tab order follows what a steward has to do: confirm or discard the hypothesis
-(Evidence), decide whether the proposed approach fits (Recommendation), then record
-the decision (Register). Acting before reading the evidence is the failure mode this
-ordering exists to discourage.
+Three blocks, in the order a steward works, and each one labelled with what kind of
+claim it is making:
+
+  * **What we think is wrong** — the model's claim, marked as one. A hypothesis and
+    the profiling behind it, then the approach recommended.
+  * **What we're going by** — measured. The failing checks and the rows that failed.
+  * **What was decided** — the append-only chain, and the one control in this app
+    that writes anything.
+
+This was five tabs until 2026-09-16: Evidence, Suggested fix, Decisions, Impact,
+Stored record. Tabs made a reader choose an order before they knew what was in each
+one, and the ordering the tabs implied — evidence first, decision last — was the
+right one, so it is now simply the order of the page. *Impact* collapsed into the
+facts line and an expander inside the first block; *Stored record* is a disclosure at
+the foot, which is where a record nobody reads on the happy path belongs.
 
 Nothing here executes anything. `executed` records a claim that a person acted in
 their own pipeline, outside this system — the spec's step 04, and the reason the
 register is a detective control rather than a preventive one.
+
+Not in the sidebar. This page means nothing without a selection, so it is reached
+from Triage and is registered in `app.py` only so `st.switch_page` can find it.
 """
 
 from __future__ import annotations
@@ -28,8 +41,8 @@ components.page_chrome()
 current = adapter.get_cohort_current()
 cohorts = adapter.get_cohorts()
 
-# The queue links here with ?cohort=<id>. A URL that names what it shows is worth
-# having: it can be pasted into a ticket, and it survives a reload.
+# Triage links here with ?cohort=<id>. A URL that names what it shows is worth having:
+# it can be pasted into a ticket, and it survives a reload.
 known = set(current["cohort_id"])
 selected = st.query_params.get("cohort") or st.session_state.get("selected_cohort")
 if selected not in known:
@@ -47,7 +60,7 @@ def _label(cid: str) -> str:
 
 
 chosen = st.sidebar.selectbox(
-    "Cohort", picker, index=picker.index(selected) if selected else 0,
+    "Problem", picker, index=picker.index(selected) if selected else 0,
     format_func=_label, key="_cohort_picker",
 )
 st.session_state["selected_cohort"] = chosen
@@ -60,62 +73,74 @@ extra = cohorts[cohorts["cohort_id"] == chosen].iloc[0]
 events = adapter.get_dispositions()
 events = events[events["cohort_id"] == chosen].sort_values("event_seq")
 
-st.title(f"Cohort {chosen[:8]}")
+
+def _title(hypothesis: str) -> str:
+    """The problem as a phrase a person would say, taken from the hypothesis.
+
+    The model already writes the sentence; this takes its first clause. There is no
+    stored title column and adding one is a fixture and DDL change, not a UI one — so
+    the id stays visible beside this, and it is the id that goes in a ticket.
+    """
+    first = str(hypothesis).split(".")[0].strip()
+    return first if len(first) <= 90 else first[:87].rstrip(" ,;") + "…"
+
+
+# --- Header -----------------------------------------------------------------
+
+if st.button("← Triage", key="_back"):
+    st.switch_page("dq_app/ui/pages/triage.py")
+
+head, gate = st.columns([4, 1.1], vertical_alignment="top")
+with head:
+    st.title(_title(extra["root_cause_hypothesis"]))
+    components.cohort_headline(row)
+with gate:
+    st.markdown(
+        '<div class="dq-quiet" style="text-align:right">approvals<br>'
+        f'<b style="font-size:1.1rem;color:{theme.NEUTRAL["text"]}">'
+        f'{int(row["distinct_approvers"])} of {int(row["approvals_required"])}</b>'
+        "</div>",
+        unsafe_allow_html=True,
+        help="Different named people. The same person approving twice does not count.",
+    )
+
+# One line where five tiles used to be. Everything on it is a fact about the problem
+# that a reader needs in order to place it, and none of it is a figure anyone tracks.
 st.caption(
-    theme.COHORT_ONE_LINER,
-    help="Everything on this page belongs to one problem: the breaches grouped into "
-         "it, the hypothesis explaining them, the approach recommended, and the chain "
-         "of decisions recorded against it.",
-)
-components.cohort_headline(row)
-
-components.kpi_row([
-    {"label": "Failing checks", "value": f"{int(row['member_count'])}",
-     "sub": "grouped into this problem"},
-    {"label": "Findings", "value": f"{int(row['total_violation_rows']):,}",
-     "sub": "rows × checks",
-     "help": "One finding is one row failing one check, so a row failing three checks "
-             "counts three times."},
-    {"label": "Tables", "value": f"{len(as_list(row['affected_tables']))}",
-     "sub": f"{int(extra['blast_radius_count'])} more downstream"},
-    {"label": "Approvals", "value":
-     f"{int(row['distinct_approvers'])}/{int(row['approvals_required'])}",
-     "sub": "different people",
-     "help": "The same person approving twice does not count — the requirement is on "
-             "distinct named approvers."},
-    {"label": "Raised", "value": f"{row['raised_ts']:%d %b}",
-     "sub": f"{(pd.Timestamp.now() - row['raised_ts']).days}d ago"},
-])
-st.caption(
-    f"{row['business_domain']} · {row['owner_group']} · run {extra['raised_run_id'][:8]} · "
-    f"rank {int(row['rank_score'])}"
+    f"`{chosen[:8]}` · {row['business_domain']} · {row['owner_group']} · raised "
+    f"{row['raised_ts']:%d %b} ({(pd.Timestamp.now() - row['raised_ts']).days}d ago) · "
+    f"{int(row['member_count'])} failing checks · "
+    f"{int(row['total_violation_rows']):,} findings · "
+    f"{len(as_list(row['affected_tables']))} table(s), "
+    f"{int(extra['blast_radius_count'])} more downstream · rank {int(row['rank_score'])}",
+    help="Findings are rows × checks: a row failing three checks counts three times. "
+         "Rank is how serious, how far it spreads, and how much data it touches — "
+         "advisory, and never a severity.",
 )
 
-tab_ev, tab_rec, tab_reg, tab_blast, tab_raw = st.tabs(
-    ["Evidence", "Suggested fix", "Decisions", "Impact", "Stored record"]
-)
+# --- 1. What we think is wrong ----------------------------------------------
 
-# --- Evidence ---------------------------------------------------------------
-with tab_ev:
+with st.container(border=True):
+    st.markdown(
+        '<div class="dq-blockhd"><b>WHAT WE THINK IS WRONG</b>'
+        + theme.badge(
+            "generated · a model claim" if row["recommendation_source"] == "generated"
+            else "from the playbook",
+            "moderate" if row["recommendation_source"] == "generated" else "neutral",
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
     st.markdown(f"**{extra['root_cause_hypothesis']}**")
+    st.markdown(
+        f'<div class="dq-because"><b>Because:</b> {extra["evidence_summary"]}</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
-        extra["evidence_summary"],
-        help="The hypothesis is the agent's; this is the profiling it ran. Confirm or "
-             "discard it against the numbers below rather than against the prose.",
+        "Confirm or discard this against the numbers in the next block rather than "
+        "against the prose.",
     )
 
-    theme.section("The checks that are failing")
-    components.member_rule_table(
-        extra, adapter.get_rule_registry_current(), adapter.get_check_runs()
-    )
-
-    theme.section("Examples of the bad data")
-    components.violation_samples_view(
-        extra, adapter.get_violation_samples(), adapter.get_check_runs()
-    )
-
-# --- Recommendation ---------------------------------------------------------
-with tab_rec:
     components.recommendation_view(extra, adapter.get_playbook())
 
     if opt(row["approach_type_taken"]):
@@ -134,12 +159,49 @@ with tab_rec:
                  "collects. A recommendation stewards keep overriding is one to change.",
         )
 
-# --- Register ---------------------------------------------------------------
-with tab_reg:
+    with st.expander(
+        f"What else reads these tables · {int(extra['blast_radius_count'])} downstream"
+    ):
+        components.blast_radius_view(extra)
+        st.caption(
+            "Blast radius is what makes a problem rankable.",
+            help="Two problems with equal violation counts are not equally urgent if "
+                 "one feeds billing and the other feeds a dormant mart.",
+        )
+
+# --- 2. What we're going by --------------------------------------------------
+
+with st.container(border=True):
+    st.markdown(
+        '<div class="dq-blockhd"><b>WHAT WE\'RE GOING BY</b>'
+        + theme.badge("measured", "neutral")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    theme.section("The checks that are failing")
+    components.member_rule_table(
+        extra, adapter.get_rule_registry_current(), adapter.get_check_runs()
+    )
+
+    theme.section("The rows that failed")
+    components.violation_samples_view(
+        extra, adapter.get_violation_samples(), adapter.get_check_runs()
+    )
+
+# --- 3. What was decided -----------------------------------------------------
+
+with st.container(border=True):
+    st.markdown(
+        '<div class="dq-blockhd"><b>WHAT WAS DECIDED</b>'
+        + theme.badge(f"{len(events)} entries · append-only", "neutral")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
     left, right = st.columns([3, 2])
 
     with left:
-        theme.section(f"Decision history · {len(events)} entries")
         components.event_timeline(events)
         st.caption(
             "Append-only.",
@@ -151,7 +213,9 @@ with tab_reg:
     with right:
         components.approval_gate_view(row, events)
 
-        theme.section("Add a decision")
+        theme.section("Record a decision")
+        # `available_events` decides what may be authored from this state, and it
+        # never offers `verified` to anyone: closure is the check runner's to declare.
         allowed = lifecycle.available_events(
             row["lifecycle_state"], int(row["distinct_approvers"]), int(row["approvals_required"])
         )
@@ -160,12 +224,12 @@ with tab_reg:
             if row["lifecycle_state"] == "awaiting_verification":
                 st.caption(
                     "Nothing to record — the next scheduled check run decides this one.",
-                    help="There is no re-check job and no way to mark a cohort verified "
+                    help="There is no re-check job and no way to mark a problem verified "
                          "by hand. Closure is never self-certified.",
                 )
             else:
                 st.caption(f"No further in-app event applies to a "
-                           f"{theme.STATE_LABEL.get(row['lifecycle_state'], '')} cohort.")
+                           f"{theme.STATE_LABEL.get(row['lifecycle_state'], '')} problem.")
         else:
             event_type = allowed[0]
 
@@ -176,7 +240,7 @@ with tab_reg:
                         format_func=lambda d: {
                             "accepted": "Accept — the hypothesis holds",
                             "deferred": "Defer — real, but not now",
-                            "rejected": "Reject — the cohort is wrong",
+                            "rejected": "Reject — the grouping is wrong",
                             "no_action": "No action — accepted as-is",
                         }[d],
                     )
@@ -241,19 +305,10 @@ with tab_reg:
                         except adapter.WriteRejected as exc:
                             st.error(str(exc), icon=":material/block:")
 
-# --- Blast radius -----------------------------------------------------------
-with tab_blast:
-    components.blast_radius_view(extra)
-    st.caption(
-        "Blast radius is what makes a cohort rankable.",
-        help="Two cohorts with equal violation counts are not equally urgent if one "
-             "feeds billing and the other feeds a dormant mart.",
-    )
+# --- The record, for the reader who wants the fields --------------------------
 
-# --- Raw record -------------------------------------------------------------
-with tab_raw:
-    st.caption("Every field as stored, unedited. The views above are a convenience; "
-               "this is the record.")
+with st.expander("Stored record — every field as stored, unedited"):
+    st.caption("The blocks above are a convenience; this is the record.")
     theme.section("results.cohort")
     # Stringified: one row transposed puts timestamps, arrays and strings in a single
     # column and Arrow has no type for that. The raw view is showing what is stored,

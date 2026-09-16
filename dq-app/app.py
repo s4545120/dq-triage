@@ -16,6 +16,17 @@ Workspace mode exists and is wired, but has never been run. See README.md, Deplo
 Built to `dq-triage-agent-spec.md` v1.0. The retired v0.1 execution spec is gone from
 this app along with everything it implied: no executor, no mutable incident state, no
 fix body, no execute button.
+
+**Five destinations, seven pages.** The nav lists what someone can decide to look at;
+`Monitor detail` and `Problem detail` are not on that list because neither means
+anything without a selection made on the page above it. They are still registered —
+Streamlit can only `switch_page` to a page it knows about — so the sidebar is built by
+hand from `st.page_link` and `st.navigation` is asked to render nothing. Adding a page
+to `PAGES` therefore does not put it in the sidebar; `SIDEBAR` does.
+
+The `Data elements` page was removed on 2026-09-16. The CDE model behind it was not:
+`v_cde_coverage` still owns the scorecard's denominator. What went is the browsing
+surface, replaced by the scope panel and the issue board on the scorecard.
 """
 
 from __future__ import annotations
@@ -32,28 +43,49 @@ st.set_page_config(
 PAGES = {
     "scorecard": st.Page("dq_app/ui/pages/scorecard.py", title="Scorecard",
                          icon=":material/monitoring:", default=True),
-    "monitors": st.Page("dq_app/ui/pages/monitored_tables.py", title="All monitored tables",
-                        icon=":material/table_chart:"),
-    "monitor_detail": st.Page("dq_app/ui/pages/monitor_detail.py", title="Monitor detail",
-                              icon=":material/frame_inspect:"),
-    "queue": st.Page("dq_app/ui/pages/cohort_queue.py", title="Cohorts",
-                     icon=":material/inbox:"),
-    "detail": st.Page("dq_app/ui/pages/cohort_detail.py", title="Detail",
-                      icon=":material/frame_inspect:"),
+    "tables": st.Page("dq_app/ui/pages/tables.py", title="Tables",
+                      icon=":material/table_chart:"),
+    "triage": st.Page("dq_app/ui/pages/triage.py", title="Triage",
+                      icon=":material/inbox:"),
     "register": st.Page("dq_app/ui/pages/register.py", title="Register",
                         icon=":material/receipt_long:"),
-    "registry": st.Page("dq_app/ui/pages/rule_registry.py", title="Rules",
-                        icon=":material/rule:"),
-    "cde": st.Page("dq_app/ui/pages/cde_registry.py", title="Data elements",
-                   icon=":material/label_important:"),
+    "rules": st.Page("dq_app/ui/pages/rule_registry.py", title="Rules",
+                     icon=":material/rule:"),
+    # Drill-downs. Registered so `st.switch_page` can reach them, deliberately absent
+    # from SIDEBAR below — each is opened from the page above it, never from a click
+    # in the nav, and opening one cold shows an empty selector.
+    "table_detail": st.Page("dq_app/ui/pages/table_detail.py", title="Monitor detail",
+                            icon=":material/frame_inspect:"),
+    "triage_detail": st.Page("dq_app/ui/pages/triage_detail.py", title="Problem detail",
+                             icon=":material/frame_inspect:"),
 }
 
-nav = st.navigation(
-    {
-        "Monitor": [PAGES["scorecard"], PAGES["monitors"], PAGES["monitor_detail"]],
-        "Triage": [PAGES["queue"], PAGES["detail"]],
-        "Evidence": [PAGES["register"], PAGES["registry"], PAGES["cde"]],
-    }
-)
+# Group → the pages linked under it. The only list that decides what the sidebar shows.
+SIDEBAR = {
+    "Monitor": ["scorecard", "tables"],
+    "Work": ["triage"],
+    "Evidence": ["register", "rules"],
+}
+
+
+def _sidebar_nav() -> None:
+    """The nav, by hand, because `st.navigation` renders all-or-nothing."""
+    st.sidebar.markdown(
+        '<div class="dq-brand"><span class="sq">DQ</span>'
+        "<span class='nm'>Triage</span></div>",
+        unsafe_allow_html=True,
+    )
+    for group, keys in SIDEBAR.items():
+        st.sidebar.markdown(f'<div class="dq-navgrp">{group}</div>',
+                            unsafe_allow_html=True)
+        for key in keys:
+            st.sidebar.page_link(PAGES[key])
+
+
+nav = st.navigation(list(PAGES.values()), position="hidden")
+
+# The brand and links are written before the page runs, so `components.page_chrome`
+# appends the source badge and identity below them rather than above.
+_sidebar_nav()
 
 nav.run()

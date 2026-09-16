@@ -21,36 +21,43 @@ import html
 import streamlit as st
 
 # --- Colour -----------------------------------------------------------------
-# Cool neutral scale with one petrol accent. Deliberately not the violet-forward
-# palette the well-known DQ suites use — same design language, different signature.
+# "Indigo signal": an indigo accent on a faintly violet neutral scale. This replaced
+# a petrol-teal palette that was chosen to look unlike the well-known DQ suites; the
+# brightness was asked for and the resemblance accepted with it.
+#
+# One change here is not cosmetic. `moderate` used to be amber (#a15c07 on #fefbe8),
+# the weakest pairing in the old set and never comfortably readable on a light ground.
+# It is now a cool teal, which clears contrast and reads as informational — which is
+# what P3_monitor means. SEVERITY_TONE below is untouched, so the mapping
+# P3_monitor -> moderate still holds; only what "moderate" looks like has changed.
 
 NEUTRAL = {
-    "canvas": "#f6f7f9",
+    "canvas": "#f7f7fa",
     "surface": "#ffffff",
-    "border": "#e4e7ec",
-    "border_strong": "#d0d5dd",
-    "text": "#101828",
-    "text_2": "#475467",
-    "text_3": "#98a2b3",
+    "border": "#e5e5ee",
+    "border_strong": "#d2d2e0",
+    "text": "#14142b",
+    "text_2": "#4a4a63",
+    "text_3": "#9695ad",
 }
 
-ACCENT = "#0d5c73"
-ACCENT_TINT = "#e8f1f4"
+ACCENT = "#4f46e5"
+ACCENT_TINT = "#eef0ff"
 
 # Reserved. Never reused as a chart series colour.
 TONE = {
-    "critical": {"fg": "#b42318", "bg": "#fef3f2", "bd": "#fecdca"},
-    "high":     {"fg": "#c4320a", "bg": "#fff4ed", "bd": "#f9dbaf"},
-    "moderate": {"fg": "#a15c07", "bg": "#fefbe8", "bd": "#feee95"},
-    "success":  {"fg": "#067647", "bg": "#ecfdf3", "bd": "#abefc6"},
-    "info":     {"fg": ACCENT,    "bg": ACCENT_TINT, "bd": "#b9d6de"},
-    "neutral":  {"fg": "#475467", "bg": "#f2f4f7", "bd": "#e4e7ec"},
+    "critical": {"fg": "#dc2626", "bg": "#fef2f2", "bd": "#fecaca"},
+    "high":     {"fg": "#ea580c", "bg": "#fff7ed", "bd": "#fed7aa"},
+    "moderate": {"fg": "#0e7490", "bg": "#ecfeff", "bd": "#a5e8f0"},
+    "success":  {"fg": "#16a34a", "bg": "#f0fdf4", "bd": "#bbf7d0"},
+    "info":     {"fg": ACCENT,    "bg": ACCENT_TINT, "bd": "#c3c6fb"},
+    "neutral":  {"fg": "#4a4a63", "bg": "#f1f1f6", "bd": "#e5e5ee"},
 }
 
 # Categorical slots for charts — fixed order, never cycled, never a ninth.
 SERIES = [
-    "#0d5c73", "#c4320a", "#2e6f9e", "#a15c07",
-    "#6941c6", "#067647", "#b42318", "#475467",
+    "#4f46e5", "#ea580c", "#0e7490", "#ca8a04",
+    "#9333ea", "#16a34a", "#dc2626", "#4a4a63",
 ]
 
 SEVERITY_TONE = {"P1_block": "critical", "P2_alert": "high", "P3_monitor": "moderate"}
@@ -641,6 +648,40 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .stTabs [data-baseweb="tab"] {{ font-size: .84rem; padding-top: .35rem; padding-bottom: .35rem; }}
 .stMain [data-testid="stMetricValue"] {{ font-size: 1.6rem; font-variant-numeric: tabular-nums; }}
 .stMain [data-testid="stMetricLabel"] p {{ font-size: .72rem; color: var(--dq-text-3); }}
+
+/* --- Sidebar nav, hand-built. -----------------------------------------------
+   `st.navigation(position="hidden")` renders no nav at all, so app.py writes its
+   own out of `st.page_link`. These rules give it the brand block and the group
+   labels; the links themselves stay Streamlit's, so the active-page highlight and
+   the keyboard behaviour are the ones the framework maintains. */
+.dq-brand {{ display: flex; align-items: center; gap: .5rem; padding: .1rem .25rem .2rem;
+  font-size: .95rem; font-weight: 620; letter-spacing: -.01em; color: {NEUTRAL["text"]}; }}
+.dq-brand .sq {{ width: 20px; height: 20px; border-radius: 6px; background: {ACCENT};
+  color: #fff; display: grid; place-items: center; font-size: .6rem; font-weight: 600;
+  letter-spacing: .02em; flex: none; }}
+.dq-navgrp {{ font-size: .63rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--dq-text-3); font-weight: 600; padding: .75rem .25rem .2rem; }}
+
+/* --- Detail blocks: the three questions, labelled. -------------------------- */
+.dq-blockhd {{ display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  font-size: .72rem; letter-spacing: .08em; color: var(--dq-text-2);
+  margin: -.2rem 0 .55rem; }}
+.dq-blockhd b {{ font-weight: 600; color: {NEUTRAL["text"]}; }}
+.dq-because {{ font-size: .86rem; color: var(--dq-text-2); line-height: 1.6;
+  border-left: 2px solid var(--dq-border); padding-left: .7rem; margin: .5rem 0 .2rem;
+  max-width: 78ch; }}
+.dq-because b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
+
+/* --- Estate tiles and the dimension grouping. ------------------------------- */
+.dq-tilehd {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--dq-text-3); font-weight: 600; padding: .1rem 0 .3rem;
+  display: flex; align-items: center; gap: .35rem; }}
+.dq-dimgrp {{ display: flex; align-items: center; gap: .45rem; flex-wrap: wrap;
+  margin: .9rem 0 .35rem; font-size: .92rem; color: {NEUTRAL["text"]}; }}
+.dq-dimgrp .q {{ font-size: .78rem; color: var(--dq-text-2); font-weight: 400; }}
+.dq-note {{ font-size: .82rem; color: var(--dq-text-2); line-height: 1.55;
+  margin: .5rem 0 .2rem; }}
+.dq-note .dq-badge {{ margin-right: .3rem; }}
 
 /* --- Page header: title on the left, page-level actions on the right. ----- */
 .dq-page-hd {{ margin-bottom: .45rem; }}

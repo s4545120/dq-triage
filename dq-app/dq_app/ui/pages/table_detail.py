@@ -26,7 +26,7 @@ scoped, window = monitoring.domain_filter(runs, "monitor_detail")
 if scoped.empty:
     st.caption(
         "No checks on registered critical data elements in the selected domains. "
-        "Unregistered columns may still be checked — those are worked from Cohorts."
+        "Unregistered columns may still be checked — those are worked from Triage."
     )
     st.stop()
 
@@ -51,7 +51,7 @@ status_tone = {
 back, picker, badge = st.columns([1.15, 3.5, 1], vertical_alignment="center")
 with back:
     if st.button("All monitors", icon=":material/arrow_back:", width="stretch"):
-        st.switch_page("dq_app/ui/pages/monitored_tables.py")
+        st.switch_page("dq_app/ui/pages/tables.py")
 with picker:
     options = inventory["__table"].tolist()
     picked = st.selectbox(
@@ -188,7 +188,7 @@ with problems_tab:
                     if st.button("Diagnose", key=f"diag_{cid}", width="stretch",
                                  type="primary"):
                         st.session_state["selected_cohort"] = cid
-                        st.switch_page("dq_app/ui/pages/cohort_detail.py")
+                        st.switch_page("dq_app/ui/pages/triage_detail.py")
 
 with trend_tab:
     cutoff = scoped["run_ts"].max() - pd.Timedelta(days=window)

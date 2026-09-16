@@ -23,7 +23,65 @@ registration, that is a third `MODIFY` grant and a decision, not a UI change.
 |---|---|
 | `sql/ddl/` | Current. Spec v1.0 + Addendum A. **Never executed** — no workspace access yet. |
 | `fixtures/` | Current. Local Parquet dataset generated from the pilot CSVs. Verified. |
-| `dq-app/` | Current. Rewritten to spec v1.0, runs on the fixture. Never run against a workspace. |
+| `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16, runs on the fixture. Never run against a workspace. |
+
+### The interface was redesigned on 2026-09-16
+
+Eight nav entries became five, and two of the eight were deleted outright rather than
+moved. Nothing about the data model, the grants or the write path changed.
+
+| Was | Now |
+|---|---|
+| `cohort_queue.py` | `triage.py` — "Cohorts" is our word for it, not the steward's |
+| `cohort_detail.py` | `triage_detail.py` — five tabs became three blocks |
+| `monitored_tables.py` | `tables.py` |
+| `monitor_detail.py` | `table_detail.py` |
+| `cde_registry.py` | **deleted** — folded into two panels on the scorecard |
+
+**`app.py` registers seven pages and links five.** `table_detail` and `triage_detail`
+are drill-downs: neither means anything without a selection made on the page above it,
+so neither is in the sidebar. They stay registered because `st.switch_page` can only
+reach a page `st.navigation` knows about — which is why the nav is asked to render
+nothing (`position="hidden"`) and `app.py` builds the sidebar itself from
+`st.page_link`. Adding a page to `PAGES` therefore does not put it in the sidebar;
+`SIDEBAR` does, and `tests/test_pages_render.py` pins both halves of that.
+
+**Deleting the CDE page did not delete the CDE model.** `config.cde_registry`,
+`results.cde_profile` and `v_cde_coverage` are untouched, and so is every test pinned
+to them — the scorecard's quality figure still has the register for a denominator.
+What went is the browsing surface. What replaced it: the `Scope · 10 CDEs` button in
+the filter strip opens a panel listing every element, and the issue board's `Review`
+opens one element in place instead of switching page. The cross-table attachment
+assertion that used to live in the CDE page's tests moved to the check panel.
+
+**The scorecard gained a drill-down.** Selecting a failing check opens a panel with
+the rule in plain words, the arithmetic, and the rows that actually failed —
+`results.violation_sample`, parsed into real columns by
+`components.sample_rows_frame`. Those samples were always captured; until now the only
+way to see them was from inside a cohort. `_check_pick` in session state is what the
+panel reads, so the selection survives a rerun the table did not cause — and a test
+can open a check without simulating a click.
+
+**The four dimension cards are gone.** Completeness / Validity / Consistency /
+Uniqueness became a `Group by dimension` toggle on the failing-checks table. The prose
+and `_DIMENSION_OF` survived the move; the cards did not. In their place is a row of
+six counts of the estate — see the next section for the denominator that comes with
+them.
+
+**`metrics.records_affected_floor` is a floor and must stay labelled as one.**
+`check_run` stores a violation count and no keys, and the runner caps
+`violation_sample` per check, so four of the failing checks are truncated and no exact
+distinct count exists. The tile reads `≥ 600`. Making it exact is a change to the
+runner, not to the app: a `distinct_entity_count` column would make each check exact
+without making the union computable across checks; only a stored key set or a
+union-able sketch answers the question the tile asks. Two tests assert the floor is a
+floor.
+
+**The palette is "Indigo signal".** `theme.py` moved off petrol teal onto an indigo
+accent. One change there is not cosmetic: `TONE["moderate"]` was amber and is now a
+cool teal, because amber never had enough contrast on a light ground and "monitor" is
+informational rather than a warning. `SEVERITY_TONE` is untouched — `P3_monitor ->
+moderate` still holds; only what `moderate` looks like changed.
 
 ### `dq-app/` was rewritten to v1.0 on 2026-09-02
 
@@ -104,29 +162,37 @@ makes rather than something a human noticed. Adding `scope_filter` to the rules
 themselves still destroys the demo, and now also empties the scope_mismatch bucket
 that `tests/test_coverage_conformance.py` asserts is non-empty.
 
-**The monitoring pages count only CDE-attached checks.** Every figure on
-`ui/pages/scorecard.py`, `monitored_tables.py` and `monitor_detail.py` — headline
-score, the four dimensions, findings, the monitor inventory, applied rules — is
-filtered to the rules `v_cde_coverage` attached to a registered element: 20 of the 34
-in the fixture. The scorecard applies it in its own filter strip; the two monitor
-pages get it from `ui/monitoring.domain_filter`, which is the only other place the
-filter is written. The other 14 checks still run and still raise cohorts, and are
-worked from the Cohorts queue, but they move no number on a monitoring page. The
-reason is the denominator: a quality score over "every rule someone
+**Quality scores count only CDE-attached checks. Inventory counts do not.** Two
+denominators, deliberately, and each is stated where it sits.
+
+*Scoped to the 20 rules `v_cde_coverage` attached to a registered element:* the
+scorecard's headline quality figure and its Recent runs rail; every figure on
+`ui/pages/tables.py` and `table_detail.py` — the monitor inventory, applied rules, the
+per-table score. The scorecard applies the filter itself; the two monitor pages get it
+from `ui/monitoring.domain_filter`, which is the only other place the filter is
+written. The reason is the denominator: a quality score over "every rule someone
 happened to write" moves whenever the rule set does, and cannot be compared across two
 months or two domains. `domain/coverage.attached_rule_ids` is the single definition of
 that set and is read back off the coverage view — never re-derived by matching table
 and column, which would silently drop `XREF_NAME_AGREEMENT` (two tables, no
 `target_column`, attaches only through its `cde_id` tag).
 
-The scoping is drawn, not implied: the monitor pages carry a `10 CDEs` badge in the
-filter strip, because a diagnostic page that quietly hides 14 of 34 checks is worse
-than one that shows fewer and says so.
+*Unscoped, counting the whole run:* the scorecard's six estate tiles and its
+failing-checks table. Reporting "2 tables monitored" over only the attached checks
+understates the estate, and a diagnostic table that hides 14 of 34 failing checks
+would disagree with the Triage queue, which is where those checks get worked. The
+tiles carry "What is being watched · every check that ran" above them; the quality
+figure carries its scope in the strip beside it.
 
-Consequences a reader will otherwise trip over: the scorecard shows 4 passing of 20,
-not 11 of 32; neither shadow rule is CDE-attached, so its shadow count is always 0;
-and three cohorts have no CDE-attached member, so they appear only in the Cohorts
-queue and never on a monitoring page.
+The scoping is drawn, not implied: the monitor pages carry a `10 CDEs` badge in the
+filter strip and the scorecard a `Scope · 10 CDEs` button that opens the element list,
+because a diagnostic page that quietly hides 14 of 34 checks is worse than one that
+shows fewer and says so.
+
+Consequences a reader will otherwise trip over: the scorecard's quality figure is
+built on 20 checks while the tiles beside it say 34 ran; neither shadow rule is
+CDE-attached, so the shadow count in any scoped figure is always 0; and three cohorts
+have no CDE-attached member, so they appear in Triage and never on a monitor page.
 
 **Criticality is not severity, and must never become it.** Criticality belongs to the
 element; severity belongs to the rule. `check_run.severity` is copied verbatim from

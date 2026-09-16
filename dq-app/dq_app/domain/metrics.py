@@ -100,6 +100,58 @@ def detection_summary(check_run: pd.DataFrame) -> dict:
     }
 
 
+def records_affected_floor(
+    samples: pd.DataFrame, check_run: pd.DataFrame, run_id=None
+) -> dict:
+    """Distinct records touched by at least one failing check — as a floor, never a count.
+
+    `results.check_run` stores a `violation_count` and no keys, and the runner keeps
+    `results.violation_sample` capped at a fixed number of rows per check. So for any
+    check breaching on more rows than the cap, the keys held are a sample and the
+    union below is short by an unknown amount. What this returns is the union of the
+    keys actually on hand, per table, which is a lower bound — and the UI labels it as
+    one everywhere it appears.
+
+    `exact` is True only when every breaching check has as many sampled keys as it has
+    violations; then the floor is the answer. On the pilot fixture it is False, and
+    `truncated` names the checks responsible.
+
+    Making it exact is a change to the check runner, not to this function. A
+    `distinct_entity_count` column on `results.check_run` would make each check exact
+    without making the union computable across checks — a contact failing six email
+    rules would still be counted six times. Only a stored key set, or a sketch that
+    supports union, answers the question the tile asks.
+    """
+    if run_id is None:
+        run_id = latest_run_id(check_run)
+    if run_id is None or samples.empty:
+        return dict(floor=0, by_table={}, exact=False, truncated=[], checks=0)
+
+    breaching = check_run[(check_run["run_id"] == run_id) & (check_run["status"] == "breach")]
+    if breaching.empty:
+        return dict(floor=0, by_table={}, exact=True, truncated=[], checks=0)
+
+    held = samples[
+        (samples["run_id"] == run_id) & samples["rule_id"].isin(set(breaching["rule_id"]))
+    ]
+    by_table = {
+        table: int(g["row_key"].nunique())
+        for table, g in held.groupby("target_table", sort=True)
+    }
+    sampled = held.groupby("rule_id")["row_key"].nunique()
+    truncated = sorted(
+        r.rule_id for r in breaching.itertuples()
+        if int(sampled.get(r.rule_id, 0)) < int(r.violation_count)
+    )
+    return dict(
+        floor=int(sum(by_table.values())),
+        by_table=by_table,
+        exact=not truncated,
+        truncated=truncated,
+        checks=int(len(breaching)),
+    )
+
+
 def quality_by(check_run: pd.DataFrame, by: str = "target_table") -> pd.DataFrame:
     """Per-table (or per-domain) quality on the latest run.
 

@@ -18,7 +18,7 @@ pytest.importorskip("streamlit.testing.v1")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parents[1]
-DETAIL = str(APP_DIR / "dq_app/ui/pages/cohort_detail.py")
+DETAIL = str(APP_DIR / "dq_app/ui/pages/triage_detail.py")
 
 
 def _cohort_awaiting_review() -> str:
@@ -39,6 +39,18 @@ def _cohort_awaiting_review() -> str:
     return waiting.iloc[0]["cohort_id"]
 
 
+def _submit(at):
+    """The register's submit button, found by its label.
+
+    Not `at.button[0]`: the detail page grew a back link above the form, and an index
+    that silently moves is exactly the wiring bug this file exists to catch.
+    """
+    for button in at.button:
+        if "Append to register" in str(button.label):
+            return button
+    raise AssertionError(f"no submit button on the page: {[b.label for b in at.button]}")
+
+
 def test_recording_a_review_advances_the_derived_state():
     """No status column is written. The state moves because the event log changed."""
     cohort_id = _cohort_awaiting_review()
@@ -53,7 +65,7 @@ def test_recording_a_review_advances_the_derived_state():
 
     at.radio[0].set_value("accepted")
     at.text_area[0].set_value("Checked against the release calendar; the hypothesis holds.")
-    at.button[0].click().run()
+    _submit(at).click().run()
     assert not at.exception, [e.message for e in at.exception]
 
     events = at.session_state["_pending_disposition_events"]
@@ -96,7 +108,7 @@ def test_a_deferral_without_a_reason_is_refused():
 
     at.radio[0].set_value("deferred")
     at.text_area[0].set_value("   ")
-    at.button[0].click().run()
+    _submit(at).click().run()
 
     assert not at.exception
     written = (

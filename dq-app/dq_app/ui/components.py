@@ -16,6 +16,7 @@ have to trust is a summary they cannot check.
 from __future__ import annotations
 
 import html
+import json
 
 import pandas as pd
 import streamlit as st
@@ -328,22 +329,55 @@ def violation_samples_view(cohort_row, samples: pd.DataFrame, runs: pd.DataFrame
 
 
 def _sample_tables(subset: pd.DataFrame) -> None:
+    """One expander per rule, each holding that rule's rows as real columns.
+
+    This used to print `sample_row` as a JSON string in a single cell. The pattern in
+    these samples is almost always vertical — the same literal twelve times, six
+    variants of a broken formatter — and a column of JSON blobs hides exactly that.
+    """
     by_rule = subset.groupby("rule_id")
     for rid, g in by_rule:
         with st.expander(f"{rid} — {len(g):,} rows", expanded=by_rule.ngroups == 1):
-            st.dataframe(
-                g[["row_key", "sample_row", "target_table", "captured_ts"]].head(100),
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "sample_row": st.column_config.TextColumn("Offending value", width="large"),
-                    "row_key": st.column_config.TextColumn("Row key", width="small"),
-                    "target_table": st.column_config.TextColumn("Table"),
-                    "captured_ts": st.column_config.DatetimeColumn(
-                        "Captured", format="YYYY-MM-DD HH:mm"
-                    ),
-                },
-            )
+            sample_rows_view(g)
+
+
+def sample_rows_frame(subset: pd.DataFrame) -> pd.DataFrame:
+    """Sampled rows as the columns they actually are, rather than as JSON text.
+
+    `violation_sample.sample_row` is a JSON object per row, and the runner chose the
+    keys in it — the offending column plus whatever makes the failure legible beside
+    it. Rendering that object as a string makes the reader parse it; rendering it as
+    columns lets them read down the column, which is the whole reason the samples are
+    kept. Twelve rows all holding the same literal is a provisioning defect; the same
+    twelve as JSON blobs is twelve things to read.
+
+    Column order is first-seen, so it is the runner's order, not alphabetical.
+    """
+    rows, order = [], []
+    for raw in subset["sample_row"]:
+        try:
+            obj = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+        except (TypeError, ValueError):
+            continue
+        for k in obj:
+            if k not in order:
+                order.append(k)
+        rows.append(obj)
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).reindex(columns=order)
+
+
+def sample_rows_view(subset: pd.DataFrame, limit: int = 100) -> None:
+    """The sampled rows, parsed into columns. Falls back to the raw payload if it
+    will not parse — a sample that cannot be shown as columns is still evidence, and
+    hiding it would be worse than showing it ugly."""
+    frame = sample_rows_frame(subset.head(limit))
+    if frame.empty:
+        st.dataframe(subset[["row_key", "sample_row"]].head(limit),
+                     width="stretch", hide_index=True)
+        return
+    st.dataframe(frame, width="stretch", hide_index=True)
 
 
 def blast_radius_view(cohort_row) -> None:

@@ -161,3 +161,73 @@ def test_every_rule_domain_is_visible_not_just_cohort_domains(check_runs, cohort
     rule_domains = set(check_runs["business_domain"].dropna())
     cohort_domains = set(cohorts["business_domain"].dropna())
     assert rule_domains - cohort_domains, "fixture no longer exercises this case"
+
+
+# --- Records affected: a floor, and honest about it -------------------------
+
+
+def _samples():
+    from pathlib import Path
+
+    import pandas as pd
+    import pytest as _pytest
+
+    path = (Path(__file__).resolve().parents[2] / "fixtures" / "out"
+            / "results.violation_sample.parquet")
+    if not path.exists():
+        _pytest.skip("fixture not built")
+    return pd.read_parquet(path)
+
+
+def test_records_affected_is_a_floor_and_says_so(check_runs):
+    """The tile reads "≥ N" because N is a lower bound, and this is what makes it one:
+    the runner caps the rows it samples per check, so for any check breaching on more
+    rows than the cap the keys held are a sample. If `exact` ever came back True on
+    this fixture the ≥ would be a lie."""
+    out = metrics.records_affected_floor(_samples(), check_runs)
+
+    assert out["floor"] > 0
+    assert out["exact"] is False, "fixture no longer exercises the truncated case"
+    assert out["truncated"], "nothing reported as truncated, yet not exact"
+
+    latest = metrics.latest_run_id(check_runs)
+    breaching = check_runs[(check_runs["run_id"] == latest)
+                           & (check_runs["status"] == "breach")]
+    assert out["checks"] == len(breaching)
+
+    # A floor, so it cannot exceed the violation count — which double-counts a row
+    # failing several checks and is therefore the loosest possible ceiling.
+    assert out["floor"] <= int(breaching["violation_count"].sum())
+    assert sum(out["by_table"].values()) == out["floor"]
+
+
+def test_records_affected_counts_a_record_once_however_many_checks_it_fails(check_runs):
+    """The whole reason this is not `sum(violation_count)`. The malformed email
+    addresses trip several format checks at once; a records-affected figure that
+    counted them once per check would be a findings count wearing a different label.
+
+    Asserted on the keys rather than on the totals: the union of the sampled keys
+    across the email checks has to be smaller than their sum, or nothing is being
+    deduplicated."""
+    samples = _samples()
+    latest = metrics.latest_run_id(check_runs)
+    email = check_runs[(check_runs["run_id"] == latest)
+                       & (check_runs["rule_id"].str.startswith("CTCT_EML"))
+                       & (check_runs["status"] == "breach")]
+    assert len(email) > 1, "fixture no longer has one column failing several checks"
+
+    held = samples[(samples["run_id"] == latest)
+                   & samples["rule_id"].isin(set(email["rule_id"]))]
+    per_check = held.groupby("rule_id")["row_key"].nunique().sum()
+    union = held["row_key"].nunique()
+    assert union < per_check, "the same contact is being counted once per check"
+
+    out = metrics.records_affected_floor(samples, check_runs)
+    assert out["by_table"]["prod.customer.ctct_c"] >= union
+
+
+def test_records_affected_is_empty_when_nothing_is_breaching(check_runs):
+    quiet = check_runs[check_runs["status"] == "pass"]
+    out = metrics.records_affected_floor(_samples(), quiet)
+    assert out["floor"] == 0
+    assert out["exact"] is True

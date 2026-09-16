@@ -163,7 +163,7 @@ def domain_filter(runs: pd.DataFrame, key_prefix: str) -> tuple[pd.DataFrame, in
                      "registered critical data element — the register owns the "
                      "denominator, so the figures do not move when someone writes or "
                      "retires an unrelated rule. Checks on unregistered columns still "
-                     "run and still raise cohorts; work them from Cohorts.",
+                     "run and still raise cohorts; work them from Triage.",
             )
         with note:
             last_ts = runs["run_ts"].max()
