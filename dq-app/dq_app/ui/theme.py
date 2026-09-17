@@ -104,6 +104,34 @@ COVERAGE_GAP_MEANING = {
                "the rules are good, only that something is looking.",
 }
 
+# The element's KIND, as `config.cde_registry.data_class` records it. It is what the
+# element IS — an email address, a date of birth — and it is the one CDE attribute
+# that groups elements across tables and domains: three bindings of a person name on
+# two tables are one kind of thing to watch. Criticality says how much it matters and
+# is a different axis entirely; neither is a severity.
+#
+# The labels exist because `national_id` is the register's word and "Identity
+# document" is the steward's. Anything the register grows later falls through
+# `data_class_label` and is title-cased rather than dropped.
+DATA_CLASS_LABEL = {
+    "email_address": "Email address",
+    "person_name": "Person name",
+    "date_of_birth": "Date of birth",
+    "phone_number": "Phone number",
+    "msisdn": "Mobile service number",
+    "national_id": "Identity document",
+    "device_id": "Device identifier",
+    "account_id": "Account identifier",
+    "other": "Other",
+}
+
+
+def data_class_label(data_class) -> str:
+    """The element kind as a person would say it."""
+    key = str(data_class or "").strip()
+    return DATA_CLASS_LABEL.get(key, key.replace("_", " ").capitalize() or "\u2014")
+
+
 CDE_ONE_LINER = (
     "A critical data element is a field the business has registered as mattering — "
     "date of birth, name, email, identity document — named before any rule was "

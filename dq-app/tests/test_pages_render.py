@@ -193,6 +193,81 @@ def test_the_scope_panel_replaces_the_data_elements_page():
     assert "Criticality" in listing[0].columns
 
 
+def test_the_element_band_lists_every_element_with_its_kind_and_score():
+    """The band is an inventory, not an issue queue. Every registered element is on
+    it — a covered element is as much a fact about the register as a gap — and each
+    carries the two things the band exists to report: what kind of element it is and
+    how the data behind it scores."""
+    at = _run(SCORECARD)
+    rows = [str(m.value) for m in at.markdown
+            if 'class="dq-rowgrid' in str(m.value) and "head" not in str(m.value)[:60]]
+    band = [r for r in rows if "Customer email address" in r]
+    assert band, "the element band does not list Customer email address"
+    assert "Email address" in band[0], "the element's kind is not on its row"
+    assert "%" in band[0], "the element's score is not on its row"
+
+    body = _body(at)
+    assert "10 registered elements" in body, "the band is not listing every element"
+    # Covered elements are listed too, so the band cannot be read as a gap list.
+    assert any("Mobile service number (MSISDN)" in r for r in rows)
+
+
+def test_the_element_band_recommends_nothing():
+    """A "What to do" column stood here until 2026-09-17 — "write a rule", "fix the
+    rule's scope", "see COH b42685aa". Recommending the fix for a gap in the register
+    is out of scope for this app; the band reports what the register holds."""
+    at = _run(SCORECARD)
+    body = _body(at)
+    for advice in ["What to do", "write a rule", "fix the rule's scope",
+                   "add a format rule", "Needs work"]:
+        assert advice not in body, advice
+
+    # And the panel behind the strip badge does not smuggle it back.
+    panel = _body(_run(SCORECARD, _scope_open=True))
+    assert "Needs work" not in panel
+
+
+def test_an_unvalidated_element_shows_its_coverage_beside_its_score():
+    """The quietest failure on the page. `Identity document number` is registered
+    critical, has one check, and that check passes on every row — so it scores 100%
+    while nothing examines what the column contains. The score alone would read as
+    the healthiest element in the register, which is why the coverage column sits
+    next to it rather than instead of it."""
+    at = _run(SCORECARD)
+    rows = [str(m.value) for m in at.markdown
+            if 'class="dq-rowgrid' in str(m.value)]
+    row = [r for r in rows if "Identity document number" in r]
+    assert row, "the identity document element is not on the band"
+    assert "Not validated" in row[0], row[0]
+
+
+def test_failing_checks_filter_by_element_kind():
+    """A cut the dimension grouping cannot make: `format` spans an email, a mobile
+    number and a date of birth. Narrowing to one kind must drop the checks on every
+    other kind and say what it is showing."""
+    EMAIL = "Contact email contains an @"
+    DOB = "Date of birth parses as a real ISO date"
+
+    unfiltered = _body(_run(SCORECARD))
+    assert EMAIL in unfiltered and DOB in unfiltered, \
+        "the fixture no longer fails both an email and a DOB check — rewrite this"
+
+    body = _body(_run(SCORECARD, _fail_kind="date_of_birth"))
+    assert DOB in body, "the DOB check is not in a DOB filter"
+    assert EMAIL not in body, "an email check survived a DOB filter"
+    assert "date of birth" in body, "the foot does not say what the filter shows"
+
+
+def test_checks_on_no_registered_element_are_filterable_rather_than_hidden():
+    """14 of the 34 rules in the fixture are attached to no registered element. A
+    filter shaped by the register that could only ever narrow to it would hide them
+    behind a control that does not admit to hiding anything."""
+    body = _body(_run(SCORECARD, _fail_kind="Not on a registered element"))
+    assert "not on a registered element" in body.lower()
+    # Attached checks are the half this option excludes.
+    assert "Contact email contains an @" not in body
+
+
 def test_the_element_panel_names_the_rules_contradicting_a_scope():
     """COH-B's root cause is an assertion the register makes, not something a human
     noticed, and this panel is the one place it is spelled out now."""

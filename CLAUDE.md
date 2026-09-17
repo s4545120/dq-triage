@@ -182,13 +182,41 @@ queue both call it; neither has its own copy.
 
 **The scorecard's bottom band is a list of elements, not an issue queue.** The tabbed
 issue board and the two cards in the rail beside it — coverage segments and Recent
-runs — were removed on 2026-09-16. What replaced them is one table, `Critical
-elements nothing valid is watching`: the element, its criticality, the finding as a
-sentence, and where the fix is. One row per ELEMENT carrying its worst finding, which
-is the same count the `CDEs under watch` tile reports, so the two cannot disagree —
-three bindings of Customer name with nothing validating them is one element, not
-three findings. A scope mismatch points at the cohort that already carries the
-evidence (`see COH b42685aa`) rather than repeating the instruction.
+runs — were removed on 2026-09-16. What replaced them is one table, and on 2026-09-17
+it became `Critical data elements`: every registered element, its kind, its
+criticality, how it is covered, how many checks watch it and how it scores. One row
+per ELEMENT carrying its worst finding, which is the same count the `CDEs under
+watch` tile reports, so the two cannot disagree — three bindings of Customer name
+with nothing validating them is one element, not three findings. Every element is
+listed now, not only the ones with a gap: a band that only ever lists trouble cannot
+be read as an inventory.
+
+**The band reports and does not advise.** A `What to do` column stood there until
+2026-09-17 — "write a rule", "fix the rule's scope", or a pointer at the cohort
+already carrying the evidence (`see COH b42685aa`). Recommending the fix for a gap in
+the register is out of scope for this app; `WHAT_TO_DO` and `_gap_sentence` are
+deleted, and `tests/test_pages_render.py` asserts none of that wording comes back.
+The scope panel's `Status` column lost its "Needs work" for the same reason and now
+prints which of the four coverage findings it is.
+
+**An element's score and its coverage are two different findings and the band shows
+both.** The score is `_element_scores` — the same row-weighted arithmetic as the
+headline figure, over that element's own checks, deduped across bindings so a
+cross-table rule is not counted three times. `Identity document number` scores 100%
+on a presence check while nothing looks at what the column holds, so only a *covered*
+element's score is coloured; everything else prints the figure in neutral and lets
+the Coverage cell beside it carry the verdict. An element with no check scores `—`,
+never 0 — a gap in the register is not a data defect.
+
+**Failing checks filter by element kind.** `data_class` is what the element IS —
+email address, date of birth, identity document — and `theme.DATA_CLASS_LABEL` is the
+one place the register's word is translated into the steward's. It is a cut the
+dimension grouping cannot make, because `format` spans an email, a mobile number and
+a date of birth. Checks attached to no registered element get their own option rather
+than being dropped: 14 of the 34 rules are unattached, and a register-shaped filter
+that could only narrow to the register would hide them behind a control that does not
+admit to hiding anything. Under any filter the table foot reports the filter
+(`7 of 21 failing checks · email address`), not the run.
 
 **The four dimension cards are gone.** Completeness / Validity / Consistency /
 Uniqueness became a `Group by dimension` toggle on the failing-checks table. The prose

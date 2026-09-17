@@ -18,8 +18,29 @@ and the score carries its scope in the strip above it.
 **The elements themselves no longer have a page.** `Data elements` was removed on
 2026-09-16: nobody browses a register. What it was actually read for is here — the
 scope panel behind the strip badge lists every element and what watches it, and the
-issue board below lists the ones nothing valid is watching. The model is untouched;
-only the browsing surface went.
+band at the foot lists every element with its kind and its score. The model is
+untouched; only the browsing surface went.
+
+**The element band reports; it does not advise.** It carries the element, its kind,
+its criticality, how it is covered and how it scores, and nothing that tells anyone
+what to do about any of that. Recommending a fix for a gap in the register is out of
+scope for this app — the band's job is to say what the register holds and how the
+data behind it is doing, and the decision about a missing rule belongs to whoever
+authors rules.
+
+**A gap and a low score are different findings and the band shows both.** An element
+nothing validates can still score 100%: the presence check attached to it passes on
+every row, which says nothing about what those rows contain. That is why the coverage
+column sits beside the score rather than instead of it — a score with no coverage
+behind it is the quietest failure on this page.
+
+**Failing checks filter by element kind.** The `Element kind` control narrows the
+table to the checks attached to elements of one kind — every email check, every
+identity-document check — which is the cut a steward asks for and the one the
+dimension grouping cannot make: `format` spans an email, a mobile number and a date
+of birth. Checks attached to no registered element are their own option rather than
+being silently dropped, because they are exactly the ones a register-shaped filter
+would otherwise hide.
 
 **Failing checks open.** Selecting one shows the rule in plain words, the arithmetic,
 and the rows that actually failed — parsed into columns, from
@@ -289,8 +310,58 @@ FAILING_GRID = ("minmax(0,2.2fr) minmax(0,1.85fr) 3.4rem minmax(0,1fr) "
 FAILING_HEADS = ["Check", "Where", "Sev", "Dimension",
                  ("Bad rows", "n"), ("Of", "n"), "Trend", "Problem"]
 
-GAP_GRID = "minmax(0,1.5fr) 5.5rem minmax(0,4fr) minmax(0,1.15fr)"
-GAP_HEADS = ["Element", "Criticality", "Problem", "What to do"]
+ELEMENT_GRID = ("minmax(0,1.9fr) minmax(0,1.35fr) 5.5rem minmax(0,1.25fr) "
+                "3.8rem 4.4rem")
+ELEMENT_HEADS = ["Element", "Kind", "Criticality", "Coverage",
+                 ("Checks", "n"), ("Score", "n")]
+
+
+def _element_scores(cde_cov: pd.DataFrame, run_rows: pd.DataFrame) -> dict:
+    """cde_id → row-weighted quality of the checks attached to that element.
+
+    The same arithmetic as the headline figure, over one element's share of it —
+    which is what makes the two commensurable: an element's score and the page score
+    are the same question asked of a smaller set of rows, not two different metrics
+    that happen to both be percentages.
+
+    `None` where the element has no check on this run, and it stays `None` rather
+    than becoming a zero: an element nothing watches has no quality figure, and
+    printing 0% would report the register's gap as a data defect.
+    """
+    if cde_cov.empty:
+        return {}
+    by_rule = run_rows.drop_duplicates("rule_id").set_index("rule_id")
+    out = {}
+    for cde_id, g in cde_cov.groupby("cde_id"):
+        # Deduped across bindings: a cross-table rule attaches to all three of the
+        # name element's bindings and must not be counted three times.
+        ids = {i for lst in g["rule_ids"] for i in components.as_list(lst)}
+        mine = by_rule[by_rule.index.isin(ids)]
+        out[cde_id] = _row_score(mine) if len(mine) else None
+    return out
+
+
+def _data_class_of_rule(cde_cov: pd.DataFrame) -> dict:
+    """rule_id → the kinds of element it watches.
+
+    A set per rule, not one value: `XREF_NAME_AGREEMENT` watches a person name on two
+    tables, and a rule could in principle be attached to two elements of different
+    kinds. Anything not in this map is attached to no registered element.
+    """
+    out: dict[str, set] = {}
+    if cde_cov.empty:
+        return out
+    for r in cde_cov.itertuples():
+        for rule_id in components.as_list(r.rule_ids):
+            out.setdefault(rule_id, set()).add(r.data_class)
+    return out
+
+
+# The failing-checks filter's "everything else" option. Named rather than dropped:
+# 14 of the 34 checks in the fixture are attached to no registered element, and a
+# filter that could only ever narrow to the register would hide them behind a control
+# that does not say it is hiding anything.
+UNATTACHED = "Not on a registered element"
 
 
 def _check_panel(rule_id: str, tagged_now: pd.DataFrame, registry: pd.DataFrame,
@@ -455,22 +526,27 @@ def _scope_panel(cde_cov: pd.DataFrame, scoped: pd.DataFrame) -> None:
         st.session_state["_scope_open"] = False
         st.rerun()
 
+    _rank = {g: i for i, g in enumerate(theme.COVERAGE_GAP_ORDER)}
     view = (
-        cde_cov.groupby(["cde_id", "cde_name", "criticality"], as_index=False)
+        cde_cov.groupby(["cde_id", "cde_name", "data_class", "criticality"],
+                        as_index=False)
         .agg(Columns=("target_column", "nunique"),
              Checks=("rule_count", "sum"),
              Findings=("latest_violation_rows", "sum"),
-             Gaps=("coverage_gap", lambda g: sum(x != "covered" for x in g)))
+             # The element's worst binding names the element. "Needs work" used to
+             # stand here and it was an instruction wearing a status's clothes —
+             # what the register actually knows is which of the four findings it is.
+             Coverage=("coverage_gap", lambda g: min(g, key=lambda x: _rank[x])))
     )
-    view["Status"] = [
-        "Covered" if not gaps else "Needs work" for gaps in view["Gaps"]
-    ]
+    view["Coverage"] = [theme.COVERAGE_GAP_LABEL.get(g, g) for g in view["Coverage"]]
+    view["data_class"] = [theme.data_class_label(c) for c in view["data_class"]]
     view = view.assign(
         _c=view["criticality"].map({c: i for i, c in enumerate(theme.CRITICALITY_ORDER)})
-    ).sort_values(["_c", "cde_name"]).drop(columns=["_c", "Gaps"])
+    ).sort_values(["_c", "cde_name"]).drop(columns=["_c"])
 
     st.dataframe(
         view.rename(columns={"cde_name": "Critical data element",
+                             "data_class": "Kind",
                              "criticality": "Criticality"})
         .drop(columns=["cde_id"]),
         width="stretch", hide_index=True,
@@ -805,29 +881,60 @@ failing = _failing_frame(tagged_now, cde_rules,
                          {r: titles.get(c, c) for r, c in cohort_of.items()},
                          in_domain, monitored_tables)
 
-hd_l, hd_r = st.columns([2.6, 2.2], vertical_alignment="bottom")
+kind_of_rule = _data_class_of_rule(cde_cov)
+kinds_present = sorted(
+    {k for r in failing["Rule id"] for k in kind_of_rule.get(r, ())},
+    key=theme.data_class_label,
+)
+
+hd_l, hd_f, hd_t = st.columns([2.35, 1.35, 1.1], vertical_alignment="bottom")
 with hd_l:
     st.markdown(
-        '<div class="dq-sectionhd"><span class="t">Failing checks</span></div>',
+        '<div class="dq-sectionhd"><span class="t">Failing checks</span>'
+        '<span class="q">click a row for the bad rows</span></div>',
         unsafe_allow_html=True)
-with hd_r:
-    tog, note = st.columns([1.25, 1.35], vertical_alignment="center")
-    with tog:
-        grouped = st.toggle(
-            "Group by dimension", value=False, key="_fail_group",
-            help="Completeness, Validity, Consistency, Uniqueness — the four "
-                 "questions a quality programme asks of a column. These used to be "
-                 "four cards at the top of the page; they answer 'which kind of "
-                 "thing is wrong', which is a question about this table.",
-        )
-    with note:
-        st.markdown('<div class="dq-quiet" style="padding-bottom:.5rem">click a row '
-                    "for the bad rows</div>", unsafe_allow_html=True)
+with hd_f:
+    # A cut the dimension grouping cannot make. `format` covers an email, a mobile
+    # number and a date of birth; "every email check" is the question a steward
+    # actually arrives with, and only the register can answer it.
+    kind_choice = st.selectbox(
+        "Element kind", ["All"] + kinds_present + ([UNATTACHED] if any(
+            r not in kind_of_rule for r in failing["Rule id"]) else []),
+        format_func=lambda k: k if k in ("All", UNATTACHED)
+        else theme.data_class_label(k),
+        key="_fail_kind",
+        help="What the failing check is watching, as the register classifies it. "
+             "Only checks attached to a registered critical data element carry a "
+             "kind — the rest are listed under " + UNATTACHED + " rather than "
+             "hidden.",
+    )
+with hd_t:
+    grouped = st.toggle(
+        "Group by dimension", value=False, key="_fail_group",
+        help="Completeness, Validity, Consistency, Uniqueness — the four "
+             "questions a quality programme asks of a column. These used to be "
+             "four cards at the top of the page; they answer 'which kind of "
+             "thing is wrong', which is a question about this table.",
+    )
+
+if kind_choice == UNATTACHED:
+    failing = failing[~failing["Rule id"].isin(kind_of_rule)]
+elif kind_choice != "All":
+    failing = failing[failing["Rule id"].apply(
+        lambda r: kind_choice in kind_of_rule.get(r, ()))]
+failing = failing.reset_index(drop=True)
+filtered = kind_choice != "All"
 
 picked_rule = st.session_state.get("_check_pick")
 
 if failing.empty:
-    st.caption("No check is failing on the run shown, in the selected domains.")
+    st.caption(
+        f"No failing check watches a {theme.data_class_label(kind_choice).lower()} "
+        "on the run shown."
+        if filtered and kind_choice != UNATTACHED else
+        "Every failing check on this run is attached to a registered element."
+        if filtered else
+        "No check is failing on the run shown, in the selected domains.")
 else:
     def _fail_cells(row) -> str:
         problem = row["Problem"]
@@ -893,12 +1000,19 @@ else:
             st.session_state["_check_pick"] = got
             st.rerun()
 
+    # Under a filter the foot reports the filter, not the run. "8 failing · 11
+    # passing" over a table showing three checks is a foot describing a set the
+    # reader is not looking at.
     st.markdown(
         '<div class="dq-tablefoot">'
-        + (f"+ {len(failing) - 6} more failing · " if len(failing) > 6 and not grouped
-           else f"{len(failing)} failing · ")
-        + f"{d_all['rules_passing']} passing"
-        + (f" · {d_all['rules_skipped']} shadow" if d_all["rules_skipped"] else "")
+        + ((f"{len(failing)} of {d_all['rules_breaching']} failing checks · "
+            + (UNATTACHED.lower() if kind_choice == UNATTACHED
+               else theme.data_class_label(kind_choice).lower()))
+           if filtered else
+           (f"+ {len(failing) - 6} more failing · " if len(failing) > 6 and not grouped
+            else f"{len(failing)} failing · ")
+           + f"{d_all['rules_passing']} passing"
+           + (f" · {d_all['rules_skipped']} shadow" if d_all["rules_skipped"] else ""))
         + "</div>",
         unsafe_allow_html=True,
     )
@@ -914,46 +1028,29 @@ else:
                          adapter.get_violation_samples(), cde_cov, cohort_of,
                          in_domain[["rule_id", "run_ts", "violation_count", "status"]])
 
-# --- What the register says nothing valid is watching ------------------------
+# --- The register, element by element ----------------------------------------
 # Everything above this line is measured against the rules that exist, so it can only
 # ever say how the checks are doing. This band is measured against the elements the
 # business registered as mattering — the one denominator on the page that the rule
-# set does not control. A finding here is a defect in the rule set, not in the data.
-
-WHAT_TO_DO = {
-    "no_rule": "write a rule",
-    "scope_mismatch": "fix the rule's scope",
-    "unvalidated": "add a format rule",
-}
-
-
-def _gap_sentence(row) -> str:
-    """The finding as a sentence, with the reason the register already knows."""
-    gap = row["coverage_gap"]
-    if gap == "scope_mismatch":
-        # `populated_when` is written for a person: "postpaid services only — a
-        # prepaid service has no billing account". The half after the dash is the
-        # reason, which is the half worth repeating here; the article in front of it
-        # is not, and the cell is narrow.
-        when = components.opt(row["populated_when"]) or ""
-        why = (when.split("—")[-1] if "—" in when else when).strip()
-        for article in ("a ", "an ", "the "):
-            if why.lower().startswith(article):
-                why = why[len(article):]
-                break
-        return ("Rule fires outside the element's scope"
-                + (f" ({why})" if why else ""))
-    if gap == "no_rule":
-        return "Registered as critical and nothing checks it"
-    return "Something watches it, but nothing checks what it contains"
-
+# set does not control.
+#
+# It reports and does not advise. There was a "What to do" column here until
+# 2026-09-17 — "write a rule", "fix the rule's scope", or a pointer at the cohort
+# already carrying the evidence — and recommending the fix for a gap in the register
+# is not this app's job. What the band owes a reader is what the register holds and
+# how the data behind it is doing; who writes the missing rule is a conversation, not
+# a table cell.
+#
+# Every registered element is listed, not only the ones with a gap. An element that
+# is fully covered and scoring 98% is as much a fact about the register as one
+# nothing watches, and a band that only ever lists trouble cannot be read as an
+# inventory.
 
 st.markdown('<div style="height:.4rem"></div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="dq-sectionhd"><span class="t">Critical elements nothing valid is '
-    "watching</span>"
-    '<span class="q">a finding here is a defect in the rule set, not in the data'
-    "</span></div>",
+    '<div class="dq-sectionhd"><span class="t">Critical data elements</span>'
+    '<span class="q">what the business registered as mattering, and how the data '
+    "behind each one is doing</span></div>",
     unsafe_allow_html=True,
 )
 
@@ -961,65 +1058,78 @@ if cde_cov.empty:
     st.caption("No critical data elements are registered.")
 else:
     # One row per ELEMENT, carrying its worst finding — the same count the tile above
-    # reports, so the two cannot disagree.
-    gaps = (cde_cov[cde_cov["coverage_gap"] != "covered"]
-            .assign(_g=lambda x: x["coverage_gap"].map(
-                {g: i for i, g in enumerate(theme.COVERAGE_GAP_ORDER)}),
-                _c=lambda x: x["criticality"].map(
-                {c: i for i, c in enumerate(theme.CRITICALITY_ORDER)}))
-            .sort_values(["_c", "_g", "cde_name"])
-            .groupby("cde_id", as_index=False).head(1)
-            .sort_values(["_c", "_g", "cde_name"]))
+    # reports, so the two cannot disagree. Three bindings of Customer name with
+    # nothing validating them is one element, not three findings.
+    elements = (cde_cov
+                .assign(_g=lambda x: x["coverage_gap"].map(
+                    {g: i for i, g in enumerate(theme.COVERAGE_GAP_ORDER)}),
+                    _c=lambda x: x["criticality"].map(
+                    {c: i for i, c in enumerate(theme.CRITICALITY_ORDER)}))
+                .sort_values(["_c", "_g", "cde_name"])
+                .groupby("cde_id", as_index=False).head(1)
+                .sort_values(["_c", "_g", "cde_name"]))
 
-    if gaps.empty:
-        st.caption("Every registered element has an active rule examining its values.")
-    else:
-        gap_rules = {i for ids in gaps["unscoped_rule_ids"]
-                     for i in components.as_list(ids)}
-        gap_cohorts = metrics.cohort_for_rules(all_cohorts, gap_rules)
+    scores = _element_scores(cde_cov, in_domain[in_domain["run_id"] == latest_run_id])
 
-        rows = []
-        for _, r in gaps.iterrows():
-            cohort_id = next((gap_cohorts[i] for i in components.as_list(
-                r["unscoped_rule_ids"]) if i in gap_cohorts), None)
-            rows.append({
-                "cde_id": r["cde_id"],
-                "Element": r["cde_name"],
-                "Criticality": r["criticality"],
-                "Problem": _gap_sentence(r),
-                # Where the fix is, not what it is: a scope mismatch already has a
-                # cohort carrying the evidence, and pointing at it is more use than
-                # repeating the instruction.
-                "Do": (f"see COH {cohort_id[:8]}" if cohort_id
-                       else WHAT_TO_DO.get(r["coverage_gap"], "review")),
-            })
+    rows = []
+    for _, r in elements.iterrows():
+        checks = len({i for lst in cde_cov[cde_cov["cde_id"] == r["cde_id"]]["rule_ids"]
+                      for i in components.as_list(lst)})
+        rows.append({
+            "cde_id": r["cde_id"],
+            "Element": r["cde_name"],
+            "Kind": theme.data_class_label(r["data_class"]),
+            "Criticality": r["criticality"],
+            "Coverage": r["coverage_gap"],
+            "Checks": checks,
+            "Score": scores.get(r["cde_id"]),
+        })
 
-        def _gap_cells(row) -> str:
-            return (
-                f'<span class="name" title="{html.escape(str(row["Element"]))}">'
-                f'{html.escape(str(row["Element"]))}</span>'
-                + f'<span>{theme.criticality_badge(row["Criticality"])}</span>'
-                + f'<span class="txt" title="{html.escape(str(row["Problem"]))}">'
-                  f'{html.escape(str(row["Problem"]))}</span>'
-                + f'<span class="mono">{html.escape(str(row["Do"]))}</span>'
-            )
-
-        components.row_head(GAP_HEADS, GAP_GRID)
-        with st.container(key="dqrows_gap"):
-            got = components.clickable_rows(
-                rows, GAP_GRID, _gap_cells, "gap", "cde_id",
-                lambda r: f"Open {r['Element']}",
-                picked=st.session_state.get("_cde_pick"))
-        if got:
-            st.session_state["_cde_pick"] = got
-            st.rerun()
-
-        st.markdown(
-            f'<div class="dq-tablefoot">{len(rows)} of {cde_sum["elements"]} '
-            f"registered elements · {cde_sum['scope_mismatches']} rule(s) "
-            "contradicting a registered scope</div>",
-            unsafe_allow_html=True,
+    def _element_cells(row) -> str:
+        score = row["Score"]
+        # A missing score is a dash, never a zero. Nothing watching an element is a
+        # gap in the register; zero percent would report it as a data defect.
+        score_txt = "\u2014" if score is None else theme.pct_text(score, 1) + "%"
+        # Only a covered element's score is coloured. `Identity document number`
+        # scores 100% on a presence check while nothing looks at what the column
+        # holds, and painting that green is the page telling a comfortable lie; a
+        # scope mismatch is the same problem inverted — 50% in red reads as bad data
+        # when the register's claim is that the rule is wrong. Both keep the figure
+        # and lose the verdict, which is what the Coverage cell beside them is for.
+        tone = ("neutral" if score is None or row["Coverage"] != "covered"
+                else "success" if score >= 99.5
+                else "moderate" if score >= 95 else "critical")
+        return (
+            f'<span class="name" title="{html.escape(str(row["Element"]))}">'
+            f'{html.escape(str(row["Element"]))}</span>'
+            + f'<span class="txt">{html.escape(str(row["Kind"]))}</span>'
+            + f'<span>{theme.criticality_badge(row["Criticality"])}</span>'
+            + f'<span>{theme.coverage_badge(row["Coverage"])}</span>'
+            + f'<span class="num">{row["Checks"]}</span>'
+            + f'<span class="num" style="color:{theme.TONE[tone]["fg"]}">'
+              f"{score_txt}</span>"
         )
+
+    components.row_head(ELEMENT_HEADS, ELEMENT_GRID)
+    with st.container(key="dqrows_cde"):
+        got = components.clickable_rows(
+            rows, ELEMENT_GRID, _element_cells, "cde", "cde_id",
+            lambda r: f"Open {r['Element']}",
+            picked=st.session_state.get("_cde_pick"))
+    if got:
+        st.session_state["_cde_pick"] = got
+        st.rerun()
+
+    # The two figures a reader needs to hold the column in their head: the score is
+    # over the element's own checks, so an element with none has none.
+    _scored = sum(1 for r in rows if r["Score"] is not None)
+    _covered = sum(1 for r in rows if r["Coverage"] == "covered")
+    st.markdown(
+        f'<div class="dq-tablefoot">{len(rows)} registered elements · '
+        f"{_covered} with a rule examining their values · {_scored} scored on this "
+        "run</div>",
+        unsafe_allow_html=True,
+    )
 
 # The element drawer, and only when no check drawer is open — two fixed panels at the
 # same edge would stack on top of each other.
