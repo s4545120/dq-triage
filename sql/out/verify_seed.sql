@@ -7,9 +7,9 @@
 -- =====================================================================
 
 -- 1. Row counts. Expected: 35, 6, 10.
-SELECT 'sdpt_data_trnf.udp_brnz.dq_config_rule_registry' AS t, count(*) AS actual, 35 AS expected FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry;
-SELECT 'sdpt_data_trnf.udp_brnz.dq_config_playbook' AS t, count(*) AS actual, 6 AS expected FROM sdpt_data_trnf.udp_brnz.dq_config_playbook;
-SELECT 'sdpt_data_trnf.udp_brnz.dq_config_cde_registry' AS t, count(*) AS actual, 10 AS expected FROM sdpt_data_trnf.udp_brnz.dq_config_cde_registry;
+SELECT 'workspace.dq_triage.dq_config_rule_registry' AS t, count(*) AS actual, 35 AS expected FROM workspace.dq_triage.dq_config_rule_registry;
+SELECT 'workspace.dq_triage.dq_config_playbook' AS t, count(*) AS actual, 6 AS expected FROM workspace.dq_triage.dq_config_playbook;
+SELECT 'workspace.dq_triage.dq_config_cde_registry' AS t, count(*) AS actual, 10 AS expected FROM workspace.dq_triage.dq_config_cde_registry;
 
 -- 2. rule_expr round-trip. EXPECTED: zero rows.
 --    Any row here is an escaping failure — do not proceed to the check runner.
@@ -53,12 +53,12 @@ WITH expected(rule_id, rule_version, len) AS (VALUES
 SELECT e.rule_id, e.rule_version, e.len AS expected_len,
        length(r.rule_expr) AS actual_len
 FROM   expected e
-JOIN   sdpt_data_trnf.udp_brnz.dq_config_rule_registry r ON r.rule_id = e.rule_id AND r.rule_version = e.rule_version
+JOIN   workspace.dq_triage.dq_config_rule_registry r ON r.rule_id = e.rule_id AND r.rule_version = e.rule_version
 WHERE  length(r.rule_expr) <> e.len;
 
 -- 3. Eyeball one. EXPECTED: the regex shows DOUBLE backslashes, e.g. [^@\\s.]
-SELECT rule_expr FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'CTCT_EML_FMT';
+SELECT rule_expr FROM workspace.dq_triage.dq_config_rule_registry WHERE rule_id = 'CTCT_EML_FMT';
 
 -- 4. Every rule now points at a table that exists. EXPECTED: zero rows.
-SELECT DISTINCT target_table FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+SELECT DISTINCT target_table FROM workspace.dq_triage.dq_config_rule_registry
 WHERE  target_table LIKE 'prod.%';
