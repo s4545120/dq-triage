@@ -163,3 +163,25 @@ python3 sql/checkrun.py   --catalog C --schema S --prefix P --src-prefix dq_mock
 Then fix `sql/out/verify_results.sql` by hand and set `CATALOG`/`SCHEMA`/`PREFIX` in the
 notebook's config cell. `render.py` exits non-zero if any statement still carries an
 unsubstituted placeholder, so a clean exit means every file will parse.
+
+## Known deviations — accepted, not bugs
+
+Recorded 2026-09-18 after the first real run, so they are not rediscovered as defects.
+
+**`XREF_NAME_AGREEMENT` reads 0 where the fixture reads 2.** The CSVs were loaded
+through the UI rather than `COPY INTO`, so blank fields landed as `NULL` instead of `''`.
+`'' <> 'John'` is TRUE; `NULL <> 'John'` is NULL, so the rule finds nothing. Row counts
+are otherwise correct — this is representation, not a load failure. It costs one rule of
+34 and shows up in two places: `check_run` (1 row `pass` instead of `breach`) and
+`violation_sample` (1026 rows instead of 1028). `sql/out/mocktables.sql` Option A fixes
+it whenever that is worth doing; for a POC it is not.
+
+**The latest check run is dated when you ran it**, not 2026-09-02. `checkrun_insert.sql`
+stamps `current_timestamp()`. Harmless, but it means the newest run in the workspace and
+the newest run in the fixture are different days.
+
+**`check_run.message` is worded differently** between `checkrun_insert.sql` and the
+fixture generator. Cosmetic; nothing reads it.
+
+**`results.cohort` has more rows than the fixture** once notebook 03 has run — the
+fixture's 14 seeded cohorts plus whatever the notebook raised.

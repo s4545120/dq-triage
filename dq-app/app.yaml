@@ -4,24 +4,27 @@ command:
   - app.py
 
 env:
-  # The deployed app reads the generated fixture bundled at
-  # dq_app/fixture_data/, not Unity Catalog. Writes are session-only and the
-  # sidebar says so. Nothing here touches a workspace table.
+  # WORKSPACE MODE — reads Unity Catalog, writes the register.
+  #
+  # To go back to the self-contained demo, set this to `local` and comment out the
+  # rest of this block: the app then reads the fixture bundled at
+  # dq_app/fixture_data/, writes are session-only, and nothing touches a workspace.
   - name: DQ_APP_DATA_SOURCE
-    value: local
+    value: databricks
 
-  # Workspace mode, when the DDL has been run and the app is given a warehouse.
-  # Uncomment these, set DQ_APP_DATA_SOURCE to `databricks`, uncomment the two
-  # client libraries in requirements.txt, and attach a SQL warehouse to the app
-  # under the resource key named by `valueFrom`.
-  #
-  # DQ_SCHEMA is only for a sandpit rendered by sql/render.py, which folds the
-  # config/results schema split into a name prefix. Leave it out for the
+  # DQ_SCHEMA set means the sandpit layout rendered by sql/render.py, which folds
+  # the config/results schema split into a name prefix. Leave DQ_SCHEMA out for the
   # two-schema layout sql/ddl/ actually declares.
-  #
-  # - name: DQ_CATALOG
-  #   value: dq
-  # - name: DQ_SCHEMA
-  #   value: udp_brnz
-  # - name: DATABRICKS_WAREHOUSE_ID
-  #   valueFrom: sql-warehouse
+  - name: DQ_CATALOG
+    value: workspace
+  - name: DQ_SCHEMA
+    value: dq_triage
+  - name: DQ_PREFIX
+    value: dq_
+
+  # Not discovered — the warehouse is attached to the app as a resource, and this
+  # surfaces its id. `valueFrom` must match the resource KEY you gave it in the
+  # app's Configure → Resources panel. An app with no warehouse attached fails with
+  # a readable message from databricks_source._cursor, not a connection timeout.
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse

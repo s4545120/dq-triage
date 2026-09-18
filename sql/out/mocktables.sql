@@ -56,7 +56,7 @@ COMMENT 'Mock source stand-in for prod.customer.ctct_c. All STRING by design: a 
 
 -- Option A — CSV already in a volume:
 -- COPY INTO workspace.dq_triage.dq_mock_ctct_c
---   FROM '/Volumes/<catalog>/<schema>/<volume>/mock_ctct_c_1000 (1).csv'
+--   FROM '/Volumes/workspace/dq_triage/raw/mock_ctct_c_1000 (1).csv'
 --   FILEFORMAT = CSV
 --   FORMAT_OPTIONS ('header' = 'true',
 --                   'inferSchema' = 'false',
@@ -112,7 +112,7 @@ COMMENT 'Mock source stand-in for prod.customer.subs_c. All STRING by design: a 
 
 -- Option A — CSV already in a volume:
 -- COPY INTO workspace.dq_triage.dq_mock_subs_c
---   FROM '/Volumes/<catalog>/<schema>/<volume>/mock_subs_c_1000 (1).csv'
+--   FROM '/Volumes/workspace/dq_triage/raw/mock_subs_c_1000 (1).csv'
 --   FILEFORMAT = CSV
 --   FORMAT_OPTIONS ('header' = 'true',
 --                   'inferSchema' = 'false',
