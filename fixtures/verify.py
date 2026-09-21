@@ -99,6 +99,46 @@ if NOTEBOOK.exists():
             findings.append(f"notebook_drift: cohort.{c} is declared in "
                             "05_results_cohort.sql and the triage notebook never writes it")
 
+# --- 5. The notebook's state enum against the view that produces them --------
+# `validate()` in the triage notebook rejects any response whose prior_state is not
+# in its PRIOR_STATES list. v_cohort_current is what computes those states, so a
+# state the view can return and the list omits rejects every brief that mentions it
+# -- and the answer is thrown away after the model call has been paid for.
+#
+# That happened: the list held seven of the ten and omitted `awaiting_triage`, which
+# is what the view returns for a cohort with no disposition events, which is every
+# cohort the notebook itself writes. The first run worked and the second advised
+# nothing. This is the check that would have caught it on a laptop.
+if NOTEBOOK.exists():
+    view_sql = (DDL_DIR / "08_views.sql").read_text()
+    case = re.search(r"CASE\s*\n(.*?)END\s+AS lifecycle_state", view_sql, re.S)
+    if not case:
+        findings.append("view_drift: cannot find the lifecycle_state CASE in 08_views.sql")
+    else:
+        view_states = set(re.findall(r"'([a-z_]+)'", case.group(1)))
+        # The CASE also tests decision values on the way to a state; those are not
+        # states. Keep only what a THEN or the ELSE actually returns.
+        view_states = set(re.findall(r"(?:THEN|ELSE)\s+'([a-z_]+)'", case.group(1)))
+
+        enum = re.search(r"PRIOR_STATES = \[(.*?)\]",
+                         "".join(c for cell in cells if cell["cell_type"] == "code"
+                                 for c in cell["source"]), re.S)
+        if not enum:
+            findings.append("notebook_drift: PRIOR_STATES not found in the triage notebook")
+        else:
+            listed = set(re.findall(r"'([a-z_]+)'|\"([a-z_]+)\"", enum.group(1)))
+            listed = {a or b for a, b in listed}
+            for st in sorted(view_states - listed):
+                findings.append(
+                    f"notebook_drift: v_cohort_current can return {st!r} and the triage "
+                    "notebook's PRIOR_STATES omits it -- every brief carrying that state "
+                    "would be rejected after the model call")
+            # "none" is the notebook's own, for a group with no prior cohort at all.
+            for st in sorted(listed - view_states - {"none"}):
+                findings.append(
+                    f"notebook_drift: the triage notebook accepts prior_state {st!r}, "
+                    "which v_cohort_current never returns")
+
 # --- v_disposition_integrity, clause by clause ------------------------------
 req = coh.set_index("cohort_id").severity.map(lambda s: 2 if s == "P1_block" else 1)
 appr = disp[disp.event_type == "approved"].groupby("cohort_id").actor_identity.nunique()

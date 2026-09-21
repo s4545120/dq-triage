@@ -98,7 +98,27 @@ def _cursor():
 def _q(sql: str) -> pd.DataFrame:
     with _cursor() as cur:
         cur.execute(sql)
-        return cur.fetchall_arrow().to_pandas()
+        return _naive_timestamps(cur.fetchall_arrow().to_pandas())
+
+
+def _naive_timestamps(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop the timezone from every timestamp column, converting to UTC first.
+
+    Unity Catalog hands back tz-aware timestamps; the fixture's parquet is tz-naive.
+    Pandas refuses to subtract one from the other, so a page that works on the
+    fixture raises `Cannot subtract tz-naive and tz-aware datetime-like objects` in
+    workspace mode — which is what the detail page's `raised_ts` age line did the
+    first time this adapter was ever run.
+
+    Normalising here rather than in the pages is the point of having an adapter: the
+    two sources must be interchangeable, and the fixture is the one with 80-odd
+    tests pinned to it. TIMESTAMP in this DDL is UTC, so converting and dropping the
+    tz loses nothing that was stored.
+    """
+    for col in df.columns:
+        if isinstance(df[col].dtype, pd.DatetimeTZDtype):
+            df[col] = df[col].dt.tz_convert("UTC").dt.tz_localize(None)
+    return df
 
 
 def _exec(sql: str) -> None:

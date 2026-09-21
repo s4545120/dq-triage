@@ -8,3 +8,6 @@ fixtures/out_bad/
 *.csv
 .pytest_cache/
 .claude/
+
+# `databricks sync` state. Local to whoever ran the deploy, not repo content.
+.databricks/

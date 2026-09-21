@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
+
+# `databricks sync` state. Local to whoever ran the deploy, not repo content.
+.databricks/
