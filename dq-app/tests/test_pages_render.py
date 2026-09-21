@@ -41,6 +41,12 @@ def _body(at) -> str:
     return " ".join(str(m.value) for m in at.markdown)
 
 
+def _text(at) -> str:
+    """Markdown and captions. `st.caption` is its own element type, so a page whose
+    explanation lives in one reads as blank to `_body`."""
+    return _body(at) + " " + " ".join(str(c.value) for c in at.caption)
+
+
 @pytest.mark.parametrize("page", PAGES)
 def test_page_renders(page):
     _run(page)
@@ -113,6 +119,119 @@ def test_detail_page_renders_every_lifecycle_state():
     assert {"reopened", "awaiting_review", "approved_awaiting_execution"} <= set(
         current["lifecycle_state"]
     )
+
+
+def _cohorts():
+    import pandas as pd
+
+    path = APP_DIR.parent / "fixtures" / "out" / "results.cohort.parquet"
+    if not path.exists():
+        pytest.skip("fixture not built")
+    return pd.read_parquet(path)
+
+
+def test_the_claim_carries_the_verdict_the_model_actually_returned():
+    """Seven fields the model produces used to survive only inside
+    `model_input_payload`, where nothing queried them and no page showed them. They
+    are columns now, and this asserts they reach the page rather than the JSON.
+
+    Rendered on the largest cohort, which is COH-A: nine members, a rival the model
+    declined to offer, and a defect in the data."""
+    cohorts = _cohorts()
+    target = cohorts.sort_values("member_count").iloc[-1]
+    at = _run("dq_app/ui/pages/triage_detail.py", selected_cohort=target["cohort_id"])
+    body = _body(at)
+
+    assert "confidence" in body.lower(), "the model's confidence is not on the page"
+    assert "The data is wrong" in body, "defect_location did not reach the page"
+    # The evidence summary, itemised. One point checked verbatim: if `evidence_points`
+    # stops being rendered, the paragraph above it still reads fine and nothing else
+    # in this suite would notice.
+    assert str(target["evidence_points"][0])[:40] in body
+    assert str(target["recommended_steps"][0])[:40] in body
+    assert "Who should act" in body
+    assert "How we will know it worked" in body
+    assert "Grouping: holds" in body
+
+
+def test_a_rule_defect_says_so_rather_than_implying_it():
+    """COH-B's whole point is that the 700 rows are correct and the rules are wrong.
+    That verdict was the model's from the first run and had nowhere to go; the page
+    has to say it in words, because a reader who infers it from the prose has to
+    already know the answer."""
+    cohorts = _cohorts()
+    rule_defects = cohorts[cohorts["defect_location"] == "rule"]
+    assert not rule_defects.empty, "no rule-defect cohort in the fixture — COH-B is it"
+
+    at = _run("dq_app/ui/pages/triage_detail.py",
+              selected_cohort=rule_defects.iloc[0]["cohort_id"])
+    body = _text(at)
+    assert "The rule is wrong" in body
+    assert "correcting this data would make correct records wrong" in body.lower()
+
+
+def test_neither_is_offered_as_an_answer_and_not_as_a_hedge():
+    """`defect_location` has three values because two is not enough: the data can be
+    correct and the rule reasonable, with the disagreement between them a business
+    question. The page must not present that as uncertainty."""
+    cohorts = _cohorts()
+    neither = cohorts[cohorts["defect_location"] == "neither"]
+    assert not neither.empty, "no 'neither' cohort in the fixture"
+
+    at = _run("dq_app/ui/pages/triage_detail.py",
+              selected_cohort=neither.iloc[0]["cohort_id"])
+    body = _text(at)
+    assert "Neither — a business question" in body
+    assert "business question rather than a defect on either side" in body
+
+
+def test_a_rival_reading_is_shown_where_there_is_one_and_absent_where_there_is_not():
+    """Absence is a claim: the prompt requires the model to say where the evidence is
+    equally consistent with another explanation, so a cohort with no rival is one
+    where it asserted there is none. Both halves are pinned, because a component that
+    silently renders nothing passes a smoke test either way."""
+    cohorts = _cohorts()
+    with_rival = cohorts[cohorts["rival_hypothesis"].notna()]
+    without = cohorts[cohorts["rival_hypothesis"].isna()]
+    assert not with_rival.empty and not without.empty, \
+        "the fixture needs both a cohort with a rival reading and one without"
+
+    at = _run("dq_app/ui/pages/triage_detail.py",
+              selected_cohort=with_rival.iloc[0]["cohort_id"])
+    assert "The evidence also fits" in _body(at)
+
+    at = _run("dq_app/ui/pages/triage_detail.py",
+              selected_cohort=without.iloc[0]["cohort_id"])
+    assert "The evidence also fits" not in _body(at)
+
+
+def test_prior_advice_is_shown_on_a_problem_that_has_been_here_before():
+    """The spec's worked failure: a run blind to the register re-recommends what has
+    already been tried. COH-D is the case — CTCT_PHN_FMT was closed and came back —
+    and the page has to say what is different this time."""
+    cohorts = _cohorts()
+    repeat = cohorts[cohorts["prior_state"] != "none"]
+    assert not repeat.empty, "no cohort with prior history in the fixture — COH-D is it"
+
+    at = _run("dq_app/ui/pages/triage_detail.py",
+              selected_cohort=repeat.iloc[0]["cohort_id"])
+    body = _body(at)
+    assert "These rules have been here before" in body
+    assert "Different this time" in body
+
+
+def test_no_recommended_step_can_be_executed():
+    """The defining non-goal, checked where a reader meets it. The prompt forbids a
+    write statement, the triage job's validator rejects one, a CHECK constraint on
+    the table refuses one and `fixtures/verify.py` asserts it — this is the fourth
+    place, and the only one that covers what the page actually prints."""
+    import re as _re
+
+    write = _re.compile(r"\b(UPDATE|MERGE\s+INTO|DELETE\s+FROM|TRUNCATE|DROP)\b")
+    cohorts = _cohorts()
+    for _, c in cohorts.iterrows():
+        for step in list(c["recommended_steps"]) + [c["recommended_approach"]]:
+            assert not write.search(str(step)), f"{c['cohort_id']}: {step[:60]!r}"
 
 
 def test_scorecard_opens_every_failing_check():

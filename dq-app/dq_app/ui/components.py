@@ -513,6 +513,118 @@ def blast_radius_view(cohort_row) -> None:
             st.markdown(f"`{t}`")
 
 
+# --- The verdict: what the model concluded, itemised ------------------------
+# Every one of these reads a column that until now existed only inside
+# `model_input_payload`, where nothing could query it and no page could show it.
+# They render nothing when their column is empty, so a cohort written before the
+# columns existed degrades to exactly the page it had.
+
+
+def itemised(items, ordered: bool = True) -> str:
+    """A list of one-fact-per-line, numbered or dotted.
+
+    Ordered for steps, where the sequence is the content. Dotted for evidence, where
+    numbering would imply an order the facts do not have.
+    """
+    rows = [str(i).strip() for i in as_list(items) if str(i).strip()]
+    if not rows:
+        return ""
+    lis = "".join(f"<li>{html.escape(r)}</li>" for r in rows)
+    return f'<ul class="dq-list{"" if ordered else " dots"}">{lis}</ul>'
+
+
+def evidence_points_view(cohort_row) -> None:
+    """The evidence summary itemised — the unit a steward actually works in.
+
+    The summary paragraph above this has to be accepted or rejected whole. These can
+    be taken one at a time, which is what confirming a hypothesis looks like: three
+    of four facts holding and the fourth not is the most useful outcome this page
+    can produce, and a paragraph cannot express it.
+    """
+    markup = itemised(cohort_row.get("evidence_points"), ordered=False)
+    if markup:
+        st.markdown(markup, unsafe_allow_html=True)
+
+
+def rival_view(cohort_row) -> None:
+    """The reading the same evidence also supports.
+
+    Absence is a claim here, not an omission: the prompt requires the model to say
+    where the evidence is equally consistent with a rival explanation, so a cohort
+    with no rival is one where it asserted there is none. Rendering nothing is
+    therefore correct — but it is the reason this is its own tinted box rather than
+    a sentence inside the hypothesis, where it read as hedging.
+    """
+    rival = opt(cohort_row.get("rival_hypothesis"))
+    if not rival:
+        return
+    st.markdown(
+        f'<div class="dq-rival"><b>The evidence also fits:</b> {html.escape(str(rival))}'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def grouping_note(cohort_row) -> None:
+    """What the model made of the grouping it was handed.
+
+    The grouping is mechanical — run history only, never meaning — so the model's
+    review of it is a finding in its own right. `rejected` never reaches this page:
+    the triage job raises no cohort at all for one. `partial` does, carrying the
+    members one cause does not explain, which are surfaced here rather than dropped
+    in silence.
+    """
+    verdict = opt(cohort_row.get("grouping_verdict"))
+    if not verdict:
+        return
+    uncovered = [str(r) for r in as_list(cohort_row.get("members_not_covered"))]
+    n = int(cohort_row["member_count"])
+    if verdict == "partial" and uncovered:
+        st.markdown(
+            theme.badge("Grouping: partial", "moderate", "alert")
+            + f'<span class="dq-quiet"> One cause explains {n} of {n + len(uncovered)} '
+            "proposed checks. Not covered, and raised nowhere else: "
+            + ", ".join(f"<code>{html.escape(r)}</code>" for r in uncovered)
+            + ".</span>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            theme.badge("Grouping: holds", "neutral", "check")
+            + f'<span class="dq-quiet"> One cause explains all {n} failing '
+            f'{"check" if n == 1 else "checks"}.</span>',
+            unsafe_allow_html=True,
+        )
+
+
+def prior_advice_note(cohort_row) -> None:
+    """What the register said last time, and what is different now.
+
+    This is the field the spec's worked failure turns on: a run blind to the register
+    re-recommended an action that had already been executed and had already failed
+    verification. `prior_state` is a SNAPSHOT taken when the advice was drafted, not
+    a live state — where the cohort is now is on the strip at the top of the page,
+    and the two are expected to diverge as soon as anyone acts.
+    """
+    prior = opt(cohort_row.get("prior_state"))
+    if not prior or prior == "none":
+        return
+    differs = opt(cohort_row.get("differs_from_prior"))
+    theme.section("These rules have been here before")
+    st.markdown(
+        theme.badge(theme.STATE_LABEL.get(prior, str(prior)), "neutral", "clock")
+        + '<span class="dq-quiet"> — what the register said when this advice was '
+        "drafted.</span>",
+        unsafe_allow_html=True,
+    )
+    if differs:
+        st.markdown(
+            f'<div class="dq-because"><b>Different this time:</b> '
+            f'{html.escape(str(differs))}</div>',
+            unsafe_allow_html=True,
+        )
+
+
 # --- Recommendation ---------------------------------------------------------
 
 
@@ -535,6 +647,44 @@ def recommendation_view(cohort_row, playbook: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
     st.markdown(cohort_row["recommended_approach"])
+
+    # The approach as ordered steps. Prose only — a step carrying a runnable body is
+    # the first move toward an execute button, which is this project's defining
+    # non-goal, so the triage job's validator, a CHECK constraint on the table and
+    # `fixtures/verify.py` all reject one. Nothing here can run any of it; a steward
+    # reads these and acts in their own pipeline.
+    steps = itemised(cohort_row.get("recommended_steps"), ordered=True)
+    if steps:
+        st.markdown(steps, unsafe_allow_html=True)
+
+    owner = opt(cohort_row.get("recommended_owner"))
+    if owner:
+        st.markdown(
+            '<div class="dq-kvline"><span class="k">Who should act:</span> '
+            f'<span>{html.escape(str(owner))}</span></div>',
+            unsafe_allow_html=True,
+        )
+        if str(owner) != str(cohort_row.get("owner_group") or ""):
+            st.caption(
+                "Not the same thing as the owning group.",
+                help="`owner_group` owns the data whatever the remedy turns out to "
+                     "be. Who should act depends on where the defect is — a rule "
+                     "defect is the stewards' to fix, not the source system's.",
+            )
+
+    expectation = opt(cohort_row.get("verification_expectation"))
+    if expectation:
+        st.markdown(
+            f'<div class="dq-because"><b>How we will know it worked:</b> '
+            f'{html.escape(str(expectation))}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "A prediction made in advance, not a memory.",
+            help="Closure is the check runner's to declare, and `verified` tests "
+                 "this sentence. Written after the fact it would only ever agree "
+                 "with whatever happened.",
+        )
 
     pb_id = opt(cohort_row.get("playbook_id"))
     if source == "playbook" and pb_id is not None and (playbook["playbook_id"] == pb_id).any():

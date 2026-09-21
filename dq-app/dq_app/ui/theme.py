@@ -208,6 +208,57 @@ modifies data or triggers a job — the remediation happens in the data owner's 
 pipeline, and the cohort is the record of what was decided and whether it held.
 """
 
+# Where the fix belongs. The model answers `data`, `rule` or `neither`; these are the
+# same three answers in the steward's words, and they are deliberately sentences
+# rather than nouns — "rule" alone reads as a category, "the rule is wrong" reads as
+# the claim it actually is.
+#
+# `neither` is not a hedge and must not be labelled as one. The data can be correct
+# and the rule reasonable, with the disagreement between them being a business
+# question: a plausibility rule firing on customers recorded as under 18 is the
+# worked example. Forcing that into data-or-rule makes the model assert a defect it
+# does not believe in.
+DEFECT_LABEL = {
+    "data": "The data is wrong",
+    "rule": "The rule is wrong",
+    "neither": "Neither — a business question",
+}
+DEFECT_TONE = {"data": "high", "rule": "info", "neither": "neutral"}
+
+DEFECT_MEANING = {
+    "data": "The rule is right and the rows are wrong. The remedy is a correction, "
+            "and it belongs as far upstream as the defect reaches.",
+    "rule": "The rows are right and the rule that judged them is wrong. The remedy "
+            "is a new rule version — correcting this data would make correct "
+            "records wrong.",
+    "neither": "The data may be correct and the rule reasonable, and the "
+               "disagreement between them is a business question rather than a "
+               "defect on either side. Answer the question before changing anything.",
+}
+
+
+def defect_badge(defect_location) -> str:
+    """Where the fix belongs, as a claim rather than a category."""
+    key = str(defect_location or "").strip()
+    if key not in DEFECT_LABEL:
+        return ""
+    return badge(DEFECT_LABEL[key], DEFECT_TONE[key], "wrench")
+
+
+# Confidence bands. The number is the model's own and the word beside it is ours;
+# both are always printed, because a reader who sees only "0.45" has to invent the
+# scale. Tone is the third channel and never the first.
+def confidence_badge(value) -> str:
+    """The model's own confidence, in figures and in words."""
+    if value is None or (isinstance(value, float) and value != value):
+        return ""
+    v = float(value)
+    word, tone = (("high", "neutral") if v >= 0.75
+                  else ("moderate", "moderate") if v >= 0.5
+                  else ("low", "high"))
+    return badge(f"{v:.0%} confidence · {word}", tone)
+
+
 APPROACH_LABEL = {
     "pipeline_rerun": "Pipeline rerun",
     "upstream_ticket": "Upstream ticket",
@@ -764,6 +815,38 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   border-left: 2px solid var(--dq-border); padding-left: .7rem; margin: .5rem 0 .2rem;
   max-width: 78ch; }}
 .dq-because b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
+
+/* --- The itemised verdict: evidence points, steps, and the rival reading. ----
+   One fact per line rather than one paragraph, because that is the unit a steward
+   works in: a hypothesis is confirmed or discarded a fact at a time, and a
+   paragraph has to be taken or left whole.
+
+   Numbered by a counter rather than by an <ol>, so the marker sits inside the
+   padding box and lines up with the text of the line above it. A browser <ol>
+   marker hangs outside the content box and drifts left of the rule as soon as the
+   count reaches double figures. */
+.dq-list {{ counter-reset: dqi; margin: .45rem 0 .2rem; padding: 0;
+  list-style: none; max-width: 80ch; }}
+.dq-list li {{ counter-increment: dqi; position: relative; padding: .18rem 0 .18rem 1.6rem;
+  font-size: .855rem; line-height: 1.55; color: var(--dq-text-2); }}
+.dq-list li::before {{ content: counter(dqi); position: absolute; left: 0; top: .28rem;
+  width: 1.1rem; height: 1.1rem; border-radius: 4px; font-size: .64rem;
+  font-weight: 600; display: grid; place-items: center;
+  background: {NEUTRAL["canvas"]}; border: 1px solid var(--dq-border);
+  color: var(--dq-text-3);
+  font-variant-numeric: tabular-nums; }}
+/* Evidence is checked off, not ordered — a dot rather than a number, because
+   numbering facts implies a sequence they do not have. */
+.dq-list.dots li::before {{ content: ""; width: .32rem; height: .32rem; top: .72rem;
+  left: .42rem; border-radius: 50%; background: var(--dq-text-3); }}
+
+/* The reading the same evidence also supports. Tinted, because the one thing a
+   reader must not do is mistake it for part of the claim. */
+.dq-rival {{ font-size: .84rem; line-height: 1.6; max-width: 80ch;
+  border: 1px dashed var(--dq-border); border-radius: 8px;
+  padding: .55rem .7rem; margin: .6rem 0 .2rem; color: var(--dq-text-2);
+  background: {NEUTRAL["canvas"]}; }}
+.dq-rival b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
 
 /* --- Estate tiles: six counts of what is watched. ---------------------------
    Their own card rather than `.dq-kpi`, which is borderless and reads as loose text

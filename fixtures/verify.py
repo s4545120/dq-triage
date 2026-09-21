@@ -7,6 +7,9 @@
      Databricks side will accept this data -- if the generator grows a column the
      DDL does not declare, the INSERT fails in the workspace and passes locally,
      which is precisely the class of bug a laptop-first build invites.
+  4. The same diff against the triage notebook's write cell. The notebook is what
+     actually writes results.cohort in a workspace; fixtures/ only stands in for it
+     here, so a column added to one and not the other is a break nothing else sees.
 
     ../.venv/bin/python verify.py [out_dir]
 
@@ -69,6 +72,33 @@ for tbl, fname in DDL_FOR.items():
         findings.append(f"schema_drift: {tbl}.{c} is declared in {fname} but never "
                         f"written by the generator")
 
+# --- 4. The notebook that will really write results.cohort ------------------
+# fixtures/ stands in for the triage job locally. The job itself is
+# notebooks/03_group_and_advise.ipynb, and it has never been executed -- so the only
+# thing that can check its write against the DDL is a reader, or this.
+NOTEBOOK = Path(__file__).parent.parent / "notebooks" / "03_group_and_advise.ipynb"
+if NOTEBOOK.exists():
+    import json as _json
+
+    cells = _json.loads(NOTEBOOK.read_text())["cells"]
+    # Anchored on the INSERT's staging view rather than on a field name: two cells
+    # mention cohort_id, and only one of them builds the row that is written.
+    write_cells = [c for c in cells
+                   if c["cell_type"] == "code"
+                   and "createOrReplaceTempView(\"candidate_cohorts\")" in "".join(c["source"])]
+    if len(write_cells) != 1:
+        findings.append(f"notebook_drift: expected one cell building the cohort row, "
+                        f"found {len(write_cells)} -- this check can no longer find the write")
+    else:
+        emitted = set(re.findall(r'^\s{8}"([a-z_]+)":', "".join(write_cells[0]["source"]), re.M))
+        declared = ddl_columns("05_results_cohort.sql")
+        for c in sorted(emitted - declared):
+            findings.append(f"notebook_drift: the triage notebook writes cohort.{c}, "
+                            "which 05_results_cohort.sql does not declare")
+        for c in sorted(declared - emitted):
+            findings.append(f"notebook_drift: cohort.{c} is declared in "
+                            "05_results_cohort.sql and the triage notebook never writes it")
+
 # --- v_disposition_integrity, clause by clause ------------------------------
 req = coh.set_index("cohort_id").severity.map(lambda s: 2 if s == "P1_block" else 1)
 appr = disp[disp.event_type == "approved"].groupby("cohort_id").actor_identity.nunique()
@@ -112,6 +142,51 @@ for _, c in coh.iterrows():
         assert rid in res.index, f"{c.cohort_id} references unknown result {rid}"
         assert res.loc[rid, "status"] in ("breach", "skipped"), \
             f"{c.cohort_id} member {res.loc[rid,'rule_id']} is not a breach"
+
+# --- The cohort verdict fields ----------------------------------------------
+# These are columns rather than JSON so the app can render them, which means the
+# CHECK constraints in 05_results_cohort.sql now have something to constrain. Each
+# assertion below is the Python twin of one of them.
+
+WRITE_STATEMENT = re.compile(r"\b(UPDATE|MERGE\s+INTO|DELETE\s+FROM|TRUNCATE|DROP)\b", re.I)
+
+for _, c in coh.iterrows():
+    assert c.defect_location in ("data", "rule", "neither"), \
+        f"{c.cohort_id} has defect_location {c.defect_location!r}"
+    assert c.grouping_verdict in ("holds", "partial"), \
+        f"{c.cohort_id} stores grouping_verdict {c.grouping_verdict!r} -- a rejected " \
+        "grouping raises no cohort at all"
+    assert (c.grouping_verdict == "partial") == (len(c.members_not_covered) > 0), \
+        f"{c.cohort_id} is {c.grouping_verdict} with {len(c.members_not_covered)} " \
+        "uncovered member(s) -- partial is exactly the case where one cause leaves " \
+        "members out, and the two must agree or the write dropped members silently"
+    assert 0.0 <= float(c.confidence) <= 1.0, f"{c.cohort_id} confidence out of range"
+    assert c.prior_state in (
+        "none", "awaiting_review", "approved_awaiting_execution", "deferred",
+        "closed_verified", "closed_rejected", "reopened"), \
+        f"{c.cohort_id} has prior_state {c.prior_state!r}"
+    # differs_from_prior answers "what is different this time", so it is meaningless
+    # without a prior and required with one.
+    said_before = pd.notna(c.differs_from_prior)
+    assert (c.prior_state == "none") != said_before, \
+        f"{c.cohort_id}: prior_state={c.prior_state!r} and differs_from_prior is " \
+        f"{'present' if said_before else 'absent'}"
+    # THE NON-EXECUTION INVARIANT. Same gate as the triage job's validator and the
+    # cohort_steps_are_not_executable constraint. A step carrying a runnable body is
+    # the first move toward an execute button, which is this project's defining
+    # non-goal -- so it is checked in all three places rather than trusted in one.
+    for step in list(c.recommended_steps) + [c.recommended_approach]:
+        assert not WRITE_STATEMENT.search(step), \
+            f"{c.cohort_id} recommends a write statement: {step[:80]!r}"
+    # A hypothesis with no itemised evidence is a paragraph a steward has to take or
+    # leave whole, which is the thing evidence_points exists to prevent.
+    assert len(c.evidence_points) >= 1, f"{c.cohort_id} has no evidence_points"
+    assert len(c.recommended_steps) >= 1, f"{c.cohort_id} has no recommended_steps"
+    assert str(c.verification_expectation).strip(), \
+        f"{c.cohort_id} predicts nothing, so `verified` has nothing to test"
+    for rid in c.members_not_covered:
+        assert rid not in list(c.member_rule_ids), \
+            f"{c.cohort_id} lists {rid} as both a member and not covered"
 
 # --- CDE register, profile and coverage -------------------------------------
 # The ordering claim, checked rather than asserted in prose: an element is

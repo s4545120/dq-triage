@@ -396,6 +396,33 @@ class CohortSpec:
     blast_radius: list[str] = None
     is_recurrence: bool = False
 
+    # --- The verdict fields ------------------------------------------------
+    # Produced by the model on Databricks, hand-written here, and each one a column
+    # on results.cohort rather than a key inside model_input_payload. They default
+    # to the shape a single-rule historical cohort has, so only the six current
+    # cohorts state them.
+    #
+    # points  -- the evidence summary itemised. One checkable fact per element: a
+    #            steward confirms or discards a hypothesis a fact at a time, where a
+    #            paragraph has to be taken or left whole.
+    # rival   -- the explanation the same evidence also fits, or None where there
+    #            genuinely is not one. None is a claim, not an omission.
+    # defect  -- data | rule | neither.
+    # steps   -- the recommendation as ordered prose. Never a runnable body.
+    # verify  -- what the next run should show if it worked, so `verified` tests a
+    #            prediction made in advance rather than a memory.
+    points: list[str] = None
+    rival: str | None = None
+    confidence: float = 0.80
+    defect: str = "data"
+    grouping_verdict: str = "holds"
+    not_covered: list[str] = None
+    steps: list[str] = None
+    rec_owner: str = "dq-stewards-customer"
+    verify: str = "The member rules return zero on the next scheduled run."
+    prior_state: str = "none"
+    differs_from_prior: str | None = None
+
 
 def _e(event_type: str, day_after: int, **kw):
     return (event_type, day_after, kw)
@@ -425,6 +452,35 @@ CURRENT_COHORTS = [
             "system of record."),
         approach_type="upstream_ticket", playbook_id="PB_UPSTREAM_SOURCE_RELEASE",
         recommendation_source="playbook",
+        points=[
+            "All six email rules were clean on every run to 2026-08-27 and breached "
+            "together on the first run after -- one date, not a drift.",
+            "The 240 addresses fall into six buckets of exactly 40. A formatter emitting "
+            "six variants produces equal buckets; 240 people mistyping does not.",
+            "EML_STTS_CD already flags all 240 as INVALID, so the source's own validator "
+            "agrees the addresses are bad -- the defect is in serialisation, not validation.",
+            "XREF_OPEN_TS_AGREEMENT moved on the same date, which places the change in the "
+            "export as a whole rather than in the email field alone.",
+        ],
+        rival=None,
+        confidence=0.86, defect="data",
+        steps=[
+            "Raise the ticket against the 2026-08-28 CRM export release, quoting the six "
+            "buckets of 40 and the release date -- the buckets are what identify the "
+            "serialiser rather than the data.",
+            "Ask CRM to confirm which of the six variants the formatter emits. If it emits "
+            "fewer than six, part of this cohort has a second cause and should be split.",
+            "Hold the cohort open until a full contact load lands after the fix. A hotfix "
+            "deployed in CRM changes nothing in the warehouse until the next load.",
+            "Do not correct the warehouse copy in the meantime. The source is still emitting "
+            "the bad format, so any correction is overwritten on the next load and leaves "
+            "the warehouse disagreeing with the system of record.",
+        ],
+        rec_owner="CRM platform engineering (source system), with dq-stewards-customer holding the cohort",
+        verify=("All nine member rules return zero on the first run after a full contact "
+                "load that follows the CRM fix. A partial fall -- some rules clearing and "
+                "others not -- means the formatter emits fewer than six variants and the "
+                "remainder have another cause."),
         blast_radius=["prod.marketing.campaign_audience", "prod.billing.invoice_contact",
                       "prod.customer.customer_360", "prod.servicing.notification_queue"],
         # P1: two distinct approvers, then a verification that FAILS and reopens.
@@ -469,6 +525,36 @@ CURRENT_COHORTS = [
             "that the rows were examined and found correct."),
         approach_type="accept_and_document", playbook_id="PB_RULE_SCOPE_AMENDMENT",
         recommendation_source="playbook",
+        points=[
+            "200 of 200 IMEI violations carry PROD_TYPE_KEY = 0 (Fixed Broadband), which has "
+            "no handset. Perfect correlation with a product line, not a distribution.",
+            "500 of 500 billing-account violations carry BILL_SUBS_TYPE_CD = 'PREPAID', which "
+            "has no billing account.",
+            "The correctly-scoped twin rules return zero on the same data -- SUBS_SIM_NOT_NULL "
+            "scoped to PROD_TYPE_KEY <> 0, SUBS_BILL_OFFR_NOT_ZERO scoped to POSTPAID.",
+            "SUBS_MSISDN_FMT already had this defect and was fixed the same way in "
+            "rule_version 2, so the remedy has a precedent in this registry.",
+            "The CDE register asserts it independently: the bindings for IMEI_ID and "
+            "PRIM_ACCT_KEY declare the expected_scope_filter these rules lack, and "
+            "v_cde_coverage reports a scope_mismatch naming both.",
+        ],
+        rival=None,
+        confidence=0.95, defect="rule",
+        steps=[
+            "Reject the cohort. The 700 rows are correct for their product line, and the "
+            "rejection is the audit record that they were examined and found correct.",
+            "Author rule_version 2 of SUBS_IMEI_NOT_NULL with scope_filter "
+            "PROD_TYPE_KEY <> 0, and of SUBS_PRIM_ACCT_NOT_ZERO with BILL_SUBS_TYPE_CD = "
+            "'POSTPAID'. Both are already declared on the CDE bindings.",
+            "Promote both through the registry as shadow first, and compare the shadow "
+            "counts against the twins before making them active.",
+            "Do not correct any of the 700 rows. The remedy for a rule defect is to amend "
+            "the rule; amending the data would make correct records wrong.",
+        ],
+        rec_owner="dq-stewards-customer -- this is a registry change, not a data change",
+        verify=("Shadow runs of rule_version 2 return zero on both rules, matching the "
+                "correctly-scoped twins. The 700 rows are unchanged, which is the point: "
+                "nothing about the data should move."),
         blast_radius=[],
         chain=[
             _e("recommended", 0),
@@ -500,6 +586,33 @@ CURRENT_COHORTS = [
         approach_type="source_correction", playbook_id="PB_PROVISIONING_BACKFILL",
         recommendation_source="playbook",
         blast_radius=["prod.network.service_inventory", "prod.billing.usage_rating"],
+        points=[
+            "All twelve rows carry the identical literal 'service-number-unknown'. One "
+            "placeholder repeated twelve times is a code path, not twelve typing errors.",
+            "All twelve are PRIM_RSRC_TYPE_KEY = 1 (mobile); ten are active and two since "
+            "cancelled, so the path is still live rather than a historical artefact.",
+            "Both breaching rules resolve to the same twelve rows -- this is one problem "
+            "seen twice, which is what the cohort is for.",
+            "SUBS_MSISDN_UNIQUE is scoped to exclude the sentinel and so passes. Without "
+            "that scope it would report the same twelve rows a third time.",
+        ],
+        rival=None,
+        confidence=0.90, defect="data",
+        steps=[
+            "Route to provisioning with the twelve subscription keys and the ten that are "
+            "still active.",
+            "Issue and publish the ten resources; close out the two cancelled subscriptions "
+            "rather than provisioning numbers nobody will use.",
+            "Ask provisioning to fail the order rather than write a sentinel when the "
+            "resource is not yet issued -- correcting twelve rows leaves the path that "
+            "wrote them in place.",
+            "Do not attempt a warehouse correction. The real numbers do not exist in any "
+            "system yet, so there is nothing to copy from.",
+        ],
+        rec_owner="Provisioning operations",
+        verify=("SUBS_MSISDN_SENTINEL and SUBS_MSISDN_FMT both return zero once the ten "
+                "resources are published and the two cancellations land. A count falling "
+                "from twelve to two means the cancellations have not been loaded yet."),
         # P1 but only one approver so far -> stays in approved_awaiting_execution... no:
         # one of two -> awaiting_approval. Fully closed instead, to exercise the pass path.
         chain=[
@@ -534,6 +647,39 @@ CURRENT_COHORTS = [
             "correction will produce the same recurrence in another fortnight."),
         approach_type="upstream_ticket", playbook_id="PB_MANDATORY_FIELD_CAMPAIGN",
         recommendation_source="playbook",
+        points=[
+            "No product-line correlation: the 16 network-technology gaps span all three "
+            "product lines, so the COH-B explanation -- a rule missing its scope -- does "
+            "not apply here.",
+            "No common load date across the three rules, and no step change in any of "
+            "them. The counts have drifted rather than jumped.",
+            "CTCT_PHN_FMT is a recurrence: verified closed on this rule 13 days ago, "
+            "breaching again 8 days later at a similar count.",
+            "The previous fix reformatted 24 rows. A fix that corrects rows and not the "
+            "process that writes them produces exactly this shape of return.",
+        ],
+        rival=("A single upstream collection change could explain all three at once; 40 "
+               "days of run history is too short to rule it out. If one is found, this "
+               "stops being three unrelated gaps and becomes one cohort with a real cause."),
+        confidence=0.45, defect="data",
+        steps=[
+            "Defer to the Q4 contactability campaign with Customer Operations -- these are "
+            "collection gaps, and a campaign is what closes collection gaps.",
+            "Before any re-action, establish why CTCT_PHN_FMT recurred. Re-applying the "
+            "previous row-level correction produces the same recurrence in another fortnight.",
+            "Check whether the landline formatting is written by one channel. If it is, the "
+            "recurrence has a single owner and does not need a campaign at all.",
+        ],
+        rec_owner="Customer Operations (collection), with dq-stewards-customer on the recurrence",
+        verify=("Counts fall and stay down across two consecutive runs. One clean run is "
+                "not enough here: this rule has already been closed once on a single "
+                "clean run and came back."),
+        prior_state="closed_verified",
+        differs_from_prior=(
+            "Last time CTCT_PHN_FMT was closed by reformatting 24 rows at source and "
+            "reloading, and it was verified clean. It returned 13 days later at a similar "
+            "count. This advice deliberately does not repeat that: the row-level correction "
+            "is what is being ruled out, not what is being proposed."),
         blast_radius=["prod.servicing.notification_queue"],
         chain=[
             _e("recommended", 0),
@@ -562,6 +708,34 @@ CURRENT_COHORTS = [
         approach_type="pipeline_rerun", playbook_id=None,
         recommendation_source="generated",
         blast_radius=["prod.customer.customer_360"],
+        points=[
+            "Twelve rows across 1000, stable on every run with no step change -- the shape "
+            "of a steady trickle, not of a release.",
+            "The two name mismatches are plausible variants rather than corruption, so the "
+            "rule may be reporting a legitimate difference.",
+            "Activation-timestamp disagreements are consistent with migrations, where the "
+            "original and the initial activation genuinely differ.",
+            "No playbook entry matched the shape of this problem, so the approach below is "
+            "drafted rather than drawn from one.",
+        ],
+        rival=("The rules may simply be over-strict. If migrations legitimately carry two "
+               "activation timestamps and a deed-poll change legitimately breaks name "
+               "agreement, there is no defect here and the correct disposition is "
+               "no_action on both rules."),
+        confidence=0.55, defect="neither",
+        steps=[
+            "Confirm first whether the two name mismatches are deed-poll changes. If they "
+            "are, the data is correct and the rule is reasonable -- record no_action rather "
+            "than correcting either.",
+            "For the ten timestamp disagreements, re-run the load for the affected "
+            "subscription keys so both tables derive from the same source event.",
+            "If migrations legitimately carry two timestamps, amend the rule to allow it "
+            "rather than re-running the load every month.",
+        ],
+        rec_owner="Customer data platform (load engineering)",
+        verify=("The ten timestamp rows clear on the run after the reload. The two name "
+                "mismatches are expected to persist -- if they clear, something corrected "
+                "a customer's name without a decision, which is worse than the finding."),
         chain=[
             _e("recommended", 0),
             _e("reviewed", 4, actor=STEWARD_B, decision="accepted",
@@ -590,6 +764,37 @@ CURRENT_COHORTS = [
         approach_type="source_correction", playbook_id=None,
         recommendation_source="generated",
         blast_radius=["prod.customer.customer_360", "prod.compliance.vulnerable_customer"],
+        points=[
+            "SPCL_CARE_STTS is 'N' on all 1000 rows. Zero variance in a flag that is "
+            "supposed to vary is the signature of a default, not of a population with no "
+            "vulnerable customers in it.",
+            "All 14 unparseable dates are the byte-identical literal '31-02-1988' -- one "
+            "bad default value written 14 times, not 14 bad records.",
+            "'31-02-1988' is both the wrong format and a date that does not exist, so no "
+            "amount of parsing recovers a real value from it.",
+            "The 27 contacts recorded as 17 all carry a 2009 birth year, which is a "
+            "consistent cohort rather than scattered noise.",
+        ],
+        rival=("The special-care flag may be correct and simply unused: if the pilot "
+               "extract predates the vulnerable-customer programme, 'N' on every row is "
+               "the true state of the source rather than a default. That is a question "
+               "for Customer Operations and it changes the remedy entirely."),
+        confidence=0.70, defect="data",
+        steps=[
+            "Split the remedy. These three share a cause in how the record is defaulted, "
+            "but they do not share a fix.",
+            "Take the defaulted special-care flag to Customer Operations as a source-"
+            "capability question -- whether the field is collected at all.",
+            "Correct the '31-02-1988' default at source. It is a single literal and a "
+            "straightforward source correction.",
+            "Do NOT correct the 27 minors. They need a consent and credit-check review "
+            "first, and the data may well be right.",
+        ],
+        rec_owner="Customer Operations, with Compliance on the 27 minors",
+        verify=("CTCT_BRTH_PARSEABLE returns zero once the default literal is corrected. "
+                "CTCT_SPCL_CARE_VARIANCE and CTCT_BRTH_PLAUSIBLE are expected to keep "
+                "breaching until their questions are answered -- neither has a data fix "
+                "pending, and a fall in either without a decision needs explaining."),
         # No disposition beyond the opening event: exercises awaiting_review and the
         # disposition-coverage metric.
         chain=[_e("recommended", 0)],
@@ -643,6 +848,7 @@ def historical_cohorts() -> list[CohortSpec]:
                playbook=(None if i == 4 else pb)),
             _e("verified", 5, passed=True),
         ]
+        owner = "CRM platform engineering" if i % 2 == 0 else "Provisioning operations"
         specs.append(CohortSpec(
             key=f"HIST-{i + 1}", raised_day=raised, rule_ids=[rule_id], severity=sev,
             hypothesis=title,
@@ -650,6 +856,16 @@ def historical_cohorts() -> list[CohortSpec]:
             recommendation=f"{title}: correct at source and reload the affected window.",
             approach_type=approach, playbook_id=pb, recommendation_source="playbook",
             blast_radius=[], chain=chain,
+            # Thin on purpose. These exist so closure rate and MTTR have a
+            # denominator, and a closed cohort nobody will reopen does not need the
+            # evidence a steward would have needed at the time.
+            points=[f"{before} violations on {rule_id}, steady across every prior run.",
+                    "A single rule with no correlated movement elsewhere in the run."],
+            confidence=0.80, defect="data",
+            steps=[f"Correct {rule_id} at source.",
+                   "Reload the affected window and let the next run verify."],
+            rec_owner=owner,
+            verify=f"{rule_id} returns zero on the run after the reload.",
         ))
     # The recurrence pair: closed once, then broke again and became part of COH-D.
     fixed_day, recur_day, count = RECURRED["CTCT_PHN_FMT"]
@@ -660,6 +876,16 @@ def historical_cohorts() -> list[CohortSpec]:
         recommendation="Correct the affected rows and reload.",
         approach_type="manual_sql", playbook_id=None, recommendation_source="generated",
         blast_radius=[],
+        points=[f"{count} landline numbers with inconsistent formatting, steady across runs.",
+                "Low enough volume to correct directly rather than route to the source."],
+        confidence=0.75, defect="data",
+        steps=["Reformat the affected rows at source and reload."],
+        rec_owner="CRM platform engineering",
+        # This prediction was met and the cohort closed -- and the rule breached again
+        # 13 days later, which is how COH-D's recurrence came to exist. A single clean
+        # run is what this expectation asked for, and a single clean run is what a
+        # row-level correction can deliver without fixing anything.
+        verify="CTCT_PHN_FMT returns zero on the next run.",
         chain=[
             _e("recommended", 0),
             _e("reviewed", 1, actor=STEWARD_C, decision="accepted",
@@ -698,6 +924,12 @@ def build_cohorts_and_dispositions(
             total_violation_rows=int(members.violation_count.sum()),
             root_cause_hypothesis=spec.hypothesis,
             evidence_summary=spec.evidence,
+            evidence_points=spec.points or [],
+            rival_hypothesis=spec.rival,
+            confidence=spec.confidence,
+            defect_location=spec.defect,
+            grouping_verdict=spec.grouping_verdict,
+            members_not_covered=spec.not_covered or [],
             blast_radius_tables=spec.blast_radius or [],
             blast_radius_count=len(spec.blast_radius or []),
             severity=spec.severity,
@@ -709,11 +941,18 @@ def build_cohorts_and_dispositions(
                 + len(spec.blast_radius or []) * 5, 2),
             recommended_approach=spec.recommendation,
             recommended_approach_type=spec.approach_type,
+            recommended_steps=spec.steps or [],
+            recommended_owner=spec.rec_owner,
+            verification_expectation=spec.verify,
+            prior_state=spec.prior_state,
+            differs_from_prior=spec.differs_from_prior,
             playbook_id=spec.playbook_id,
             recommendation_source=spec.recommendation_source,
             model_endpoint=("dq-cohort-triage" if spec.recommendation_source != "none" else None),
             # Stub. On Databricks this is the exact payload the endpoint was shown,
-            # which the parent architecture doc requires be retained for audit.
+            # which the parent architecture doc requires be retained for audit. It
+            # carries the INPUT and the provenance only -- the model's answer lives in
+            # columns above, where the app can reach it.
             model_input_payload=json.dumps({
                 "_fixture": "hand-authored, no model invoked",
                 "member_rule_ids": spec.rule_ids,

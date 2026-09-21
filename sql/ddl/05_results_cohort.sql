@@ -17,6 +17,15 @@
 -- because the parent architecture doc requires every AI output be stored with its
 -- input for audit.
 --
+-- THE VERDICT FIELDS ARE COLUMNS, NOT JSON. grouping_verdict, defect_location,
+-- confidence, recommended_owner, prior_state, differs_from_prior and
+-- members_not_covered were produced by the model from the first run and kept only
+-- inside model_input_payload, where nothing could query them and no page could show
+-- them. defect_location in particular is the highest-value thing the model produces
+-- — it is what turns 700 false breaches into a rule defect — and a field the UI
+-- cannot reach is a field that does not exist. model_input_payload keeps the brief
+-- and the provenance; the answer lives in columns.
+--
 -- A COHORT IS NOT A STATUS. There is no state column here. Where a cohort has got
 -- to is derived from the disposition event log — see 08_views.sql. Adding a status
 -- column here would create a second source of truth that can disagree with the
@@ -33,6 +42,12 @@ CREATE TABLE IF NOT EXISTS {catalog}.results.cohort (
   total_violation_rows BIGINT             COMMENT 'sum of member violation_counts; rows may be double-counted across rules, so this is an indicator not a total',
   root_cause_hypothesis STRING            COMMENT 'the agents proposed cause. A HYPOTHESIS — the UI must not render it as a finding',
   evidence_summary     STRING             COMMENT 'what in the data led to the hypothesis, so a steward can confirm or discard quickly',
+  evidence_points      ARRAY<STRING>      COMMENT 'the summary itemised — one checkable fact per element, each standing on its own. A steward confirms or discards a hypothesis one fact at a time; a paragraph has to be accepted or rejected whole',
+  rival_hypothesis     STRING             COMMENT 'the competing explanation the same evidence also fits, or NULL where there is none. The prompt requires the model to say so; without a column it said so inside the hypothesis, where it read as hedging rather than as a second candidate',
+  confidence           DOUBLE             COMMENT '0.0-1.0, the models own. Advisory and NOT an input to rank_score — ranking on a self-reported number lets a confident wrong answer outrank a hedged right one',
+  defect_location      STRING             COMMENT 'data | rule | neither. Whether the fix belongs in the data or in the rule that judged it. neither exists because a plausibility rule firing on correct rows is a business question, not a defect on either side',
+  grouping_verdict     STRING             COMMENT 'holds | partial | rejected — the models review of the mechanical grouping it was handed. rejected raises no cohort at all, so no row here carries it',
+  members_not_covered  ARRAY<STRING>      COMMENT 'rule_ids from the proposed group that one cause does not explain. Non-empty only when grouping_verdict = partial; they are surfaced for a steward, never silently dropped',
   blast_radius_tables  ARRAY<STRING>      COMMENT 'downstream tables from Unity Catalog lineage, beyond those directly breached',
   blast_radius_count   INT                COMMENT 'size of blast_radius_tables, denormalised for ranking',
   severity             STRING    NOT NULL COMMENT 'highest severity among members; drives the approver count in the register',
@@ -41,6 +56,11 @@ CREATE TABLE IF NOT EXISTS {catalog}.results.cohort (
   rank_score           DOUBLE             COMMENT 'triage ranking, higher first. Advisory — a steward can work the queue in any order',
   recommended_approach STRING             COMMENT 'the approach to take, in prose',
   recommended_approach_type STRING        COMMENT 'pipeline_rerun | upstream_ticket | source_correction | manual_sql | accept_and_document',
+  recommended_steps    ARRAY<STRING>      COMMENT 'the approach broken into ordered steps, in prose. PROSE ONLY — a step carrying a runnable body is the first move toward an execute button, and the triage jobs validator rejects one containing a write statement',
+  recommended_owner    STRING             COMMENT 'who the model believes should act — a team, not a person. Distinct from owner_group, which owns the data whatever the remedy turns out to be: a rule defect is the stewards to fix, not the source systems',
+  verification_expectation STRING         COMMENT 'what the next check run should show if this worked, so the verified event tests a stated prediction rather than a memory. Prose, never a query',
+  prior_state          STRING             COMMENT 'what the register said about these rules when the advice was drafted — none | awaiting_review | approved_awaiting_execution | deferred | closed_verified | closed_rejected | reopened. A SNAPSHOT at advice time, not a live state: where the cohort is now comes from v_cohort_current and the two are expected to diverge',
+  differs_from_prior   STRING             COMMENT 'what this advice does differently from what was already tried, or that it does not. NULL when prior_state is none',
   playbook_id          STRING             COMMENT 'the playbook entry used; NULL when the recommendation was drafted',
   recommendation_source STRING   NOT NULL COMMENT 'playbook | generated | none. generated MUST be surfaced as generated in the UI',
   model_endpoint       STRING             COMMENT 'which serving endpoint produced this, for reproducibility',
@@ -64,3 +84,48 @@ ALTER TABLE {catalog}.results.cohort
 ALTER TABLE {catalog}.results.cohort
   ADD CONSTRAINT cohort_has_members
   CHECK (member_count >= 1);
+
+-- The models verdict on the grouping it was handed. `rejected` means the members do
+-- not belong together, and the triage job raises no cohort at all — so a stored row
+-- may only be `holds` or `partial`. A rejected grouping that reached this table is a
+-- triage-job defect.
+ALTER TABLE {catalog}.results.cohort
+  ADD CONSTRAINT cohort_grouping_verdict_enum
+  CHECK (grouping_verdict IS NULL OR grouping_verdict IN ('holds', 'partial'));
+
+-- Non-empty members_not_covered is exactly what `partial` means. The two disagreeing
+-- means the write dropped members without saying so, which is the failure the field
+-- exists to prevent.
+ALTER TABLE {catalog}.results.cohort
+  ADD CONSTRAINT cohort_partial_names_its_gaps
+  CHECK (grouping_verdict IS NULL
+         OR (grouping_verdict = 'partial') = (size(coalesce(members_not_covered, array())) > 0));
+
+-- `neither` is not a hedge. The data may be correct and the rule reasonable, with the
+-- disagreement between them being a business question — a plausibility rule firing on
+-- customers recorded as under 18 is the worked example. Forcing that into data|rule
+-- makes the model assert a defect it does not believe in.
+ALTER TABLE {catalog}.results.cohort
+  ADD CONSTRAINT cohort_defect_location_enum
+  CHECK (defect_location IS NULL OR defect_location IN ('data', 'rule', 'neither'));
+
+ALTER TABLE {catalog}.results.cohort
+  ADD CONSTRAINT cohort_confidence_range
+  CHECK (confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0));
+
+ALTER TABLE {catalog}.results.cohort
+  ADD CONSTRAINT cohort_prior_state_enum
+  CHECK (prior_state IS NULL OR prior_state IN (
+    'none', 'awaiting_review', 'approved_awaiting_execution', 'deferred',
+    'closed_verified', 'closed_rejected', 'reopened'));
+
+-- THE NON-EXECUTION INVARIANT, AT THE STORAGE LAYER. recommended_steps is prose. A
+-- step carrying a runnable body is the first step toward an execute button, and this
+-- is the same gate the triage jobs validator applies to the response before it is
+-- written — stated twice because the notebook can be edited and the table cannot be
+-- edited quietly.
+ALTER TABLE {catalog}.results.cohort
+  ADD CONSTRAINT cohort_steps_are_not_executable
+  CHECK (recommended_steps IS NULL
+         OR NOT exists(recommended_steps,
+                       s -> upper(s) RLIKE '(^|[^A-Z])(UPDATE|MERGE INTO|DELETE FROM|TRUNCATE|DROP) '));

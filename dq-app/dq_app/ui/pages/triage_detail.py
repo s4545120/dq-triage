@@ -4,8 +4,10 @@
 state strip naming whose turn it is with the one event this state permits. Everything
 else is reading, and reading is what the tabs hold:
 
-  * **Why we think this** — the model's claim, marked as one, and the approach
-    recommended for it.
+  * **Why we think this** — the model's claim, marked as one: how sure it is, where
+    it says the defect lives, the evidence itemised one checkable fact at a time,
+    the rival reading where there is one, what the register already said about
+    these rules, and the approach recommended for it broken into steps.
   * **Evidence** — the failing checks, and the rows behind whichever one you click.
   * **Decisions** — the append-only chain and the approval gate.
   * **Stored record** — every field as stored, for the reader who wants the fields.
@@ -207,6 +209,11 @@ why_tab, evidence_tab, decisions_tab, record_tab = st.tabs([
 ])
 
 with why_tab:
+    # The block head carries the three things that qualify the claim before it is
+    # read: whether it was drafted or drawn from the playbook, how sure the model
+    # says it is, and where the fix belongs. All three are the model's own, and all
+    # three say so — a reader who takes the hypothesis as a finding has been misled
+    # by this page, not by the model.
     st.markdown(
         '<div class="dq-blockhd"><b>THE CLAIM</b>'
         + theme.badge(
@@ -214,6 +221,8 @@ with why_tab:
             else "from the playbook",
             "moderate" if row["recommendation_source"] == "generated" else "neutral",
         )
+        + theme.confidence_badge(extra.get("confidence"))
+        + theme.defect_badge(extra.get("defect_location"))
         + "</div>",
         unsafe_allow_html=True,
     )
@@ -223,8 +232,25 @@ with why_tab:
         "</div>",
         unsafe_allow_html=True,
     )
+    # The same summary, itemised. Confirming a hypothesis is a fact-at-a-time job:
+    # three of four holding and the fourth not is the most useful thing this page can
+    # tell a steward, and the paragraph above cannot express it.
+    components.evidence_points_view(extra)
+    components.rival_view(extra)
     st.caption("Confirm or discard this against the numbers in Evidence rather than "
                "against the prose.")
+
+    _defect = components.opt(extra.get("defect_location"))
+    if _defect in theme.DEFECT_MEANING:
+        st.caption(theme.DEFECT_MEANING[_defect],
+                   help="`defect_location` — the model's answer to whether the rows "
+                        "or the rule that judged them are wrong. It is what turns "
+                        "COH-B's 700 breaches into a registry change rather than a "
+                        "data correction.")
+
+    components.grouping_note(extra)
+
+    components.prior_advice_note(extra)
 
     theme.section("What to do about it")
     components.recommendation_view(extra, adapter.get_playbook())

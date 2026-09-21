@@ -24,6 +24,7 @@ registration, that is a third `MODIFY` grant and a decision, not a UI change.
 | `sql/ddl/` | Current. Spec v1.0 + Addendum A. **Never executed** — no workspace access yet. |
 | `fixtures/` | Current. Local Parquet dataset generated from the pilot CSVs. Verified. |
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16, runs on the fixture. Never run against a workspace. |
+| `notebooks/` | Current. The triage job's advice endpoint. **Never executed** — same status as `sql/ddl/`, same reason. |
 
 ### The interface was redesigned on 2026-09-16
 
@@ -99,6 +100,61 @@ avoided:
   so the strip is part of the tested write path.
 * *Impact* stayed dissolved. Blast radius is one line at the foot of the first tab and
   a phrase in the header. It never earned a tab and did not get one back.
+
+**The model's verdict is eleven columns, and the app renders all of them.**
+`notebooks/03_group_and_advise.ipynb` always produced more than a hypothesis and a
+paragraph — `grouping_verdict`, `members_not_covered`, `defect_location`,
+`recommended_owner`, `confidence`, `prior_state` and `differs_from_prior` came back on
+every call and survived only inside the `model_input_payload` JSON, where nothing
+queried them and no page could show them. They are columns on `results.cohort` now,
+along with four fields the brief did not ask for before: `evidence_points`,
+`rival_hypothesis`, `recommended_steps` and `verification_expectation`. A field the UI
+cannot reach is a field that does not exist.
+
+What stays in `model_input_payload` is the input and the provenance — the brief, the
+system-prompt hash, the model and the temperature — plus `reasoning`. That last one is
+deliberate: given a column it would sit on the page beside the evidence and compete
+with it, and what a steward confirms is the facts, not the model's narration of its own
+answer.
+
+Consequences worth knowing:
+
+* **`defect_location` has three values, not two.** `neither` exists because the data
+  can be correct and the rule reasonable, with the disagreement between them a business
+  question — COH-E is the fixture's case. Forcing that into data-or-rule makes the model
+  assert a defect it does not believe in. `theme.DEFECT_LABEL` and `DEFECT_MEANING` are
+  the one place those three are put into the steward's words.
+* **The Triage queue's `rule defect, not data` mark still comes from the CDE register,
+  not from `defect_location`.** `v_cde_coverage`'s `scope_mismatch` is an assertion the
+  model cannot fabricate; the model's verdict is a claim. Both say COH-B, and where they
+  ever disagree the register wins. Reading the mark off `defect_location` would quietly
+  swap a declared assertion for a generated one.
+* **`grouping_verdict` is never `rejected` in the table.** A rejected grouping raises no
+  cohort at all, so a stored row is `holds` or `partial`, and a CHECK constraint says so.
+  `partial` has no fixture example: making one would drop a member rule from its cohort,
+  and `metrics.live_cohorts` maps breaching rules to cohorts, so that rule would vanish
+  from the queue rather than appear unattached. The rendering path exists and is
+  defensive; it is not exercised locally.
+* **`confidence` is advisory and is not an input to `rank_score`.** Ranking on a
+  self-reported number lets a confident wrong answer outrank a hedged right one.
+* **Nothing re-reads `verification_expectation`.** It states what the next run should
+  show, and `verified` is still the check runner's call. Comparing the two is the obvious
+  next control test — HIST-8 is the worked example, whose expectation was met by a fix
+  that did not hold a fortnight.
+
+**The non-execution invariant is now checked in four places.** `recommended_steps` is
+prose, and a step carrying a runnable body is the first move toward an execute button:
+the system prompt forbids it, the notebook's `validate` rejects the response,
+`cohort_steps_are_not_executable` refuses the row, and `fixtures/verify.py` and
+`tests/test_pages_render.py` assert it over what is stored and what is printed. Four,
+because a prompt can drift without anyone noticing.
+
+**`fixtures/verify.py` now diffs the notebook too.** It already compared every fixture
+table's columns against the `CREATE TABLE`; check 4 does the same for the cell in
+`03_group_and_advise.ipynb` that builds the cohort row, anchored on the
+`candidate_cohorts` temp view. The notebook is what will really write this table, and
+until now nothing could tell you it had fallen behind the DDL. Add a column to
+`results.cohort` and you must add it in both places or `verify.py` exits 1.
 
 **The Register page was deleted on 2026-09-17; the register was not.**
 `results.disposition` is still the append-only audit artefact and still the app's

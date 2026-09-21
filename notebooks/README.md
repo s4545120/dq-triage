@@ -7,6 +7,18 @@ reason: there is no workspace yet.
 |---|---|
 | `03_group_and_advise.ipynb` | The advice endpoint. Groups breaches mechanically, reads the disposition register, calls a model once per group, writes `results.cohort`. |
 
+Every field of the verdict is a column on `results.cohort`, and `dq-app/` renders all of
+them on the problem detail page. Seven of them — `grouping_verdict`,
+`members_not_covered`, `defect_location`, `recommended_owner`, `confidence`,
+`prior_state`, `differs_from_prior` — used to survive only inside `model_input_payload`,
+which nothing queried; four more (`evidence_points`, `rival_hypothesis`,
+`recommended_steps`, `verification_expectation`) are new to the brief. `model_input_payload`
+keeps the input, the provenance and `reasoning`.
+
+`fixtures/verify.py` diffs the write cell below against `sql/ddl/05_results_cohort.sql`
+and exits 1 on a mismatch, so a column added to one and not the other is caught without a
+workspace. Run it after editing either.
+
 `01` and `02` are the pilot notebooks that live outside this repo; `03` supersedes `02`.
 
 ## What it assumes
@@ -33,6 +45,13 @@ reason: there is no workspace yet.
    the cost of the evidence the model reasons from.
 3. **`TEMPERATURE = 0.0`.** Advice lands in an audit register, so it should be
    reproducible. The pilot notebook left this at the provider default.
+4. **Check what the model does with `neither`.** `defect_location` gained a third value
+   because a plausibility rule firing on customers recorded as under 18 is neither a data
+   defect nor a rule defect. A model that never answers `neither`, or that reaches for it
+   whenever the evidence is thin, is a prompt problem — it is an answer, not a hedge.
+5. **Check that `rival_hypothesis` comes back null sometimes.** Null is a claim that the
+   evidence points one way. A model that always finds a rival has learned to hedge, and a
+   model that never does is not reading rule 2.
 
 ## Verifying it locally
 
