@@ -1405,6 +1405,49 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   .dq-lineage .arrow {{ padding: 0; transform: rotate(90deg); }}
 }}
 
+/* The scorecard's element list and the header of the pane beside it. The dot is the
+   element's criticality; its tooltip and the right pane's badge say it in words. */
+.dq-eldot {{ display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
+  margin-right: .42rem; vertical-align: .06rem; }}
+.dq-rowgrid .stack .t2.sans {{ font-family: inherit; }}
+.dq-elhd {{ display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start;
+  border: 1px solid var(--dq-border); border-radius: 10px; background: {NEUTRAL["surface"]};
+  padding: .8rem 1rem; margin: .15rem 0 .5rem; }}
+.dq-elhd .l {{ min-width: 0; }}
+.dq-elhd .n {{ font-size: clamp(1rem, 1.2vw, 1.15rem); font-weight: 620; color: {NEUTRAL["text"]}; }}
+.dq-elhd .b {{ margin: .3rem 0 .25rem; display: flex; flex-wrap: wrap; gap: .3rem; }}
+.dq-elhd .w {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .74rem; color: var(--dq-text-3); overflow-wrap: anywhere; }}
+.dq-elhd .r {{ text-align: right; flex: 0 0 auto; }}
+.dq-elhd .s {{ font-size: clamp(1.5rem, 2vw, 1.9rem); font-weight: 650; line-height: 1.1;
+  font-variant-numeric: tabular-nums; }}
+.dq-elhd .s span {{ font-size: .6em; margin-left: .05em; }}
+.dq-elhd .d {{ font-size: .74rem; color: var(--dq-text-3); margin: .1rem 0 .2rem; }}
+
+/* The two scorecard panes wrap rather than squeeze. Streamlit only stacks columns
+   below a 640px VIEWPORT, and the page can be far narrower than the viewport once the
+   sidebar is open — so the floor is set on the columns themselves: the list never
+   narrower than 18rem, the table never narrower than 32rem, and whichever does not
+   fit goes to the next line at full width. */
+/* Clear air between the metric cards and the two panes: they answer different
+   questions — how is the estate, and how is this element — and at the old spacing
+   the element card read as a seventh tile. */
+.st-key-dq_elsplit {{ margin-top: 1.6rem; }}
+/* The toggle beside "Failing checks" sits on the heading's baseline rather than
+   floating above it, and its label is never cut. */
+.st-key-dq_elsplit [data-testid="stColumn"]:has(.dq-elhd) .stCheckbox {{
+  margin-bottom: .45rem; }}
+.st-key-dq_elsplit [data-testid="stColumn"]:has(.dq-elhd) .stCheckbox label p {{
+  white-space: nowrap; }}
+/* Matched by what each column holds, not by `>` from the container: Streamlit puts
+   wrapper blocks between the keyed container and its columns. */
+.st-key-dq_elsplit [data-testid="stHorizontalBlock"]:has(.st-key-dqrows_elist) {{
+  flex-wrap: wrap; }}
+.st-key-dq_elsplit [data-testid="stColumn"]:has(.st-key-dqrows_elist) {{
+  flex: 1.3 1 18rem !important; min-width: 18rem; }}
+.st-key-dq_elsplit [data-testid="stColumn"]:has(.dq-elhd) {{
+  flex: 2.4 1 32rem !important; min-width: min(32rem, 100%); }}
+
 /* The header sits OUTSIDE the scroll box so it does not scroll away, which means
    its cells have to line up with rows drawn inside it: the box's own side padding
    plus the row's. `scrollbar-gutter` below holds that true once the list scrolls. */

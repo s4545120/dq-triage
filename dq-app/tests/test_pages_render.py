@@ -362,10 +362,19 @@ def test_an_unvalidated_element_shows_its_coverage_beside_its_score():
     assert "Not validated" in row[0], row[0]
 
 
-def test_failing_checks_filter_by_element_kind():
-    """A cut the dimension grouping cannot make: `format` spans an email, a mobile
-    number and a date of birth. Narrowing to one kind must drop the checks on every
-    other kind and say what it is showing."""
+def _fail_rows(at) -> list[str]:
+    """The failing-checks table's rows — every clickable row that is not an element
+    in the list beside it."""
+    return [str(m.value) for m in at.markdown
+            if 'class="dq-rowgrid' in str(m.value) and "dq-eldot" not in str(m.value)
+            and "Show the checks" not in str(m.value) and "head" not in str(m.value)[:60]]
+
+
+def test_picking_an_element_narrows_the_failing_checks_to_it():
+    """The element list is the filter. Picking Customer date of birth must drop the
+    checks on every other element and say what it is showing — the cut the
+    dimension grouping cannot make, because `format` spans an email, a mobile number
+    and a date of birth."""
     EMAIL = "Contact email contains an @"
     DOB = "Date of birth parses as a real ISO date"
 
@@ -373,20 +382,50 @@ def test_failing_checks_filter_by_element_kind():
     assert EMAIL in unfiltered and DOB in unfiltered, \
         "the fixture no longer fails both an email and a DOB check — rewrite this"
 
-    body = _body(_run(SCORECARD, _fail_kind="date_of_birth"))
-    assert DOB in body, "the DOB check is not in a DOB filter"
-    assert EMAIL not in body, "an email check survived a DOB filter"
-    assert "date of birth" in body, "the foot does not say what the filter shows"
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_DOB")
+    rows = " ".join(_fail_rows(at))
+    assert DOB in rows, "the DOB check is not listed under the DOB element"
+    assert EMAIL not in rows, "an email check survived picking the DOB element"
+    assert "of 21 failing checks · Customer date of birth" in _body(at), \
+        "the foot does not say what the pane shows"
 
 
-def test_checks_on_no_registered_element_are_filterable_rather_than_hidden():
+def test_checks_on_no_registered_element_have_their_own_entry_rather_than_hiding():
     """14 of the 34 rules in the fixture are attached to no registered element. A
-    filter shaped by the register that could only ever narrow to it would hide them
+    list shaped by the register that could only ever narrow to it would hide them
     behind a control that does not admit to hiding anything."""
-    body = _body(_run(SCORECARD, _fail_kind="Not on a registered element"))
-    assert "not on a registered element" in body.lower()
-    # Attached checks are the half this option excludes.
-    assert "Contact email contains an @" not in body
+    at = _run(SCORECARD)
+    assert "Not on a registered element" in _body(at), "no entry for unattached checks"
+
+    at = _run(SCORECARD, _elem_scope="__none__")
+    rows = " ".join(_fail_rows(at))
+    assert "Special-care status" in rows
+    # Attached checks are the half this entry excludes.
+    assert "Contact email contains an @" not in rows
+    assert "do not move the quality figure" in _body(at)
+
+
+def test_an_element_shows_its_own_score_in_the_pane():
+    """The drill-down's point: the element's DQ score, the same row-weighted
+    arithmetic as the headline over that element's own checks. Customer email address
+    is 7 checks, 521 bad rows of 6,993 scanned: 92.5%, printed 92.6 at one place."""
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
+    head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
+    assert head, "the pane has no element header"
+    assert "Customer email address" in head[0]
+    assert re.search(r">9\d\.\d<span>%</span>", head[0]), head[0]
+    assert "since" in head[0] and "dq-spark" in head[0], "no trend beside the score"
+
+
+def test_a_scope_mismatch_score_is_not_coloured_as_bad_data():
+    """Primary billing account scores 50%, and the register says the rule is wrong,
+    not the data. The pane prints the figure and the coverage note, never red."""
+    from dq_app.ui import theme
+
+    at = _run(SCORECARD, _elem_scope="CDE_BILLING_ACCOUNT")
+    head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)][0]
+    assert "Scope mismatch" in head
+    assert theme.TONE["critical"]["fg"] not in head.split('class="r"')[1].split("<svg viewBox=\"0 0 120")[0]
 
 
 def test_the_element_panel_names_the_rules_contradicting_a_scope():

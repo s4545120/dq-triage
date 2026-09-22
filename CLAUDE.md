@@ -267,16 +267,18 @@ are counted in a dashed chip rather than dropped. The Triage queue does not repe
 the chips — its title already names the elements — and carries the most critical
 one's criticality on the row's second line instead.
 
-**The scorecard's bottom band is a list of elements, not an issue queue.** The tabbed
-issue board and the two cards in the rail beside it — coverage segments and Recent
-runs — were removed on 2026-09-16. What replaced them is one table, and on 2026-09-17
-it became `Critical data elements`: every registered element, its kind, its
-criticality, how it is covered, how many checks watch it and how it scores. One row
-per ELEMENT carrying its worst finding, which is the same count the `CDEs under
-watch` tile reports, so the two cannot disagree — three bindings of Customer name
-with nothing validating them is one element, not three findings. Every element is
-listed now, not only the ones with a gap: a band that only ever lists trouble cannot
-be read as an inventory.
+**The scorecard's lower half is master–detail: elements left, failing checks
+right.** Since 2026-09-22. The element list (`dqrows_elist`, selection in
+`_elem_scope`) is every registered element — one row per ELEMENT carrying its worst
+finding, the same count the `CDEs under watch` tile reports — plus `All checks` at
+the top and `Not on a registered element` at the foot. Picking one puts that
+element's score, the change since the previous run and a sparkline in the right
+pane's header, and narrows the failing checks to the ones that watch it. It replaced
+an `Element kind` dropdown over the failing-checks table and a separate element band
+below it. The list sorts by criticality, then worst score: score alone put the two
+scope mismatches on top, and their low scores are the rule's fault. The element
+drawer is still reachable, from "Every binding and what checks it" in the pane; the
+cards above the two panes did not change.
 
 **The band reports and does not advise.** A `What to do` column stood there until
 2026-09-17 — "write a rule", "fix the rule's scope", or a pointer at the cohort
@@ -286,7 +288,7 @@ deleted, and `tests/test_pages_render.py` asserts none of that wording comes bac
 The scope panel's `Status` column lost its "Needs work" for the same reason and now
 prints which of the four coverage findings it is.
 
-**An element's score and its coverage are two different findings and the band shows
+**An element's score and its coverage are two different findings and the list shows
 both.** The score is `_element_scores` — the same row-weighted arithmetic as the
 headline figure, over that element's own checks, deduped across bindings so a
 cross-table rule is not counted three times. `Identity document number` scores 100%
@@ -295,15 +297,14 @@ element's score is coloured; everything else prints the figure in neutral and le
 the Coverage cell beside it carry the verdict. An element with no check scores `—`,
 never 0 — a gap in the register is not a data defect.
 
-**Failing checks filter by element kind.** `data_class` is what the element IS —
-email address, date of birth, identity document — and `theme.DATA_CLASS_LABEL` is the
-one place the register's word is translated into the steward's. It is a cut the
-dimension grouping cannot make, because `format` spans an email, a mobile number and
-a date of birth. Checks attached to no registered element get their own option rather
-than being dropped: 14 of the 34 rules are unattached, and a register-shaped filter
-that could only narrow to the register would hide them behind a control that does not
-admit to hiding anything. Under any filter the table foot reports the filter
-(`7 of 21 failing checks · email address`), not the run.
+**Failing checks narrow by element, not by kind.** The `Element kind` dropdown went
+on 2026-09-22 with the move to master–detail — picking an element is the finer cut,
+and `data_class` (`theme.DATA_CLASS_LABEL`) is now a badge in the pane header. Checks
+attached to no registered element keep their own entry rather than being dropped: 14
+of the 34 rules are unattached, and a register-shaped list that could only narrow to
+the register would hide them behind a control that does not admit to hiding anything.
+Under any selection the table foot reports it (`7 of 21 failing checks · Customer
+email address`), not the run.
 
 **The four dimension cards are gone.** Completeness / Validity / Consistency /
 Uniqueness became a `Group by dimension` toggle on the failing-checks table. The prose
