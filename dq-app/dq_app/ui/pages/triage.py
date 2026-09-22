@@ -96,6 +96,7 @@ current = adapter.get_cohort_current()
 cohorts = adapter.get_cohorts()
 runs = adapter.get_check_runs()
 cde_cov = adapter.get_cde_coverage()
+registry = adapter.get_rule_registry_current()
 
 # One definition of compression, in domain/metrics.py — recomputing it here with a
 # slightly different denominator is how a headline starts disagreeing with the
@@ -206,10 +207,16 @@ else:
     for _, r in view.iterrows():
         cid = r["cohort_id"]
         members = member_rules.get(cid, [])
+        elements, unattached = components.cohort_elements(members, cde_cov)
         rows.append({
             "cohort_id": cid,
-            "Problem": components.problem_title(
-                detail.loc[cid, "root_cause_hypothesis"], limit=110),
+            "Problem": components.problem_title(detail.loc[cid], elements, registry),
+            "Claim": components.claim_sentence(
+                detail.loc[cid, "root_cause_hypothesis"], limit=200),
+            # The title already names the elements, so the second line does not repeat
+            # them — it carries the one thing about them the title cannot: how critical
+            # the most critical one is. The chips themselves are on the detail page.
+            "Criticality": elements[0]["criticality"] if elements else None,
             "Tables": " · ".join(sorted(
                 t.split(".")[-1] for t in as_list(r["affected_tables"]))),
             "Severity": r["severity"],
@@ -234,9 +241,16 @@ else:
         )
         return (
             '<span class="stack">'
-            f'<span class="t1" title="{html.escape(str(row["Problem"]))}">'
+            # The claim rides as the tooltip: the title says what and what kind, the
+            # hover says why, and the row stays two lines high.
+            f'<span class="t1" title="{html.escape(str(row["Claim"]))}">'
             f'{html.escape(str(row["Problem"]))}</span>'
-            f'<span class="t2">{html.escape(row["Tables"])}{marks}</span></span>'
+            '<span class="t2">'
+            + (f'<span class="mark" style="color:'
+               f'{theme.TONE[theme.CRITICALITY_TONE.get(row["Criticality"], "neutral")]["fg"]}">'
+               f'{html.escape(str(row["Criticality"]))} element</span> · '
+               if row["Criticality"] else "")
+            + f'{html.escape(row["Tables"])}{marks}</span></span>'
             + f'<span>{theme.severity_badge(row["Severity"], words=False)}</span>'
             + f'<span>{theme.badge(row["State"], row["State tone"])}</span>'
             + f'<span class="num">{row["Checks"]:,}</span>'

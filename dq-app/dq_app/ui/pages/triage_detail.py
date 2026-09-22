@@ -1,24 +1,27 @@
 """Problem detail — what state this is in, and everything behind it.
 
-**Two things sit above the tabs and are visible on all of them:** the header, and a
-state strip naming whose turn it is with the one event this state permits. Everything
-else is reading, and reading is what the tabs hold:
+**Three things sit above the tabs and are visible on all of them:** the header — a
+title naming the element and the kind of wrong, the claim's first sentence under it,
+and the facts line; the critical data elements the checks watch, as pills that open
+the element drawer; and a state strip naming whose turn it is with the one event
+this state permits. Everything else is reading, and reading is what the tabs hold:
 
-  * **Why we think this** — the model's claim, marked as one: how sure it is, where
-    it says the defect lives, the evidence itemised one checkable fact at a time,
-    the rival reading where there is one, what the register already said about
-    these rules, and the approach recommended for it broken into steps.
+  * **Diagnosis** — the model's claim, marked as one: how sure it is, where it says
+    the defect lives, the evidence itemised one checkable fact at a time, the rival
+    reading where there is one, and what it made of the grouping.
+  * **What to do** — what was done once anything has been, the approach recommended
+    and its steps, who should act, how we will know it worked, and what the register
+    already said about these rules.
   * **Evidence** — the failing checks, and the rows behind whichever one you click.
+  * **Lineage** — checks → the tables they found rows in → what reads those tables.
   * **Decisions** — the append-only chain and the approval gate.
   * **Stored record** — every field as stored, for the reader who wants the fields.
 
-**This had five tabs until 2026-09-16 and none between then and 2026-09-17.** The
-objection to the first set — Evidence, Suggested fix, Decisions, Impact, Stored record
-— was that they made a reader choose an order before knowing what was in each, and
-that the decision was buried inside one of them. Both are answered here rather than
-avoided: every tab carries its count, so the label says what is behind it, and nothing
-you have to *act on* is inside a tab. *Impact* stayed dissolved — blast radius is one
-line at the foot of the first tab and a phrase in the header. It never earned a tab.
+**The first three were one tab, "Why we think this", until 2026-09-22.** It held the
+claim, the advice and the blast radius in a single scroll, and they answer three
+different questions — is it true, what do we do, what else does it touch. The
+objection to the original five tabs still holds and is still answered: every tab
+carries its count, and nothing you have to *act on* is inside one.
 
 **Evidence is master–detail.** The page used to print a sample table per failing
 check, one after another — nine of them for COH-A. The checks are now one short table
@@ -125,10 +128,17 @@ with back:
         st.switch_page("dq_app/ui/pages/triage.py")
 
 age = (pd.Timestamp.now() - row["raised_ts"]).days
+cde_cov = adapter.get_cde_coverage()
+registry = adapter.get_rule_registry_current()
+elements, unattached = components.cohort_elements(extra["member_rule_ids"], cde_cov)
 st.markdown(
     '<div class="dq-page-hd" style="margin-bottom:.2rem">'
-    f'<div class="t">{html.escape(components.problem_title(extra["root_cause_hypothesis"], 110))}'
+    f'<div class="t">{html.escape(components.problem_title(extra, elements, registry, 140))}'
     "</div>"
+    # The title says what and what kind of wrong; the claim's first sentence under it
+    # says why, in the model's words. It used to BE the title — see `claim_sentence`.
+    f'<div class="dq-subclaim">'
+    f'{html.escape(components.claim_sentence(extra["root_cause_hypothesis"], 220))}</div>'
     '<div class="dq-factline">'
     + theme.severity_badge(row["severity"])
     + theme.badge(theme.STATE_LABEL.get(state, state), theme.STATE_TONE.get(state, "neutral"))
@@ -143,6 +153,40 @@ st.markdown(
     "</div></div>",
     unsafe_allow_html=True,
 )
+
+# --- The elements this problem touches ----------------------------------------
+# Pills rather than markup so they can be clicked: one opens the same element drawer
+# the scorecard uses. Coverage rides in the label because it is the one fact about an
+# element that changes how this page reads — COH-B's "Scope mismatch" says the rule
+# is wrong before a word of the claim has been read.
+_ELEM_PICK = "_detail_cde_pick"
+if elements:
+    by_id = {e["cde_id"]: e for e in elements}
+    # An element picked on another problem is not one of this problem's. Set to None
+    # rather than popped: a popped widget key is re-seeded from the browser's copy,
+    # which still holds the old pick.
+    if st.session_state.get(_ELEM_PICK) is not None \
+            and st.session_state[_ELEM_PICK] not in by_id:
+        st.session_state[_ELEM_PICK] = None
+    picked_el = st.pills(
+        "Critical data elements", list(by_id), key=_ELEM_PICK,
+        format_func=lambda i: (
+            f'{by_id[i]["name"]} · {by_id[i]["criticality"]} · '
+            f'{theme.COVERAGE_GAP_LABEL.get(by_id[i]["coverage_gap"], "")}'),
+        help="The registered elements this problem's checks watch, from the CDE "
+             "register. Click one to see every binding and what checks it.",
+    )
+    if unattached:
+        st.markdown(f'<div class="dq-chiprow">{components.element_chips([], unattached)}'
+                    "</div>", unsafe_allow_html=True)
+else:
+    picked_el = None
+    st.markdown(
+        '<div class="dq-chiprow"><span class="k">Critical data elements</span>'
+        + components.element_chips([], unattached)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 # --- The state strip: whose turn, and the one event this state permits -------
 # Above the tabs, deliberately. The objection to the old five tabs was not that tabs
@@ -198,22 +242,35 @@ with st.container(key="dq_strip"):
         st.session_state["_decide_open"] = True
         st.rerun()
 
-# --- The reading, in four tabs ----------------------------------------------
+# --- The reading, in six tabs -----------------------------------------------
 # Counts in the labels, so a reader knows what is behind a tab before opening it.
+# "Why we think this" held the claim, the advice and the blast radius in one scroll
+# until 2026-09-22; they are three tabs now, because they answer three questions —
+# is it true, what do we do, what else does it touch — and a reader rarely wants
+# more than one of them at a time.
 
-why_tab, evidence_tab, decisions_tab, record_tab = st.tabs([
-    "Why we think this",
+_n_facts = len(as_list(extra.get("evidence_points")))
+_n_steps = len(as_list(extra.get("recommended_steps")))
+_n_tables = len(as_list(row["affected_tables"])) + int(extra["blast_radius_count"])
+
+(diagnosis_tab, todo_tab, evidence_tab, lineage_tab, decisions_tab,
+ record_tab) = st.tabs([
+    f"Diagnosis · {_n_facts} {'fact' if _n_facts == 1 else 'facts'}" if _n_facts
+    else "Diagnosis",
+    f"What to do · {_n_steps} {'step' if _n_steps == 1 else 'steps'}" if _n_steps
+    else "What to do",
     f"Evidence · {int(row['member_count'])}",
+    f"Lineage · {_n_tables} {'table' if _n_tables == 1 else 'tables'}",
     f"Decisions · {len(events)}",
     "Stored record",
 ])
 
-with why_tab:
-    # The block head carries the three things that qualify the claim before it is
-    # read: whether it was drafted or drawn from the playbook, how sure the model
-    # says it is, and where the fix belongs. All three are the model's own, and all
-    # three say so — a reader who takes the hypothesis as a finding has been misled
-    # by this page, not by the model.
+with diagnosis_tab:
+    # The block head carries the things that qualify the claim before it is read:
+    # whether it was drafted or drawn from the playbook, how sure the model says it
+    # is, and where the fix belongs. All are the model's own, and all say so — a
+    # reader who takes the hypothesis as a finding has been misled by this page, not
+    # by the model.
     st.markdown(
         '<div class="dq-blockhd"><b>THE CLAIM</b>'
         + theme.badge(
@@ -227,18 +284,6 @@ with why_tab:
         unsafe_allow_html=True,
     )
     st.markdown(f"**{extra['root_cause_hypothesis']}**")
-    st.markdown(
-        f'<div class="dq-because"><b>Because:</b> {html.escape(str(extra["evidence_summary"]))}'
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    # The same summary, itemised. Confirming a hypothesis is a fact-at-a-time job:
-    # three of four holding and the fourth not is the most useful thing this page can
-    # tell a steward, and the paragraph above cannot express it.
-    components.evidence_points_view(extra)
-    components.rival_view(extra)
-    st.caption("Confirm or discard this against the numbers in Evidence rather than "
-               "against the prose.")
 
     _defect = components.opt(extra.get("defect_location"))
     if _defect in theme.DEFECT_MEANING:
@@ -248,13 +293,27 @@ with why_tab:
                         "COH-B's 700 breaches into a registry change rather than a "
                         "data correction.")
 
+    theme.section("What supports it")
+    # Itemised, one checkable fact at a time. Confirming a hypothesis is a
+    # fact-at-a-time job: three of four holding and the fourth not is the most useful
+    # thing this page can tell a steward, and a paragraph cannot express it. The
+    # paragraph is kept only where the itemised list is missing.
+    if _n_facts:
+        components.evidence_points_view(extra)
+    else:
+        st.markdown(
+            f'<div class="dq-because"><b>Because:</b> '
+            f'{html.escape(str(extra["evidence_summary"]))}</div>',
+            unsafe_allow_html=True,
+        )
+    components.rival_view(extra)
     components.grouping_note(extra)
+    st.caption("Confirm or discard this against the numbers in Evidence rather than "
+               "against the prose.")
 
-    components.prior_advice_note(extra)
-
-    theme.section("What to do about it")
-    components.recommendation_view(extra, adapter.get_playbook())
-
+with todo_tab:
+    # What was done goes first once something has been: at that point it is the
+    # headline, and the recommendation below it is what it is measured against.
     if opt(row["approach_type_taken"]):
         st.markdown(
             '<div class="dq-kvline"><span class="k">What was done:</span> '
@@ -269,16 +328,20 @@ with why_tab:
             "Divergence is not a failure — it is the signal the acceptance metric "
             "collects. A recommendation stewards keep overriding is one to change.")
 
-    # Impact, dissolved. One line, where it is read — not a tab of its own.
-    theme.section(f"What else reads these tables · {int(extra['blast_radius_count'])} downstream")
-    components.blast_radius_view(extra)
+    components.recommendation_view(extra, adapter.get_playbook())
+
+    # Here rather than under the claim: what was tried last time is a fact about the
+    # advice — the spec's worked failure is re-recommending what already failed.
+    components.prior_advice_note(extra)
+
+with lineage_tab:
+    components.lineage_view(extra, registry)
     st.caption("Blast radius is what makes a problem rankable.",
                help="Two problems with equal violation counts are not equally urgent if "
                     "one feeds billing and the other feeds a dormant mart.")
 
 with evidence_tab:
     runs = adapter.get_check_runs()
-    registry = adapter.get_rule_registry_current()
     members = as_list(extra["member_rule_ids"])
     reg = registry.set_index("rule_id")
     latest_run = runs.loc[runs["run_ts"].idxmax(), "run_id"]
@@ -492,3 +555,12 @@ if st.session_state.get("_decide_open") and allowed:
                         st.rerun()
                     except adapter.WriteRejected as exc:
                         st.error(str(exc), icon=":material/block:")
+
+
+# --- The element drawer --------------------------------------------------------
+# Opened from a pill in the header, and never alongside the decision drawer — two
+# fixed panels at the same edge would stack on top of each other.
+
+if picked_el and not st.session_state.get("_decide_open"):
+    with st.container(key="dq_element_drawer"):
+        components.element_panel(cde_cov, registry, picked_el, pick_key=_ELEM_PICK)

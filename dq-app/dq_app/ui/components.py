@@ -194,33 +194,228 @@ def waiting_on(row) -> str:
     return "—"
 
 
-def problem_title(hypothesis, limit: int = 62) -> str:
-    """A cohort's opening claim, as a title.
+def claim_sentence(hypothesis, limit: int = 62) -> str:
+    """A cohort's opening claim, cut to one sentence.
 
-    There is no stored title column and adding one is a fixture and DDL change rather
-    than a UI one, so the title is derived — in one place, because the Scorecard, the
-    Triage queue and the detail page all show it, and three copies of a `split(".")`
-    are three chances for one problem to carry three different names.
+    This was the problem's title until 2026-09-22. It is still the line under the
+    title on the detail page and the tooltip on a queue row, because it is the one
+    place the model's *why* is said in a sentence. It stopped being the title because
+    a hypothesis is written as an argument and its first sentence is often not a
+    headline: COH-B's is "Neither of these is a data defect", which names nothing.
 
-    Two cuts, in this order, because a root-cause hypothesis is written as an argument
-    and its first line is not a headline:
+    Two cuts, in this order:
 
       1. A dashed aside is dropped. "Twelve mobile subscriptions -- ten of them
          active, two since cancelled -- carry the literal 'service-number-unknown'"
-         is a claim with a parenthetical wedged into it; the parenthetical is detail
-         for the detail page.
+         is a claim with a parenthetical wedged into it.
       2. The sentence ends at the first `.` or `:`. The colon matters as much as the
          stop — "Scattered contactability gaps with no shared driver: 18 contacts
          with no mobile, 24 with a malformed landline" states the finding before the
          colon and enumerates after it.
 
-    What this deliberately does not do is rewrite. The title is the author's own
-    words, cut — so a badly-written hypothesis yields a badly-written title, which is
-    the correct place for that problem to show up.
+    It does not rewrite. A badly-written hypothesis yields a badly-written sentence.
     """
     text = _ASIDE.sub(" ", str(hypothesis)).strip()
     first = re.split(r"[.:]", text)[0].strip()
     return first if len(first) <= limit else first[: limit - 1].rstrip(" ,;—-") + "…"
+
+
+# --- A problem's elements, and its title --------------------------------------
+# The title is what the problem is about and what kind of wrong it is, in that
+# order: "Customer email address — wrong data". Both halves are facts the system
+# already holds — the element from the CDE register via `v_cde_coverage`, the verdict
+# from `defect_location` — so every title in the app follows one pattern and none of
+# them is a sentence someone has to parse. There is still no stored title column;
+# a model-written one is a DDL, notebook and fixture change, and if it ever lands
+# this stays as its fallback.
+
+
+def cohort_elements(member_rule_ids, cde_cov: pd.DataFrame) -> tuple[list[dict], list[str]]:
+    """The registered elements a problem's checks watch, and the checks that watch none.
+
+    One entry per ELEMENT, carrying its worst coverage finding across bindings — the
+    same one-row-per-element count the scorecard's element table uses, so Customer
+    name bound to three columns is one chip, not three. Ordered most critical first.
+
+    Attachment is read off `v_cde_coverage.rule_ids`, never re-derived by matching
+    table and column, for the reason `coverage.attached_rule_ids` gives: a cross-table
+    rule attaches only through its `cde_id` tag.
+
+    The unattached list is returned rather than dropped. 14 of the 34 rules are on no
+    registered element, and a problem that shows only its attached checks' elements
+    reads as smaller than it is.
+    """
+    members = [str(r) for r in as_list(member_rule_ids)]
+    if cde_cov is None or cde_cov.empty:
+        return [], members
+    gap_rank = {g: i for i, g in enumerate(theme.COVERAGE_GAP_ORDER)}
+    crit_rank = {c: i for i, c in enumerate(theme.CRITICALITY_ORDER)}
+    found: dict[str, dict] = {}
+    attached: set[str] = set()
+    for _, r in cde_cov.iterrows():
+        hit = set(members) & {str(i) for i in as_list(r["rule_ids"])}
+        if not hit:
+            continue
+        attached |= hit
+        el = found.setdefault(r["cde_id"], {
+            "cde_id": r["cde_id"], "name": str(r["cde_name"]),
+            "criticality": r["criticality"], "coverage_gap": r["coverage_gap"],
+        })
+        if gap_rank.get(r["coverage_gap"], 99) < gap_rank.get(el["coverage_gap"], 99):
+            el["coverage_gap"] = r["coverage_gap"]
+    elements = sorted(found.values(),
+                      key=lambda e: (crit_rank.get(e["criticality"], 99), e["name"]))
+    return elements, [m for m in members if m not in attached]
+
+
+def _check_subject(cohort_row, registry: pd.DataFrame) -> list[str]:
+    """What the checks look at, for a problem on no registered element: the column,
+    or — for a cross-table rule, whose `target_column` is NULL by design — the rule's
+    own name. "subs_c" alone reads as a rule on one table; "Every subscription
+    resolves to a contact" is what the check actually asserts."""
+    if registry is None or registry.empty:
+        return []
+    reg = registry.drop_duplicates("rule_id").set_index("rule_id")
+    out: list[str] = []
+    for rid in as_list(cohort_row.get("member_rule_ids")):
+        if rid not in reg.index:
+            continue
+        r = reg.loc[rid]
+        if opt(r["target_column"]):
+            where = f'{str(r["target_table"]).split(".")[-1]}.{r["target_column"]}'
+        else:
+            where = str(r["rule_name"])
+        if where not in out:
+            out.append(where)
+    return out
+
+
+def problem_title(cohort_row, elements: list[dict], registry: pd.DataFrame | None = None,
+                  limit: int = 90) -> str:
+    """`<what it is about> — <what kind of wrong>`, derived in one place.
+
+    The Scorecard, the Triage queue and the detail page all call this; three copies
+    are three chances for one problem to carry three names.
+
+    The subject is the registered elements, most critical first, and two at most by
+    name — "Device IMEI and Primary billing account", "Customer contact mobile number
+    + 1 more". A problem on no element falls back to the columns its checks read,
+    which is less friendly and honest about why: nobody has registered them.
+
+    The verdict is `defect_location` in the steward's words (`theme.DEFECT_VERDICT`).
+    A cohort written before that column existed says only that its checks fail — the
+    title does not guess a verdict the model never gave.
+    """
+    names = [e["name"] for e in elements] or _check_subject(cohort_row, registry)
+    if not names:
+        subject = "Unattributed checks"
+    elif len(names) == 1:
+        subject = names[0]
+    elif len(names) == 2 and len(names[0]) + len(names[1]) <= 46:
+        subject = f"{names[0]} and {names[1]}"
+    else:
+        subject = f"{names[0]} + {len(names) - 1} more"
+    verdict = theme.DEFECT_VERDICT.get(opt(cohort_row.get("defect_location")),
+                                       "failing checks")
+    title = f"{subject} — {verdict}"
+    return title if len(title) <= limit else title[: limit - 1].rstrip(" ,;—-") + "…"
+
+
+def element_chips(elements: list[dict], unattached: list[str],
+                  with_coverage: bool = False) -> str:
+    """The elements as quiet pills, with the unattached checks counted in a dashed
+    one rather than left out. Criticality is the dot's tone and also a word — colour
+    is never the only channel in this app."""
+    pills = []
+    for e in elements:
+        tone = theme.TONE[theme.CRITICALITY_TONE.get(e["criticality"], "neutral")]
+        extra = (f' · {html.escape(theme.COVERAGE_GAP_LABEL.get(e["coverage_gap"], ""))}'
+                 if with_coverage else "")
+        pills.append(
+            f'<span class="dq-chip"><i style="background:{tone["fg"]}"></i>'
+            f'{html.escape(e["name"])} · {html.escape(str(e["criticality"]))}{extra}</span>'
+        )
+    if unattached:
+        n = len(unattached)
+        pills.append(f'<span class="dq-chip off">{n} {"check" if n == 1 else "checks"} '
+                     "on no registered element</span>")
+    return "".join(pills)
+
+
+def element_panel(cde_cov: pd.DataFrame, registry: pd.DataFrame, cde_id: str,
+                  pick_key: str) -> None:
+    """One element, in a drawer: every binding, what checks it, what they find.
+
+    Opened from a row of the scorecard's element table and from an element chip on
+    the problem detail page. `pick_key` is the session key holding the selection,
+    which Close clears — each page keeps its own, so an element opened on one page
+    is not still open when the reader arrives at the other.
+    """
+    rows = cde_cov[cde_cov["cde_id"] == cde_id]
+    if rows.empty:
+        return
+    first = rows.iloc[0]
+
+    head, close = st.columns([5, 1], vertical_alignment="center")
+    with head:
+        st.markdown(
+            '<div class="dq-dim-panel-hd">'
+            f'<span class="t">{html.escape(str(first["cde_name"]))}</span>'
+            + theme.criticality_badge(first["criticality"])
+            + (theme.badge("PII", "high", "shield") if first["pii"] else "")
+            + f'<span class="q">{html.escape(str(first["business_domain"]))} · '
+            f'{html.escape(str(first["owner_group"]))}</span></div>',
+            unsafe_allow_html=True,
+        )
+    # Cleared in the callback, not after the click: on the detail page the key
+    # belongs to a pills widget that has already rendered this run, and a widget's
+    # state can only be written before it is drawn. Done afterwards, the drawer shut
+    # and the pill stayed lit, so clicking it again deselected instead of reopening.
+    def _close() -> None:
+        st.session_state[pick_key] = None
+
+    close.button("Close", key="_elem_close", width="stretch", on_click=_close)
+
+    rule_name = registry.set_index("rule_id")["rule_name"].to_dict()
+    body = []
+    for _, r in rows.iterrows():
+        ids = as_list(r["rule_ids"])
+        body.append({
+            "Column": f"{str(r['target_table']).split('.')[-1]}.{r['target_column']}",
+            "Finding": theme.COVERAGE_GAP_LABEL.get(r["coverage_gap"], r["coverage_gap"]),
+            "Checks": ", ".join(rule_name.get(i, i) for i in ids) or "nothing",
+            "Findings": int(r["latest_violation_rows"]),
+            "Populated when": opt(r["populated_when"]) or "always",
+        })
+    st.dataframe(
+        pd.DataFrame(body), width="stretch", hide_index=True,
+        # Sized deliberately rather than evenly: in a drawer this wide an even split
+        # gives the rule name too little and the one-word finding too much.
+        column_config={
+            "Column": st.column_config.TextColumn(width="small"),
+            "Finding": st.column_config.TextColumn(width="small"),
+            "Checks": st.column_config.TextColumn(width="medium"),
+            "Findings": st.column_config.NumberColumn(format="%d", width="small"),
+            "Populated when": st.column_config.TextColumn(width="medium"),
+        },
+    )
+
+    gap = first["coverage_gap"]
+    st.markdown(
+        f'<div class="dq-note">{theme.coverage_badge(gap)} '
+        f'{html.escape(theme.COVERAGE_GAP_MEANING.get(gap, ""))}</div>',
+        unsafe_allow_html=True,
+    )
+    unscoped = sorted({i for ids in rows["unscoped_rule_ids"]
+                       for i in as_list(ids)})
+    if unscoped:
+        st.caption(
+            "Rules contradicting this element's registered scope: "
+            + ", ".join(f"`{i}`" for i in unscoped)
+            + ". The register declares the scope these rules should have had, which "
+            "is how a rule defect becomes an assertion the model makes rather than "
+            "something a human noticed."
+        )
 
 
 # --- Tiles ------------------------------------------------------------------
@@ -494,23 +689,45 @@ def sample_rows_view(subset: pd.DataFrame, limit: int = 100) -> None:
     st.dataframe(frame, width="stretch", hide_index=True)
 
 
-def blast_radius_view(cohort_row) -> None:
+def lineage_view(cohort_row, registry: pd.DataFrame) -> None:
+    """Checks → the tables they found rows in → what reads those tables.
+
+    Drawn left to right because that is the direction the damage travels, which two
+    side-by-side lists of table names never said. Checks are named by rule id, the
+    one name that is the same on every page; the downstream column is Unity Catalog
+    lineage in a workspace and plausible-but-invented names on the fixture, and its
+    header says so on hover.
+    """
+    members = [str(r) for r in as_list(cohort_row["member_rule_ids"])]
     affected = as_list(cohort_row["affected_tables"])
     downstream = as_list(cohort_row.get("blast_radius_tables"))
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f'<div class="dq-section">Affected · {len(affected)}</div>',
-                    unsafe_allow_html=True)
-        for t in affected:
-            st.markdown(f"`{t}`")
-    with c2:
-        st.markdown(
-            f'<div class="dq-section" title="From Unity Catalog lineage. Locally these '
-            f'names are plausible, not observed.">Downstream · {len(downstream)}</div>',
-            unsafe_allow_html=True,
-        )
-        for t in downstream:
-            st.markdown(f"`{t}`")
+    table_of = ({} if registry is None or registry.empty else
+                registry.drop_duplicates("rule_id").set_index("rule_id")["target_table"]
+                .to_dict())
+
+    def _col(head: str, items: list[str], cls: str = "", tip: str = "") -> str:
+        nodes = "".join(
+            f'<div class="node {cls}" title="{html.escape(t)}">{html.escape(t)}</div>'
+            for t in items) or '<div class="none">none recorded</div>'
+        return (f'<div class="col"><div class="hd"'
+                + (f' title="{html.escape(tip)}"' if tip else "")
+                + f'>{html.escape(head)} · {len(items)}</div>{nodes}</div>')
+
+    arrow = '<div class="arrow">→</div>'
+    checks = [f"{m}  ·  {str(table_of.get(m, '')).split('.')[-1]}".rstrip(" ·")
+              for m in members]
+    st.markdown(
+        '<div class="dq-lineage">'
+        + _col("Failing checks", checks)
+        + arrow
+        + _col("Tables with bad rows", [str(t) for t in affected], "hit")
+        + arrow
+        + _col("Read downstream", [str(t) for t in downstream], "",
+               "From Unity Catalog lineage. Locally these names are plausible, not "
+               "observed.")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # --- The verdict: what the model concluded, itemised ------------------------

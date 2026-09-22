@@ -41,7 +41,7 @@ moved. Nothing about the data model, the grants or the write path changed.
 | Was | Now |
 |---|---|
 | `cohort_queue.py` | `triage.py` — "Cohorts" is our word for it, not the steward's |
-| `cohort_detail.py` | `triage_detail.py` — five tabs, then three blocks, now four tabs |
+| `cohort_detail.py` | `triage_detail.py` — five tabs, then three blocks, then four tabs, now six |
 | `monitored_tables.py` | `tables.py` |
 | `monitor_detail.py` | `table_detail.py` |
 | `cde_registry.py` | **deleted** — folded into two panels on the scorecard |
@@ -90,23 +90,30 @@ the one worth knowing before you touch it is that Streamlit reports a markdown b
 one line high whatever it contains, so a row's height has to be set on the row
 container, never on the grid inside it.
 
-**The problem detail page has tabs again, and that is not a reversal.** It had five
+**The problem detail page has six tabs, and that is not a reversal.** It had five
 until 2026-09-16 (Evidence, Suggested fix, Decisions, Impact, Stored record), then
-three stacked blocks, and since 2026-09-17 four tabs: Why we think this · Evidence ·
-Decisions · Stored record. The objection to the first set was never that tabs are bad
-— it was that they made a reader choose an order before knowing what was in each, and
-that the decision was buried inside one of them. Both are answered rather than
-avoided:
+three stacked blocks, then four tabs, and since 2026-09-22 six: Diagnosis · What to
+do · Evidence · Lineage · Decisions · Stored record. The first of the four, "Why we
+think this", held the claim, the advice and the blast radius in one scroll; they
+answer three questions — is it true, what do we do, what else does it touch — so
+they are three tabs. The objection to the original set was never that tabs are bad
+— it was that they made a reader choose an order before knowing what was in each,
+and that the decision was buried inside one of them. Both are still answered:
 
-* Every tab carries its count, so the label says what is behind it.
-* **Nothing you have to act on is inside a tab.** The header and a state strip sit
-  above the tab bar, visible on all four. The strip names the state, quotes the last
-  reason anyone wrote, says whose turn it is, and carries the one event
-  `lifecycle.available_events` permits — which opens the decision form in a drawer.
-  `tests/test_write_path.py` clicks that button rather than setting the session flag,
-  so the strip is part of the tested write path.
-* *Impact* stayed dissolved. Blast radius is one line at the foot of the first tab and
-  a phrase in the header. It never earned a tab and did not get one back.
+* Every tab carries its count (`4 facts`, `4 steps`, `6 tables`), so the label says
+  what is behind it.
+* **Nothing you have to act on is inside a tab.** The header, the element pills and
+  a state strip sit above the tab bar, visible on all six. The strip names the state,
+  quotes the last reason anyone wrote, says whose turn it is, and carries the one
+  event `lifecycle.available_events` permits — which opens the decision form in a
+  drawer. `tests/test_write_path.py` clicks that button rather than setting the
+  session flag, so the strip is part of the tested write path.
+* *Impact* came back as **Lineage**, and earned it by being drawn rather than listed:
+  checks → tables with bad rows → what reads them downstream
+  (`components.lineage_view`). Two lists of table names never earned a tab; a
+  picture of where the damage travels does.
+* Prior advice ("These rules have been here before") moved under **What to do**, not
+  Diagnosis: what was tried last time is a fact about the advice.
 
 **The model's verdict is eleven columns, and the app renders all of them.**
 `notebooks/03_group_and_advise.ipynb` always produced more than a hypothesis and a
@@ -236,12 +243,29 @@ off the lifecycle state — `owner_group` is the domain that owns the data and i
 same for most of the register, so printing it would say nothing. The Triage queue's
 `Waiting on` column and the detail page's state strip both call it.
 
-**A problem's title is derived, in one place.** There is no stored title column and
-adding one is a fixture and DDL change, not a UI one, so `components.problem_title`
-cuts one out of the root-cause hypothesis: drop a dashed aside, stop at the first `.`
-or `:`. It does not rewrite — a badly-written hypothesis yields a badly-written title,
-which is the right place for that problem to surface. The Scorecard and the Triage
-queue both call it; neither has its own copy.
+**A problem's title is derived, in one place, and it is not the hypothesis.**
+`components.problem_title` builds `<what it is about> — <what kind of wrong>`:
+the registered elements the checks watch (`components.cohort_elements`, read off
+`v_cde_coverage`, most critical first, two by name at most) and `defect_location` in
+the steward's words (`theme.DEFECT_VERDICT`: wrong data / rule flags valid rows /
+needs a business call). COH-B is "Primary billing account and Device IMEI — rule
+flags valid rows". A problem on no registered element falls back to the column its
+checks read, or a cross-table check's rule name — never one bare table. Until
+2026-09-22 the title was the hypothesis's first sentence, cut; COH-B's was "Neither
+of these is a data defect", which names nothing. That cut survives as
+`components.claim_sentence`: the line under the title on the detail page and the
+tooltip on a queue row. There is still no stored title column — a model-written one
+is a DDL, notebook and fixture change, and this stays as its fallback if it lands.
+The Scorecard, the Triage queue and the detail page all call it.
+
+**A problem's elements are pills on its detail page.** One per element (Customer
+name bound to three columns is one), labelled with criticality and coverage, and a
+click opens `components.element_panel` — the same drawer the scorecard's element
+table opens, moved out of `scorecard.py` so both pages share it. Each page holds the
+pick in its own session key (`_cde_pick`, `_detail_cde_pick`). Checks on no element
+are counted in a dashed chip rather than dropped. The Triage queue does not repeat
+the chips — its title already names the elements — and carries the most critical
+one's criticality on the row's second line instead.
 
 **The scorecard's bottom band is a list of elements, not an issue queue.** The tabbed
 issue board and the two cards in the rail beside it — coverage segments and Recent

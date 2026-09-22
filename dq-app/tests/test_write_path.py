@@ -42,7 +42,7 @@ def _cohort_awaiting_review() -> str:
 def _open_the_form(at):
     """Click the control that opens the decision drawer, and return the reloaded app.
 
-    The form moved behind this button on 2026-09-17: the page's four tabs hold the
+    The form moved behind this button on 2026-09-17: the page's tabs hold the
     reading and the decision sits above them, in a drawer. Clicking rather than
     setting the session flag by hand is deliberate — the strip button is now part of
     the write path, and a test that skipped it would pass with the button unwired.

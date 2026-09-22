@@ -224,6 +224,13 @@ DEFECT_LABEL = {
     "neither": "Neither — a business question",
 }
 DEFECT_TONE = {"data": "high", "rule": "info", "neither": "neutral"}
+# The same three answers, shortened to the half of a problem's title that says what
+# kind of wrong it is — `components.problem_title`. Lower case: it follows a dash.
+DEFECT_VERDICT = {
+    "data": "wrong data",
+    "rule": "rule flags valid rows",
+    "neither": "needs a business call",
+}
 
 DEFECT_MEANING = {
     "data": "The rule is right and the rows are wrong. The remedy is a correction, "
@@ -1361,6 +1368,43 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 /* The tags on that second line are words, not colours — "recurrence", "checks
    breaching again". The tint is the second channel; the phrase is the first. */
 .dq-rowgrid .stack .t2 .mark {{ font-weight: 600; }}
+/* A problem's registered elements, as pills — `components.element_chips`. Sans, not
+   the mono of the line they may sit on: they are names, not identifiers. The dot is
+   criticality's tone and the word beside it says the same thing. `.off` is the count
+   of checks on no element, dashed because it is an absence rather than a thing. */
+.dq-chip {{ display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap;
+  font-family: inherit; font-size: clamp(.64rem, .76vw, .71rem); font-weight: 500;
+  color: var(--dq-text-2); border: 1px solid var(--dq-border); border-radius: 999px;
+  padding: .02rem .5rem; margin: 0 .3rem .1rem 0; background: {NEUTRAL["surface"]}; }}
+.dq-chip i {{ width: .42rem; height: .42rem; border-radius: 50%; display: inline-block; }}
+.dq-chip.off {{ border-style: dashed; color: var(--dq-text-3); font-weight: 400; }}
+.dq-rowgrid .stack .t2 .dq-chip {{ font-family: -apple-system, BlinkMacSystemFont,
+  "Segoe UI", sans-serif; margin-bottom: 0; }}
+.dq-chiprow {{ margin: .35rem 0 .1rem; line-height: 1.9; }}
+.dq-chiprow .k {{ font-size: .74rem; color: var(--dq-text-3); margin-right: .45rem; }}
+.dq-subclaim {{ font-size: .9rem; color: var(--dq-text-2); margin: .1rem 0 .3rem; }}
+
+/* The detail page's Lineage tab — `components.lineage_view`. Three columns and two
+   arrows; each column grows to its own height, so nine checks beside two tables do
+   not stretch the tables' boxes. */
+.dq-lineage {{ display: grid; grid-template-columns: minmax(0,1fr) 1.6rem minmax(0,1fr)
+  1.6rem minmax(0,1fr); align-items: start; gap: .4rem; margin: .4rem 0 .6rem; }}
+.dq-lineage .col {{ display: flex; flex-direction: column; gap: .35rem; min-width: 0; }}
+.dq-lineage .hd {{ font-size: .68rem; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--dq-text-3); margin-bottom: .1rem; }}
+.dq-lineage .node {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .74rem; color: {NEUTRAL["text"]}; background: {NEUTRAL["surface"]};
+  border: 1px solid var(--dq-border); border-radius: 6px; padding: .3rem .55rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.dq-lineage .node.hit {{ border-color: {TONE["critical"]["bd"]};
+  background: {TONE["critical"]["bg"]}; }}
+.dq-lineage .none {{ font-size: .76rem; color: var(--dq-text-3); padding: .3rem 0; }}
+.dq-lineage .arrow {{ color: var(--dq-text-3); text-align: center; padding-top: 1.55rem; }}
+@media (max-width: 720px) {{
+  .dq-lineage {{ grid-template-columns: 1fr; }}
+  .dq-lineage .arrow {{ padding: 0; transform: rotate(90deg); }}
+}}
+
 /* The header sits OUTSIDE the scroll box so it does not scroll away, which means
    its cells have to line up with rows drawn inside it: the box's own side padding
    plus the row's. `scrollbar-gutter` below holds that true once the list scrolls. */

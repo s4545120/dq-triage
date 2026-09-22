@@ -223,12 +223,16 @@ def _tagged(check_run: pd.DataFrame, registry: pd.DataFrame,
 # --- The failing-checks table ------------------------------------------------
 
 
-def _problem_titles(cohorts: pd.DataFrame) -> dict:
-    """cohort_id → the problem as a phrase. One derivation, in
-    `components.problem_title`, shared with the Triage queue — three copies of a
-    `split(".")` is three chances for one problem to have three different names."""
-    return {r.cohort_id: components.problem_title(r.root_cause_hypothesis)
-            for r in cohorts.itertuples()}
+def _problem_titles(cohorts: pd.DataFrame, cde_cov: pd.DataFrame,
+                    registry: pd.DataFrame) -> dict:
+    """cohort_id → the problem's title. One derivation, in
+    `components.problem_title`, shared with the Triage queue and the detail page —
+    three copies are three chances for one problem to have three different names."""
+    out = {}
+    for _, r in cohorts.iterrows():
+        elements, _ = components.cohort_elements(r["member_rule_ids"], cde_cov)
+        out[r["cohort_id"]] = components.problem_title(r, elements, registry)
+    return out
 
 
 def _where(row, tables: list[str]) -> str:
@@ -563,70 +567,6 @@ def _scope_panel(cde_cov: pd.DataFrame, scoped: pd.DataFrame) -> None:
     )
 
 
-def _element_panel(cde_cov: pd.DataFrame, registry: pd.DataFrame, cde_id: str) -> None:
-    """One element, for the reader who clicked Review on the issue board."""
-    rows = cde_cov[cde_cov["cde_id"] == cde_id]
-    if rows.empty:
-        return
-    first = rows.iloc[0]
-
-    head, close = st.columns([5, 1], vertical_alignment="center")
-    with head:
-        st.markdown(
-            '<div class="dq-dim-panel-hd">'
-            f'<span class="t">{html.escape(str(first["cde_name"]))}</span>'
-            + theme.criticality_badge(first["criticality"])
-            + (theme.badge("PII", "high", "shield") if first["pii"] else "")
-            + f'<span class="q">{html.escape(str(first["business_domain"]))} · '
-            f'{html.escape(str(first["owner_group"]))}</span></div>',
-            unsafe_allow_html=True,
-        )
-    if close.button("Close", key="_elem_close", width="stretch"):
-        st.session_state.pop("_cde_pick", None)
-        st.rerun()
-
-    rule_name = registry.set_index("rule_id")["rule_name"].to_dict()
-    body = []
-    for _, r in rows.iterrows():
-        ids = components.as_list(r["rule_ids"])
-        body.append({
-            "Column": f"{str(r['target_table']).split('.')[-1]}.{r['target_column']}",
-            "Finding": theme.COVERAGE_GAP_LABEL.get(r["coverage_gap"], r["coverage_gap"]),
-            "Checks": ", ".join(rule_name.get(i, i) for i in ids) or "nothing",
-            "Findings": int(r["latest_violation_rows"]),
-            "Populated when": components.opt(r["populated_when"]) or "always",
-        })
-    st.dataframe(
-        pd.DataFrame(body), width="stretch", hide_index=True,
-        # Sized deliberately rather than evenly: in a drawer this wide an even split
-        # gives the rule name too little and the one-word finding too much.
-        column_config={
-            "Column": st.column_config.TextColumn(width="small"),
-            "Finding": st.column_config.TextColumn(width="small"),
-            "Checks": st.column_config.TextColumn(width="medium"),
-            "Findings": st.column_config.NumberColumn(format="%d", width="small"),
-            "Populated when": st.column_config.TextColumn(width="medium"),
-        },
-    )
-
-    gap = first["coverage_gap"]
-    st.markdown(
-        f'<div class="dq-note">{theme.coverage_badge(gap)} '
-        f'{html.escape(theme.COVERAGE_GAP_MEANING.get(gap, ""))}</div>',
-        unsafe_allow_html=True,
-    )
-    unscoped = sorted({i for ids in rows["unscoped_rule_ids"]
-                       for i in components.as_list(ids)})
-    if unscoped:
-        st.caption(
-            "Rules contradicting this element's registered scope: "
-            + ", ".join(f"`{i}`" for i in unscoped)
-            + ". The register declares the scope these rules should have had, which "
-            "is how a rule defect becomes an assertion the model makes rather than "
-            "something a human noticed."
-        )
-
-
 # =============================================================================
 # Page
 # =============================================================================
@@ -875,7 +815,7 @@ with tiles:
 tagged_now = _tagged(in_domain, registry, latest_run_id)
 all_cohorts = adapter.get_cohorts()
 cohort_of = metrics.cohort_for_rules(all_cohorts, set(tagged_now["rule_id"]))
-titles = _problem_titles(all_cohorts)
+titles = _problem_titles(all_cohorts, cde_cov, registry)
 monitored_tables = sorted(in_domain["target_table"].dropna().unique())
 failing = _failing_frame(tagged_now, cde_rules,
                          {r: titles.get(c, c) for r, c in cohort_of.items()},
@@ -1136,4 +1076,5 @@ else:
 if st.session_state.get("_cde_pick") and picked_rule not in set(
         failing["Rule id"] if not failing.empty else []):
     with st.container(key="dq_element_drawer"):
-        _element_panel(cde_cov, registry, st.session_state["_cde_pick"])
+        components.element_panel(cde_cov, registry, st.session_state["_cde_pick"],
+                                 pick_key="_cde_pick")

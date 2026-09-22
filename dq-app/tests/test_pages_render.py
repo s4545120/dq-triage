@@ -320,7 +320,9 @@ def test_the_element_band_lists_every_element_with_its_kind_and_score():
     at = _run(SCORECARD)
     rows = [str(m.value) for m in at.markdown
             if 'class="dq-rowgrid' in str(m.value) and "head" not in str(m.value)[:60]]
-    band = [r for r in rows if "Customer email address" in r]
+    # Outside the problem link: since 2026-09-22 a problem's title names its element,
+    # so a failing-check row that links to COH-A mentions the element too.
+    band = [r for r in rows if "Customer email address" in r.split('class="link"')[0]]
     assert band, "the element band does not list Customer email address"
     assert "Email address" in band[0], "the element's kind is not on its row"
     assert "%" in band[0], "the element's score is not on its row"
@@ -426,3 +428,107 @@ def test_a_dimension_with_a_failing_check_never_reads_as_a_clean_100():
     for header in headers:
         shown = re.search(r">([\d.]+)% scored<", header)
         assert not (shown and shown.group(1) == "100"), header
+
+
+# --- Titles, elements and tabs (2026-09-22) ----------------------------------
+
+
+def _titles():
+    from dq_app.data import adapter
+    from dq_app.ui import components
+
+    cov = adapter.get_cde_coverage()
+    reg = adapter.get_rule_registry_current()
+    out = {}
+    for _, c in adapter.get_cohorts().iterrows():
+        els, loose = components.cohort_elements(c["member_rule_ids"], cov)
+        out[c["cohort_id"]] = (components.problem_title(c, els, reg), els, loose, c)
+    return out
+
+
+def test_every_problem_title_names_what_it_is_about_and_what_kind_of_wrong():
+    """A title is `<element or column> — <verdict>`, never the hypothesis's first
+    sentence: COH-B's first sentence is "Neither of these is a data defect", which
+    names nothing."""
+    from dq_app.ui import theme
+
+    verdicts = set(theme.DEFECT_VERDICT.values()) | {"failing checks"}
+    for cid, (title, els, _, c) in _titles().items():
+        subject, sep, verdict = title.rpartition(" — ")
+        assert sep and subject, (cid, title)
+        assert verdict in verdicts, (cid, title)
+        if els:
+            assert els[0]["name"] in subject, (cid, title)
+
+
+def test_the_rule_defect_title_says_the_rule_is_wrong_and_names_both_elements():
+    coh_b = [v for v in _titles().values() if "SUBS_IMEI_NOT_NULL" in
+             list(v[3]["member_rule_ids"])][0]
+    title, els, _, _ = coh_b
+    assert title.endswith("rule flags valid rows")
+    assert "Device IMEI" in title and "Primary billing account" in title
+    assert {e["coverage_gap"] for e in els} == {"scope_mismatch"}
+
+
+def test_a_problem_on_no_registered_element_falls_back_to_its_columns():
+    """Three problems touch no element. Their titles name the columns their checks
+    read rather than going blank or inventing an element."""
+    bare = [v for v in _titles().values() if not v[1]]
+    assert bare, "every cohort has an element — the fallback is untested"
+    for title, _, loose, _ in bare:
+        assert loose, title
+        subject = title.rpartition(" — ")[0]
+        # A column, or a cross-table check's own name. Never one bare table.
+        assert subject not in {"subs_c", "ctct_c"}, title
+
+
+def test_an_element_is_one_chip_however_many_columns_bind_it():
+    """Customer name is bound to three columns and is one element, the same
+    one-row-per-element count the scorecard's element table uses."""
+    for title, els, _, _ in _titles().values():
+        ids = [e["cde_id"] for e in els]
+        assert len(ids) == len(set(ids)), title
+
+
+def test_the_detail_page_is_six_tabs_with_counts():
+    target = _cohorts().sort_values("member_count").iloc[-1]
+    at = _run("dq_app/ui/pages/triage_detail.py", selected_cohort=target["cohort_id"])
+    labels = [t.label for t in at.tabs]
+    assert [lb.split(" · ")[0] for lb in labels] == [
+        "Diagnosis", "What to do", "Evidence", "Lineage", "Decisions", "Stored record"]
+    assert labels[1] == f"What to do · {len(target['recommended_steps'])} steps"
+    body = _body(at)
+    # The advice and the blast radius are in their own tabs, not under the claim.
+    assert "Tables with bad rows" in body and "Read downstream" in body
+    for t in target["blast_radius_tables"]:
+        assert str(t) in body
+
+
+def test_the_detail_header_carries_the_title_the_claim_and_the_elements():
+    target = _cohorts().sort_values("member_count").iloc[-1]
+    title, els, loose, _ = _titles()[target["cohort_id"]]
+    at = _run("dq_app/ui/pages/triage_detail.py", selected_cohort=target["cohort_id"])
+    body = _body(at)
+    assert title in body
+    assert "A change to the CRM contact export" in body   # the claim, under the title
+    pills = at.get("button_group")
+    assert pills, "no element pills on the detail page"
+    assert f"{len(loose)} checks on no registered element" in body
+
+
+def test_an_element_pill_opens_the_element_drawer():
+    target = _cohorts().sort_values("member_count").iloc[-1]
+    _, els, _, _ = _titles()[target["cohort_id"]]
+    at = _run("dq_app/ui/pages/triage_detail.py", selected_cohort=target["cohort_id"],
+              _detail_cde_pick=els[0]["cde_id"])
+    assert any(b.key == "_elem_close" for b in at.button), "the drawer did not open"
+    at.button(key="_elem_close").click().run()
+    assert not at.exception
+    assert not any(b.key == "_elem_close" for b in at.button), "Close did not close it"
+
+
+def test_the_queue_shows_the_new_titles():
+    at = _run("dq_app/ui/pages/triage.py")
+    body = _body(at)
+    assert "rule flags valid rows" in body
+    assert "Neither of these is a data defect</span>" not in body
