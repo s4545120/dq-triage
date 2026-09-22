@@ -301,15 +301,13 @@ def test_the_check_panel_says_when_a_check_is_not_scored():
     assert "does not move the quality figure" in shown
 
 
-def test_the_scope_panel_replaces_the_data_elements_page():
-    """`Data elements` was deleted. Everything anyone used it for has to be reachable
-    from the scorecard, or the page was not folded in — it was dropped."""
-    at = _run(SCORECARD, _scope_open=True)
-    frames = [df.value for df in at.dataframe]
-    listing = [f for f in frames if "Critical data element" in f.columns]
-    assert listing, "the scope panel lists no elements"
-    assert len(listing[0]) >= 10
-    assert "Criticality" in listing[0].columns
+def test_the_scope_button_is_gone_because_the_element_list_replaced_it():
+    """`Scored on 20 checks over 10 critical elements` opened a panel listing every
+    element. The element list beside the failing checks is that list, so the button
+    went on 2026-09-22 rather than leaving two ways to the same table."""
+    at = _run(SCORECARD)
+    assert not any(b.key == "_scope_btn" for b in at.button)
+    assert "Scored on" not in _body(at)
 
 
 def test_the_element_band_lists_every_element_with_its_kind_and_score():
@@ -342,10 +340,6 @@ def test_the_element_band_recommends_nothing():
     for advice in ["What to do", "write a rule", "fix the rule's scope",
                    "add a format rule", "Needs work"]:
         assert advice not in body, advice
-
-    # And the panel behind the strip badge does not smuggle it back.
-    panel = _body(_run(SCORECARD, _scope_open=True))
-    assert "Needs work" not in panel
 
 
 def test_an_unvalidated_element_shows_its_coverage_beside_its_score():
@@ -386,8 +380,8 @@ def test_picking_an_element_narrows_the_failing_checks_to_it():
     rows = " ".join(_fail_rows(at))
     assert DOB in rows, "the DOB check is not listed under the DOB element"
     assert EMAIL not in rows, "an email check survived picking the DOB element"
-    assert "of 21 failing checks · Customer date of birth" in _body(at), \
-        "the foot does not say what the pane shows"
+    head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
+    assert head and "Customer date of birth" in head[0], "the pane does not say what it shows"
 
 
 def test_checks_on_no_registered_element_have_their_own_entry_rather_than_hiding():
@@ -402,7 +396,7 @@ def test_checks_on_no_registered_element_have_their_own_entry_rather_than_hiding
     assert "Special-care status" in rows
     # Attached checks are the half this entry excludes.
     assert "Contact email contains an @" not in rows
-    assert "do not move the quality figure" in _body(at)
+    assert "Not counted in the quality score" in _body(at)
 
 
 def test_an_element_shows_its_own_score_in_the_pane():

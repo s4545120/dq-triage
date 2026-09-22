@@ -58,10 +58,11 @@ nothing (`position="hidden"`) and `app.py` builds the sidebar itself from
 **Deleting the CDE page did not delete the CDE model.** `config.cde_registry`,
 `results.cde_profile` and `v_cde_coverage` are untouched, and so is every test pinned
 to them — the scorecard's quality figure still has the register for a denominator.
-What went is the browsing surface. What replaced it: the `Scored on 20 checks over 10
-critical elements` button in the filter strip opens a panel listing every element, and
-a row of the element table at the foot of the page opens that one element in a drawer
-instead of switching page. The cross-table attachment assertion that used to live in
+What went is the browsing surface. What replaced it is the scorecard's element list
+(see below), and "Every binding and what checks it" in its right pane opens one
+element in a drawer instead of switching page. The `Scored on 20 checks over 10
+critical elements` button and the scope panel it opened were deleted on 2026-09-22:
+the element list is the same list, and two ways to one table was one too many. The cross-table attachment assertion that used to live in
 the CDE page's tests moved to the check panel.
 
 **The scorecard gained a drill-down.** Selecting a failing check opens a panel with
@@ -285,8 +286,8 @@ cards above the two panes did not change.
 already carrying the evidence (`see COH b42685aa`). Recommending the fix for a gap in
 the register is out of scope for this app; `WHAT_TO_DO` and `_gap_sentence` are
 deleted, and `tests/test_pages_render.py` asserts none of that wording comes back.
-The scope panel's `Status` column lost its "Needs work" for the same reason and now
-prints which of the four coverage findings it is.
+The scope panel's `Status` column lost its "Needs work" for the same reason; the
+panel itself is gone since 2026-09-22.
 
 **An element's score and its coverage are two different findings and the list shows
 both.** The score is `_element_scores` — the same row-weighted arithmetic as the
@@ -544,15 +545,16 @@ and column, which would silently drop `XREF_NAME_AGREEMENT` (two tables, no
 *Unscoped, counting the whole run:* the scorecard's six estate tiles and its
 failing-checks table. Reporting "2 tables monitored" over only the attached checks
 understates the estate, and a diagnostic table that hides 14 of 34 failing checks
-would disagree with the Triage queue, which is where those checks get worked. The
-tiles carry "What is being watched · every check that ran" above them; the quality
-figure carries its scope in the strip beside it.
+would disagree with the Triage queue, which is where those checks get worked.
 
-The scoping is drawn, not implied, and it is spelled out rather than abbreviated: the
-monitor pages carry a `10 CDEs` badge in the filter strip, and the scorecard a
-`Scored on 20 checks over 10 critical elements` button that opens the element list —
-a reader who does not already know the denominator cannot recover it from a badge
-reading `10 CDEs`. A diagnostic page that quietly hides 14 of 34 checks is worse than
+The scoping is drawn, not implied: the monitor pages carry a `10 CDEs` badge in the
+filter strip, and on the scorecard it is stated where the numbers are — the `All
+checks` pane reads `32 checks · 20 scored`, `Not on a registered element` reads `Not
+counted in the quality score.`, and the quality figure's tooltip gives the full
+explanation. On 2026-09-22 the scorecard's explanatory captions were cut (the
+`Scored on …` button, "every check that ran — not only the 20 the score is built
+on" over the tiles, "click a row for the bad rows") because they repeated what the
+page already showed. Keep the page terse; put the long explanation in a tooltip. A diagnostic page that quietly hides 14 of 34 checks is worse than
 one that shows fewer and says so.
 
 Consequences a reader will otherwise trip over: the scorecard's quality figure is

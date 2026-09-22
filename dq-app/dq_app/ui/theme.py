@@ -1365,6 +1365,14 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-rowgrid .stack .t2 {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: clamp(.66rem, .78vw, .72rem); color: var(--dq-text-3); line-height: 1.4;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+/* Opt-in wrapping for a cell whose full text matters more than a fixed row height:
+   up to two lines, then an ellipsis. Used on the scorecard's failing checks, where
+   "Contact email domain has a top-level domain" cut to "Contact email domain ha…"
+   was not a check anyone could identify. The row grows to fit — its height comes
+   from `min-height` on the row container, not a fixed height. */
+.dq-rowgrid .stack .t1.wrap, .dq-rowgrid .link.wrap {{
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }}
 /* The tags on that second line are words, not colours — "recurrence", "checks
    breaching again". The tint is the second channel; the phrase is the first. */
 .dq-rowgrid .stack .t2 .mark {{ font-weight: 600; }}
@@ -1487,6 +1495,11 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 [class*="st-key-dqrow_"] .stMarkdown, [class*="st-key-dqrow_"] .stMarkdown > div {{
   display: block; height: auto;
 }}
+/* Streamlit gives every markdown container `margin-bottom: -1rem` to cancel the gap it
+   puts after blocks — here there is no block after it, so the row came out 1rem short
+   of its content and a two-line check name spilled into the next row. Zeroed, the row
+   is as tall as its content wherever that beats the `min-height` above. */
+[class*="st-key-dqrow_"] [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
 /* The hover response the reader is looking for: the whole row tints, in the same
    accent the selected row uses, so hovering previews what clicking does. */
 [class*="st-key-dqrow_"]:hover {{
@@ -1511,6 +1524,15 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 }}
 [class*="st-key-dqrow_"] [data-testid="stButton"] {{
   height: 100%; width: 100%; max-width: none;
+}}
+/* A button given `help` is wrapped in three more boxes for its tooltip, each sized to
+   its content — which left a 22px strip across the top of the row as the only thing
+   that could be clicked or hovered. Stretched, the whole row is the target again and
+   the tooltip opens from anywhere on it. */
+[class*="st-key-dqrow_"] [data-testid="stButton"] > div,
+[class*="st-key-dqrow_"] .stTooltipIcon,
+[class*="st-key-dqrow_"] .stTooltipHoverTarget {{
+  display: block; height: 100%; width: 100%; max-width: none;
 }}
 [class*="st-key-dqrow_"] .stButton button {{
   height: 100%; width: 100%; opacity: 0; padding: 0; min-height: 0;

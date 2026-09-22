@@ -141,7 +141,7 @@ def row_head(heads: list, grid: str) -> None:
 
 
 def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
-                   label, picked=None) -> str | None:
+                   label, picked=None, tip=None) -> str | None:
     """A block of whole-row click targets. Returns the id clicked, or None.
 
     `key` is a short name unique to this table on this page — it prefixes the
@@ -150,6 +150,11 @@ def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
 
     Plain dicts rather than `itertuples`, because half these column names carry a
     space and `itertuples` silently renames those to positional `_7`.
+
+    `tip`, where given, is the row's hover text. It has to ride on the button: the
+    button is stretched over the whole row, so a `title` on the markup underneath is
+    never hovered and never shows — which is how every cut-off name on these tables
+    came to have a tooltip nobody could see.
     """
     got = None
     for row in rows:
@@ -160,7 +165,8 @@ def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
                 f'style="grid-template-columns:{grid}">' + cells(row) + "</div>",
                 unsafe_allow_html=True,
             )
-            if st.button(label(row), key=f"_open_dqrow_{key}_{row_id}"):
+            if st.button(label(row), key=f"_open_dqrow_{key}_{row_id}",
+                         help=tip(row) if tip else None):
                 got = row_id
     return got
 
