@@ -844,7 +844,7 @@ with left:
         got = components.clickable_rows(
             el_rows, ELIST_GRID, _el_cells, "el", "key",
             lambda r: f"Show the checks on {r['Element']}", picked=scope,
-            tip=lambda r: f"**{r['Element']}**  \n{r['Line']}")
+            tip=lambda r: [r["Element"], r["Line"]])
     if got:
         st.session_state["_elem_scope"] = got
         # A check picked under the old scope may not be in the new one, and a drawer
@@ -981,8 +981,8 @@ with right:
         def _fail_tip(row):
             # The full text of every cell that can still be cut: the check, where it
             # looks, and the problem it belongs to.
-            return (f"**{row['Check']}**  \n`{row['Where']}`"
-                    + (f"  \nProblem: {row['Problem']}" if row["Problem"] else ""))
+            return [row["Check"], (row["Where"], "mono"),
+                    f"Problem: {row['Problem']}" if row["Problem"] else None]
 
         components.row_head(FAILING_HEADS, FAILING_GRID)
         if grouped:

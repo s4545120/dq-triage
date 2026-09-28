@@ -151,10 +151,15 @@ def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
     Plain dicts rather than `itertuples`, because half these column names carry a
     space and `itertuples` silently renames those to positional `_7`.
 
-    `tip`, where given, is the row's hover text. It has to ride on the button: the
-    button is stretched over the whole row, so a `title` on the markup underneath is
-    never hovered and never shows — which is how every cut-off name on these tables
-    came to have a tooltip nobody could see.
+    `tip`, where given, is the row's hover text: a list of lines, the first drawn
+    bold, any line a `(text, "mono")` pair. It is drawn markup shown by the row
+    container's CSS `:hover`, not the button's `help=`. Two reasons, one per option
+    ruled out. A `title` on the markup never shows: the button stretched over the row
+    is what the pointer is on — which is how every cut-off name on these tables came
+    to have a tooltip nobody could see. And `help=` sticks: a click reruns the page
+    under the open popover, the popover never hears the pointer leave, and the bubble
+    stays on screen over whatever the reader moves to next. `:hover` is the browser's
+    own state and cannot be left behind.
     """
     got = None
     for row in rows:
@@ -162,13 +167,24 @@ def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
         with st.container(key=f"dqrow_{key}_{row_id}"):
             st.markdown(
                 f'<div class="dq-rowgrid{" dq-row-on" if row_id == picked else ""}" '
-                f'style="grid-template-columns:{grid}">' + cells(row) + "</div>",
+                f'style="grid-template-columns:{grid}">' + cells(row) + "</div>"
+                + (_row_tip(tip(row)) if tip else ""),
                 unsafe_allow_html=True,
             )
-            if st.button(label(row), key=f"_open_dqrow_{key}_{row_id}",
-                         help=tip(row) if tip else None):
+            if st.button(label(row), key=f"_open_dqrow_{key}_{row_id}"):
                 got = row_id
     return got
+
+
+def _row_tip(lines) -> str:
+    """The bubble `clickable_rows` shows on hover. `aria-hidden`, because the button's
+    label already names the row for a screen reader and this would read it twice."""
+    out = []
+    for i, line in enumerate(x for x in lines if x):
+        text, cls = line if isinstance(line, tuple) else (line, "")
+        cls = " ".join(c for c in [cls, "b" if i == 0 else ""] if c)
+        out.append(f'<span class="{cls}">{html.escape(str(text))}</span>')
+    return f'<div class="dq-rowtip" aria-hidden="true">{"".join(out)}</div>'
 
 
 _ASIDE = re.compile(r"\s+(--|—)\s.*?\s(--|—)\s+")

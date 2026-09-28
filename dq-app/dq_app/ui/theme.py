@@ -1542,6 +1542,36 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   opacity: 1; background: transparent; color: transparent;
   outline: 2px solid {ACCENT}; outline-offset: -2px; border-radius: 6px;
 }}
+/* A row's hover text — `components.clickable_rows(tip=)`. Drawn and shown by
+   `:hover` rather than by the button's `help=`, because Streamlit's popover sticks:
+   a click reruns the page under it, it never hears the pointer leave, and the
+   bubble stayed on screen after the cursor had gone. It hangs below the row, and
+   above it for the last two, so the foot of a scrolling list does not clip it. The
+   delay is so that running the cursor down the list does not strobe a bubble per
+   row. */
+.dq-rowtip {{
+  position: absolute; top: calc(100% - 4px); left: .7rem; z-index: 60;
+  width: max-content; max-width: min(24rem, calc(100% - 1.4rem));
+  display: flex; flex-direction: column; gap: .1rem;
+  background: {NEUTRAL["text"]}; color: #fff;
+  font-size: .74rem; font-weight: 450; line-height: 1.45; white-space: normal;
+  overflow-wrap: anywhere; padding: .45rem .62rem; border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(16, 24, 40, .22);
+  visibility: hidden; opacity: 0; pointer-events: none;
+  transition: opacity .1s ease-out 0s, visibility 0s linear .1s;
+}}
+.dq-rowtip .b {{ font-weight: 600; }}
+.dq-rowtip .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem;
+  opacity: .85; }}
+/* Counted on the row's parent: Streamlit wraps each container in a layout wrapper of
+   its own, so the rows themselves are all only children. */
+:nth-last-child(-n+2):not(:first-child) > [class*="st-key-dqrow_"] .dq-rowtip {{
+  top: auto; bottom: calc(100% - 4px);
+}}
+[class*="st-key-dqrow_"]:hover .dq-rowtip {{
+  visibility: visible; opacity: 1;
+  transition: opacity .1s ease-out .45s, visibility 0s linear .45s;
+}}
 /* The markup underneath must not eat the click meant for the button above it. */
 [class*="st-key-dqrow_"] .stMarkdown {{ pointer-events: none; }}
 
