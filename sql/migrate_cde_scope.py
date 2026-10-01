@@ -152,8 +152,10 @@ def main() -> int:
         "",
         "-- EXPLICIT column list: ADD COLUMN appends tolerance_pct at the END of the table",
         "-- while sql/ddl/ declares it after regulatory_basis, so a positional INSERT would",
-        "-- load garbage without erroring. bindings is selected from the row superseded,",
-        "-- so the table-name rewrite the seed performed is carried across untouched.",
+        "-- load garbage without erroring. bindings is written from the FIXTURE, with the",
+        "-- seed's table-name rewrite applied, not copied off the row superseded: the",
+        "-- fixture bound EML_STTS_CD to CDE_CUST_EMAIL after the workspace was seeded, and",
+        "-- copying forward left the two status-code rules attached to nothing.",
     ]
     for _, r in originals.iterrows():
         tol = float(r.tolerance_pct)
@@ -169,7 +171,8 @@ def main() -> int:
             "SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,",
             "       expected_signature, criticality, pii, regulatory_basis,",
             f"       {lit(tol)},",
-            "       bindings, business_domain, owner_group, status,",
+            "       array(" + ", ".join(binding_lit(b, rewrite) for b in r.bindings) + "),",
+            "       business_domain, owner_group, status,",
             "       current_timestamp(), current_user(), current_timestamp(),",
             f"       {lit(note)}",
             f"FROM   {cde}",

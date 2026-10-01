@@ -30,15 +30,18 @@ ALTER TABLE workspace.dq_triage.dq_config_cde_registry
 
 -- EXPLICIT column list: ADD COLUMN appends tolerance_pct at the END of the table
 -- while sql/ddl/ declares it after regulatory_basis, so a positional INSERT would
--- load garbage without erroring. bindings is selected from the row superseded,
--- so the table-name rewrite the seed performed is carried across untouched.
+-- load garbage without erroring. bindings is written from the FIXTURE, with the
+-- seed's table-name rewrite applied, not copied off the row superseded: the
+-- fixture bound EML_STTS_CD to CDE_CUST_EMAIL after the workspace was seeded, and
+-- copying forward left the two status-code rules attached to nothing.
 
 -- CDE_BILLING_ACCOUNT  -> v2   tolerance 0.5%  (high)
 INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde_name, business_term, data_class, definition, expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings, business_domain, owner_group, status, effective_from, registered_by, registered_at, note)
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        0.5,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_subs_c', 'target_column', 'PRIM_ACCT_KEY', 'populated_when', 'postpaid services only — a prepaid service has no billing account', 'expected_scope_filter', 'BILL_SUBS_TYPE_CD = \'POSTPAID\'', 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 0.5% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (high) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -50,7 +53,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        0.5,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'BRTH_TS', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 0.5% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (high) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -62,7 +66,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        0.5,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'EML_ID', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0), named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'EML_STTS_CD', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 0.5% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (high) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -74,7 +79,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        0.0,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'IDNT_DOC_1_NO', 'populated_when', 'an identity document type has been recorded for the contact', 'expected_scope_filter', 'IDNT_TYPE_1_CD IS NOT NULL AND trim(IDNT_TYPE_1_CD) <> \'\'', 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 0.0% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (critical) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -86,7 +92,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        2.0,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'PHN_NO', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 2.0% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (medium) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -98,7 +105,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        0.5,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'MOBL_NO', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 0.5% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (high) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -110,7 +118,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        0.0,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_subs_c', 'target_column', 'PRIM_RSRC_VALU_TXT', 'populated_when', 'the primary resource on the service is a mobile number', 'expected_scope_filter', 'PRIM_RSRC_TYPE_KEY = 1', 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 0.0% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (critical) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -122,7 +131,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        0.5,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'LEGL_NM', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0), named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'FRST_NM', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0), named_struct('target_table', 'workspace.dq_triage.dq_mock_ctct_c', 'target_column', 'LAST_NM', 'populated_when', NULL, 'expected_scope_filter', NULL, 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 0.5% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (high) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -134,7 +144,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        2.0,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_subs_c', 'target_column', 'IMEI_ID', 'populated_when', 'handset services only — fixed broadband has no handset and never will', 'expected_scope_filter', 'PROD_TYPE_KEY <> 0', 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 2.0% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (medium) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
@@ -146,7 +157,8 @@ INSERT INTO workspace.dq_triage.dq_config_cde_registry (cde_id, cde_version, cde
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis,
        2.0,
-       bindings, business_domain, owner_group, status,
+       array(named_struct('target_table', 'workspace.dq_triage.dq_mock_subs_c', 'target_column', 'SIM_SERL_ID', 'populated_when', 'services that carry a SIM — everything except fixed broadband', 'expected_scope_filter', 'PROD_TYPE_KEY <> 0', 'binding_status', 'bound', 'discovered_by', 'manual', 'confidence', 1.0)),
+       business_domain, owner_group, status,
        current_timestamp(), current_user(), current_timestamp(),
        'v2: tolerance_pct declared at 2.0% -- the share of rows in scope that may violate before the business calls this element broken, and the ceiling any rule watching it may set as fail_threshold_pct. Set from the criticality tier (medium) in fixtures/cdes.py: one person\'s starting point for a conversation with the business, not an agreed policy.'
 FROM   workspace.dq_triage.dq_config_cde_registry
