@@ -471,7 +471,7 @@ cde_cov = adapter.get_cde_coverage()
 
 
 def _page_head(sub: str = "") -> str:
-    return ('<div class="dq-page-hd"><div class="t">Data quality at a glance</div>'
+    return ('<div class="dq-page-hd"><div class="t">Data quality scorecard</div>'
             + (f'<div class="s">{html.escape(sub)}</div>' if sub else "") + "</div>")
 
 
