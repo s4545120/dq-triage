@@ -7,9 +7,9 @@
 -- =====================================================================
 
 -- 1. Row counts. Expected: 35, 6, 10.
-SELECT 'workspace.dq_triage.dq_config_rule_registry' AS t, count(*) AS actual, 48 AS expected FROM workspace.dq_triage.dq_config_rule_registry;
+SELECT 'workspace.dq_triage.dq_config_rule_registry' AS t, count(*) AS actual, 49 AS expected FROM workspace.dq_triage.dq_config_rule_registry;
 SELECT 'workspace.dq_triage.dq_config_playbook' AS t, count(*) AS actual, 6 AS expected FROM workspace.dq_triage.dq_config_playbook;
-SELECT 'workspace.dq_triage.dq_config_cde_registry' AS t, count(*) AS actual, 20 AS expected FROM workspace.dq_triage.dq_config_cde_registry;
+SELECT 'workspace.dq_triage.dq_config_cde_registry' AS t, count(*) AS actual, 21 AS expected FROM workspace.dq_triage.dq_config_cde_registry;
 
 -- 2. rule_expr round-trip. EXPECTED: zero rows.
 --    Any row here is an escaping failure — do not proceed to the check runner.
@@ -38,6 +38,7 @@ WITH expected(rule_id, rule_version, len) AS (VALUES
   ('CTCT_IDNT_DOC_NOT_NULL', 1, 49),
   ('CTCT_IDNT_DOC_NOT_NULL', 2, 52),
   ('CTCT_SPCL_CARE_VARIANCE', 1, 57),
+  ('CTCT_SPCL_CARE_VARIANCE', 2, 57),
   ('CTCT_PREF_LANG_VARIANCE', 1, 55),
   ('SUBS_MSISDN_SENTINEL', 1, 99),
   ('SUBS_MSISDN_SENTINEL', 2, 60),

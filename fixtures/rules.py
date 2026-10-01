@@ -606,7 +606,17 @@ RULES: list[Rule] = [
         severity="P2_alert",
         key_column="CTCT_KEY",
         sample_columns=["CTCT_KEY", "SPCL_CARE_STTS"],
-        note="A vulnerable-customer flag that is constant is almost certainly not being populated.",
+        note=(
+            "v2: retired 2026-10-01, with CDE_VULNERABLE_CUSTOMER. A count of distinct "
+            "values cannot tell a defaulted flag from a population with no vulnerable "
+            "customers, and failing it marked all 1000 rows. The runs before this date "
+            "stand; nothing runs it after."),
+        status="retired",
+        rule_version=2,
+        superseded=[dict(
+            rule_version=1,
+            note="A vulnerable-customer flag that is constant is almost certainly not being populated.",
+        )],
     ),
     Rule(
         rule_id="CTCT_PREF_LANG_VARIANCE",

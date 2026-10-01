@@ -331,8 +331,8 @@ assert _active <= _attached_ids, \
     f"active rules attached to no binding: {sorted(_active - _attached_ids)}"
 
 # Coverage is derived, so it must not invent or lose a binding.
-bound_count = sum(1 for _, c in cde.iterrows() if c.status == "registered"
-                  for b in c.bindings if b["binding_status"] == "bound")
+# Current versions only: a retired element's earlier registered version is history.
+bound_count = len(_bound)
 assert len(cov) == bound_count, \
     f"v_cde_coverage has {len(cov)} rows for {bound_count} bound columns"
 assert cov.coverage_gap.isin(
@@ -346,7 +346,7 @@ for _, r in cov.iterrows():
     for rid in r.unscoped_rule_ids:
         assert rid in known_rules, f"{r.cde_id} names unknown rule {rid}"
 
-print(f"cde: {len(cde)} elements  {bound_count} bound columns  "
+print(f"cde: {int((_cur_cde.status == 'registered').sum())} elements  {bound_count} bound columns  "
       f"{len(prof)} profiles  gaps: "
       + ", ".join(f"{k}={v}" for k, v in cov.coverage_gap.value_counts().items()))
 print(f"tables: {len(T)}  cohorts: {len(coh)}  events: {len(disp)}  "

@@ -243,6 +243,9 @@ def build_rule_registry() -> pd.DataFrame:
                 note=prior.get("note", ""),
             ))
         eff = base_authored if not r.superseded else SNAPSHOT - timedelta(days=45)
+        if r.status == "retired":
+            # Retired after the final run, so every run of it is history.
+            eff = cdes.RETIRED_AT.to_pydatetime()
         rows.append(dict(
             rule_id=r.rule_id,
             rule_version=r.rule_version,
@@ -263,8 +266,10 @@ def build_rule_registry() -> pd.DataFrame:
             effective_from=eff,
             created_by=STEWARD_A[0],
             created_at=eff,
+            # Retiring is not a promotion: who promoted it, and when, carries forward.
             promoted_by=None if r.status == "shadow" else STEWARD_B[0],
-            promoted_at=None if r.status == "shadow" else eff,
+            promoted_at=(None if r.status == "shadow"
+                         else base_authored if r.status == "retired" else eff),
             note=r.note,
         ))
     return pd.DataFrame(rows)
@@ -313,7 +318,9 @@ def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, 
 
             runs.append(dict(
                 result_id=result_id, run_id=run_id, run_ts=run_ts,
-                rule_id=r.rule_id, rule_version=r.rule_version,
+                # Every run predates a retirement, so it ran the version before it.
+                rule_id=r.rule_id,
+                rule_version=r.rule_version - 1 if r.status == "retired" else r.rule_version,
                 source_layer=r.source_layer, target_table=r.target_table,
                 target_column=r.target_column, rows_scanned=scanned,
                 violation_count=viol, violation_pct=pct,

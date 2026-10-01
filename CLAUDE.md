@@ -344,14 +344,14 @@ tolerance on every element since 2026-09-28, so the page can now say it.
 * **Overall quality** — the row-weighted score, the change since the previous run,
   its target and how far off it is, a 30-day line with the target dashed across it
   (`theme.target_chart`), and one sentence reading the chart aloud.
-* **Monitoring coverage** — elements by their worst finding (7 covered · 7 not
+* **Monitoring coverage** — elements by their worst finding (6 covered · 7 not
   validated · 6 out of scope on the fixture) as one bar in three shares. Its floor
   is a button: the open-problems count opens the Triage queue (`dq_covcard`,
   `dqrow_op_queue`).
 * **Critical data elements** (`dq_elcard`, rows in `dqrows_elist`, selection in
   `_elem_scope`) — one row per element: score, a 0–100 bar with the target ticked on
   it (`theme.target_bar`), the shortfall, the change since the last run. `Priority 5`
-  by default, `All 20` on request (`_elist_show`). The page opens on the first row.
+  by default, `All 19` on request (`_elist_show`). The page opens on the first row.
 * **Selected element** (`dq_elpane`) — a header (name, badges, score against target)
   above four tabs: **Overview** (trend, one sentence, the element drawer's button),
   **Checks · N** (every check on it, passing ones too, each with its own pass rate
@@ -395,7 +395,8 @@ below about 41rem of page.
   `≥ 100%`; that is the registry's state, and the Thresholds page is where it moves.
 * The **headline's** is the element targets weighted by the rows each check scanned
   (`blended_target`) — the figure the score would read if every element sat exactly
-  on its tolerance. 99.3% on the fixture, against a score of 92.1%.
+  on its tolerance. 99.3% on the fixture, against a score of 95.3% (92.1% until the
+  variance rule was retired — its 1000 failed rows were most of the gap).
 
 **Not every score is assessed against its target, and `targets.assessed` is the one
 definition.** It takes a binding something validates, no binding in scope mismatch, a
@@ -403,7 +404,7 @@ check that ran and a declared tolerance. An element nothing validates keeps its 
 and is not told it meets target; a scope mismatch keeps its 50% and is not told it is
 below — no red figure, no dashed line on its chart, and the rule the register
 disputes is labelled `Rule scope disputed` in its breakdown. On the fixture that is
-6 below, 2 meeting, 12 unassessed. **Eight assessed against seven "covered" is not a
+5 below, 2 meeting, 12 unassessed. **Seven assessed against six "covered" is not a
 bug**: coverage counts an element by its WORST binding, and Customer email address
 has seven checks examining the address and a status-code column watched only for
 presence. Its score is a real claim about the data; its coverage is honestly
@@ -666,7 +667,7 @@ freezes its column list at creation, so `v_rule_registry_current` could not see
 `join_sql` until it was re-created. Expect the same for any future `ADD COLUMN`.
 
 Verified: 13/13 helper rules OK with identical counts, `SUBS_MSISDN_FMT` at v3; three
-cross-table rules carry `join_sql`; 20 elements, all with a tolerance; no current rule
+cross-table rules carry `join_sql`; 20 elements (19 after the retirement below), all with a tolerance; no current rule
 without `cde_id`. Coverage reads 8 covered · 11 unvalidated · 4 no_rule · 2
 scope_mismatch against the fixture's 8 · 12 · 4 · 2.
 
@@ -933,6 +934,21 @@ shadow rule and so start with no active rule — which is the `no_rule` coverage
 the first ten never exercised. The fixture now reads 26 bound columns, 8 `covered`, 12
 `unvalidated`, 4 `no_rule`, 2 `scope_mismatch`, and `fixtures/verify.py` asserts that
 every current rule with a column names an element that binds it.
+
+**Nineteen since 2026-10-01: the vulnerable-customer flag is retired.** Its only rule,
+`CTCT_SPCL_CARE_VARIANCE`, asked whether `SPCL_CARE_STTS` ever varies; on a 1000-row
+extract an all-`N` column cannot tell a defaulted field from a population with no
+vulnerable customers, and a failed variance check marks every row, so the element
+read 0% and carried most of the headline's gap. Both were retired, not deleted —
+`status = 'retired'` at a new version, effective 2026-10-01, in the fixture
+(`CDE.retired_note`, `cdes.RETIRED_AT`) and in the workspace
+(`sql/out/retire_vulnerable_customer.sql`, applied). Every run before that date and
+COH-F, which was raised with the rule as a member, are left as they were; COH-F's
+pill row now counts that check as on no element. The scorecard drops a retired
+rule's runs at load (`_retired` in `scorecard.py`) so a run that predates the
+retirement does not resurface it under `Not on a registered element`. The fixture
+reads 25 bound columns, 7 `covered`. Re-registering it waits on the business saying
+how many customers it expects to carry the flag.
 
 **One denominator now.** The scorecard's `Not on a registered element` entry and
 its `not scored` pane state are conditional on a

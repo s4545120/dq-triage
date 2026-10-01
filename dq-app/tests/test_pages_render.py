@@ -247,6 +247,9 @@ def test_scorecard_opens_every_failing_check():
     runs = pd.read_parquet(path)
     latest = runs.loc[runs["run_ts"].idxmax(), "run_id"]
     failing = runs[(runs["run_id"] == latest) & (runs["status"] == "breach")]["rule_id"]
+    reg = pd.read_parquet(path.parent / "config.rule_registry.parquet")
+    latest_ver = reg.sort_values("rule_version").groupby("rule_id").tail(1)
+    failing = failing[~failing.isin(latest_ver[latest_ver["status"] == "retired"]["rule_id"])]
     assert len(failing) > 1
 
     for rule_id in failing:
@@ -294,6 +297,11 @@ def test_every_failing_check_is_on_a_registered_element():
     runs = pd.read_parquet(runs_path)
     latest = runs.loc[runs["run_ts"].idxmax(), "run_id"]
     failing = set(runs[(runs["run_id"] == latest) & (runs["status"] == "breach")]["rule_id"])
+    # A rule retired after the run still has its verdict on it; it is history, and
+    # the scorecard drops it rather than calling it unattached.
+    reg = pd.read_parquet(APP_DIR.parent / "fixtures" / "out" / "config.rule_registry.parquet")
+    latest_ver = reg.sort_values("rule_version").groupby("rule_id").tail(1)
+    failing -= set(latest_ver[latest_ver["status"] == "retired"]["rule_id"])
     assert failing <= attached, sorted(failing - attached)
 
     at = _run(SCORECARD, _check_pick=sorted(failing)[0])
@@ -321,14 +329,14 @@ def _rows(at, of: str) -> list[str]:
 
 def test_the_element_list_shows_five_by_default_and_every_element_on_request():
     """The list is an inventory sorted so its top is where to look first. Five rows
-    by default; all twenty one click away — a covered element is as much a fact
+    by default; all nineteen one click away — a covered element is as much a fact
     about the register as a gap, so `All` lists every one of them with its score."""
     at = _run(SCORECARD)
     assert len(_rows(at, "elements")) == 5
 
     at = _run(SCORECARD, _elist_show="all")
     rows = _rows(at, "elements")
-    assert len(rows) == 20, len(rows)
+    assert len(rows) == 19, len(rows)
     email = [r for r in rows if "Customer email address" in r]
     assert email and "%" in email[0], "the element's score is not on its row"
     assert any("Mobile service number (MSISDN)" in r for r in rows)
@@ -341,19 +349,24 @@ def test_the_element_counts_add_up_to_the_register():
     body = _body(_run(SCORECARD))
     counts = re.search(r"(\d+) below target · (\d+) meeting target · (\d+) unassessed", body)
     assert counts, "the list no longer states how the register splits"
-    assert sum(int(n) for n in counts.groups()) == 20
+    assert sum(int(n) for n in counts.groups()) == 19
 
 
 def test_the_largest_shortfall_is_first_and_picked_by_default():
-    """Largest target gap first, and the page opens on it. Vulnerable customer
-    indicator scores 0% against a zero-tolerance target, which no other element in
-    the fixture comes near."""
+    """Largest target gap first, and the page opens on it. Customer email address
+    carries the 240 malformed addresses against a 0.5% tolerance. (Vulnerable customer
+    indicator led at 0% until it was retired on 2026-10-01.)"""
     at = _run(SCORECARD)
     first = _rows(at, "elements")[0]
-    assert "Vulnerable customer indicator" in first
+    assert "Customer email address" in first
     assert "below target" in first
     head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
-    assert head and "Vulnerable customer indicator" in head[0]
+    assert head and "Customer email address" in head[0]
+    # A retired element and its retired rule leave the page entirely: not listed,
+    # and not swept into "Not on a registered element" by a run that predates it.
+    body = " ".join(str(m.value) for m in at.markdown)
+    assert "Vulnerable customer indicator" not in body
+    assert "Not on a registered element" not in body
 
 
 def test_the_element_band_recommends_nothing():
@@ -545,9 +558,9 @@ def test_the_page_renders_with_no_tolerance_declared(monkeypatch):
     body = _body(at)
     assert "No target" in body
     assert "Target \u2265" not in body
-    assert "0 below target · 0 meeting target · 20 unassessed" in body
+    assert "0 below target · 0 meeting target · 19 unassessed" in body
     rows = _rows(at, "elements")
-    assert len(rows) == 20
+    assert len(rows) == 19
     assert not any("Meets target" in r or "pts below" in r for r in rows)
 
 

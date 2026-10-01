@@ -82,6 +82,11 @@ class Binding:
 # different figure says so on its own row.
 TOLERANCE_BY_CRITICALITY = {"critical": 0.0, "high": 0.5, "medium": 2.0, "low": 5.0}
 
+# When the fixture's retirements took effect: the day they were decided, a month
+# after the final check run, so every run and cohort before it is history the
+# retirement does not reach.
+RETIRED_AT = pd.Timestamp("2026-10-01 09:00:00")
+
 
 @dataclass
 class CDE:
@@ -104,6 +109,11 @@ class CDE:
     status: str = "registered"
     cde_version: int = 1
     note: str = ""
+    # A retired element is written as two versions: v1 registered, carrying `note`,
+    # and the retiring version carrying `retired_note`. Retiring is an INSERT, never
+    # a delete -- the register is append-only -- so the element's history, and every
+    # check run and cohort that predates the retirement, stays readable.
+    retired_note: str = ""
     # Rules a column join cannot reach, tagged explicitly. Kept to the genuine
     # cases: tagging a rule whose target_column already matches a binding would
     # make config.rule_registry.cde_id look load-bearing when the column match
@@ -434,6 +444,16 @@ CDES: list[CDE] = [
             "The pilot data reads 'N' on all 1000 rows, and the variance rule that "
             "watches it says so. Whether that is a defaulted field or a population with "
             "no vulnerable customers is COH-F's open question."),
+        status="retired",
+        cde_version=2,
+        retired_note=(
+            "v2: retired 2026-10-01. Its only rule, CTCT_SPCL_CARE_VARIANCE, asked whether "
+            "the flag ever varied, and on a 1000-row pilot extract an all-'N' column cannot "
+            "tell a defaulted field from a population with no vulnerable customers -- so "
+            "every run scored the element 0% for a question the data cannot answer. Retired "
+            "with its rule rather than deleted. COH-F, raised on 2026-08-30 with that rule as "
+            "a member, is left as raised. Re-register when the business can state how many "
+            "customers it expects to carry the flag."),
     ),
     CDE(
         cde_id="CDE_PREF_LANGUAGE",

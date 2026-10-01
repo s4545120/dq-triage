@@ -72,7 +72,8 @@ def test_meeting_a_zero_tolerance_target_takes_every_row():
 
 
 def test_every_fixture_element_declares_a_tolerance_and_every_rule_maps_to_one():
-    """The fixture's side of the bargain: twenty elements, each with a target, and
+    """The fixture's side of the bargain: nineteen elements (twenty registered, one
+    retired 2026-10-01), each with a target, and
     every attached rule on exactly one of them — which is what lets the blend weight
     a check by a single element's tolerance."""
     if not FIXTURE.exists():
@@ -81,7 +82,7 @@ def test_every_fixture_element_declares_a_tolerance_and_every_rule_maps_to_one()
     cov = pd.read_parquet(FIXTURE / "results.v_cde_coverage.parquet")
 
     declared = targets.element_targets(reg)
-    assert len(declared) == 20 and all(t is not None for t in declared.values())
+    assert len(declared) == 19 and all(t is not None for t in declared.values())
     assert set(declared.values()) == {100.0, 99.5, 98.0, 95.0}
 
     rule_cde = targets.rule_elements(cov)

@@ -120,7 +120,8 @@ def profile_binding(ctx: Ctx, cde: CDE, binding: Binding) -> dict:
         profile_run_id=None,
         profile_ts=None,
         cde_id=cde.cde_id,
-        cde_version=cde.cde_version,
+        # The version profiled: a since-retired element was profiled before it retired.
+        cde_version=cde.cde_version - 1 if cde.status == "retired" else cde.cde_version,
         data_class=cde.data_class,
         criticality=cde.criticality,
         pii=cde.pii,
@@ -153,7 +154,9 @@ def build_cde_profile(ctx: Ctx, profile_ts, det_uuid, rng) -> pd.DataFrame:
     run_id = det_uuid("cde_profile_run", profile_ts.date().isoformat())
     rows = []
     for cde in cdes.CDES:
-        if cde.status != "registered":
+        # The profile pass ran on 2026-09-02, when a since-retired element was still
+        # registered; retiring it later does not un-profile it.
+        if cde.status not in ("registered", "retired"):
             continue
         for binding in cdes.bindings_of(cde):
             row = profile_binding(ctx, cde, binding)
@@ -173,10 +176,21 @@ def build_cde_registry(effective_from, registered_by: str) -> pd.DataFrame:
     and never re-tiers, so there is no version history to fold. The table is
     append-only regardless, and v_cde_registry_current derives effective_to from
     the next version exactly as the rule registry does."""
-    return pd.DataFrame([
-        dict(
+    rows = []
+    for c in cdes.CDES:
+        versions = [(c.cde_version, c.status, effective_from, c.note)]
+        if c.status == "retired":
+            versions = [(c.cde_version - 1, "registered", effective_from, c.note),
+                        (c.cde_version, "retired", cdes.RETIRED_AT, c.retired_note)]
+        for version, status, eff, note in versions:
+            rows.append(_registry_row(c, version, status, eff, registered_by, note))
+    return pd.DataFrame(rows)
+
+
+def _registry_row(c, version, status, eff, registered_by, note) -> dict:
+    return dict(
             cde_id=c.cde_id,
-            cde_version=c.cde_version,
+            cde_version=version,
             cde_name=c.cde_name,
             business_term=c.business_term,
             data_class=c.data_class,
@@ -189,11 +203,9 @@ def build_cde_registry(effective_from, registered_by: str) -> pd.DataFrame:
             bindings=[b.to_struct() for b in c.bindings],
             business_domain=c.business_domain,
             owner_group=c.owner_group,
-            status=c.status,
-            effective_from=effective_from,
+            status=status,
+            effective_from=eff,
             registered_by=registered_by,
-            registered_at=effective_from,
-            note=c.note,
+            registered_at=eff,
+            note=note,
         )
-        for c in cdes.CDES
-    ])

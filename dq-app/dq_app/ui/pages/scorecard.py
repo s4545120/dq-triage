@@ -467,6 +467,13 @@ components.page_chrome()
 
 runs = adapter.get_check_runs()
 registry = adapter.get_rule_registry_current()
+# A retired rule's runs are history, not a current claim about the data: the page
+# reads every run through today's register, so they leave the score, the trend and
+# the element list together. Without this they would surface under "Not on a
+# registered element", which is for a check that names none -- not one withdrawn.
+_all_versions = adapter.get_rule_registry().sort_values("rule_version")
+_retired = set(_all_versions.groupby("rule_id").tail(1).query("status == 'retired'").rule_id)
+runs = runs[~runs["rule_id"].isin(_retired)]
 cde_cov = adapter.get_cde_coverage()
 
 
