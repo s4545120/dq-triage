@@ -50,6 +50,7 @@ import cdes
 import coverage
 import profile as cde_profiler
 import rules
+import thresholds as threshold_advisor
 from rules import CTCT_TABLE, SUBS_TABLE, Ctx
 
 HERE = Path(__file__).parent
@@ -112,8 +113,17 @@ FIXED_ON = {
 RECURRED = {"CTCT_PHN_FMT": (-21, -8, 24)}  # (fixed_day, recurred_day, count now)
 
 
-def history_count(rule_id: str, snapshot_violations: int, day: int, rng: random.Random) -> int:
-    """Violations for `rule_id` on the run `day` days before the snapshot."""
+def history_count(rule_id: str, snapshot_violations: int, day: int, rng: random.Random,
+                  rule_type: str = "", rows_scanned: int | None = None) -> int:
+    """Violations for `rule_id` on the run `day` days before the snapshot.
+
+    Never more than `rows_scanned`: a check cannot fail more rows than it read."""
+    n = _history_count(rule_id, snapshot_violations, day, rng, rule_type)
+    return n if rows_scanned is None else min(n, rows_scanned)
+
+
+def _history_count(rule_id: str, snapshot_violations: int, day: int, rng: random.Random,
+                   rule_type: str) -> int:
     if rule_id in INCIDENT_RULES:
         run_ts = SNAPSHOT + timedelta(days=day)
         return snapshot_violations if run_ts >= INCIDENT_DATE else 0
@@ -138,7 +148,13 @@ def history_count(rule_id: str, snapshot_violations: int, day: int, rng: random.
     # Chronic. Hold roughly steady -- these are the problems nobody has touched.
     if day == 0:
         return snapshot_violations
-    return max(1, int(snapshot_violations * rng.uniform(0.92, 1.08)))
+    jittered = max(1, int(snapshot_violations * rng.uniform(0.92, 1.08)))
+    # A variance rule is all-or-nothing: the column is constant, so every row in
+    # scope fails, or it is not and none do. Jittering it produced 1072 of 1000.
+    # The draw above still happens so every other rule's history is unchanged.
+    if rule_type == "variance":
+        return snapshot_violations
+    return jittered
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +195,11 @@ def evaluate_all(ctx: Ctx) -> dict[str, Snapshot]:
 # rule_id -> cde_id, for the rules a column join cannot reach. Every other rule
 # is attached by v_cde_coverage on (target_table, target_column) with no tagging
 # at all -- see the note in fixtures/cdes.py on why both paths exist.
-CDE_FOR_RULE = cdes.rule_cde_map()
+# Every rule names its element -- explicit tag or bound column -- and cdes.cde_of
+# raises on one that resolves to neither, which is the NOT NULL on
+# config.rule_registry.cde_id caught here rather than at the INSERT.
+CDE_FOR_RULE = {r.rule_id: cdes.cde_of(r.rule_id, r.target_table, r.target_column)
+                for r in rules.RULES}
 
 
 def build_rule_registry() -> pd.DataFrame:
@@ -195,8 +215,20 @@ def build_rule_registry() -> pd.DataFrame:
                 target_column=r.target_column,
                 cde_id=CDE_FOR_RULE.get(r.rule_id),
                 rule_type=r.rule_type,
-                rule_expr=r.rule_expr,
-                scope_filter=prior.get("scope_filter"),
+                # A prior version may differ in its EXPRESSION as well as its scope.
+                # Until 2026-09-27 this took r.rule_expr unconditionally, so a
+                # superseded row silently claimed the current predicate -- which made
+                # the 13 rules that moved to a shared UC helper unrepresentable as
+                # history. Falling back to r.rule_expr keeps every existing entry
+                # (which only overrides scope_filter) writing exactly what it did.
+                rule_expr=prior.get("rule_expr", r.rule_expr),
+                join_sql=prior.get("join_sql", r.join_sql),
+                # INHERIT unless the entry says otherwise. A bare .get() returned None
+                # for any entry that did not mention scope_filter, which fabricated a
+                # history claiming the rule once ran unscoped -- the exact defect COH-B
+                # is about. The default matters and the None case still works, because
+                # a key present with value None beats the default.
+                scope_filter=prior.get("scope_filter", r.scope_filter),
                 fail_threshold_pct=r.fail_threshold_pct,
                 severity=r.severity,
                 business_domain=r.business_domain,
@@ -220,6 +252,7 @@ def build_rule_registry() -> pd.DataFrame:
             cde_id=CDE_FOR_RULE.get(r.rule_id),
             rule_type=r.rule_type,
             rule_expr=r.rule_expr,
+            join_sql=r.join_sql,
             scope_filter=r.scope_filter,
             fail_threshold_pct=r.fail_threshold_pct,
             severity=r.severity,
@@ -255,7 +288,8 @@ def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, 
 
         for r in rules.RULES:
             snap = snaps[r.rule_id]
-            viol = history_count(r.rule_id, snap.violations, day, rng)
+            viol = history_count(r.rule_id, snap.violations, day, rng,
+                                 r.rule_type, snap.rows_scanned)
             scanned = snap.rows_scanned
             pct = round(viol / scanned * 100, 4) if scanned else 0.0
             result_id = det_uuid("result", run_id, r.rule_id)
@@ -1144,6 +1178,15 @@ def main() -> None:
         ctx, SNAPSHOT, det_uuid, random.Random(20260902))
     cde_cov = coverage.cde_coverage(cde_registry, registry, runs, cde_profile)
 
+    # The threshold job's advice, one pass an hour after the final check run, and
+    # two decisions on it. Detection advice about the rules, and nothing to do with
+    # the cohorts above -- see fixtures/thresholds.py.
+    proposals = threshold_advisor.build_threshold_proposals(
+        runs, registry, cde_registry, SNAPSHOT + timedelta(hours=1), det_uuid)
+    reviews = threshold_advisor.build_threshold_reviews(
+        proposals, det_uuid, STEWARD_A, STEWARD_B, APP_VERSION)
+    proposal_current = threshold_advisor.proposal_current(proposals, reviews, registry)
+
     tables = {
         "config.rule_registry": registry,
         "config.playbook": playbook,
@@ -1155,6 +1198,9 @@ def main() -> None:
         "results.cde_profile": cde_profile,
         "results.v_cohort_current": current,
         "results.v_cde_coverage": cde_cov,
+        "results.threshold_proposal": proposals,
+        "results.threshold_review": reviews,
+        "results.v_threshold_proposal_current": proposal_current,
     }
     for name, df in tables.items():
         df.to_parquet(out / f"{name}.parquet", index=False)

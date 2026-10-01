@@ -49,14 +49,14 @@ UNION ALL
 UNION ALL
   SELECT 'CTCT_EML_FMT' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(NOT (EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$')) AS violation_count,
+         count_if(NOT workspace.dq_triage.dq_fn_is_valid_email_v1(EML_ID)) AS violation_count,
          999 AS exp_scanned, 240 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_ctct_c
   WHERE  EML_ID IS NOT NULL AND trim(EML_ID) <> ''
 UNION ALL
   SELECT 'CTCT_EML_NOT_NULL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(EML_ID IS NULL OR trim(EML_ID) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(EML_ID)) AS violation_count,
          1000 AS exp_scanned, 1 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_ctct_c
 UNION ALL
@@ -69,14 +69,14 @@ UNION ALL
 UNION ALL
   SELECT 'CTCT_EML_STTS_CONSISTENT' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(EML_STTS_CD = 'INVALID' AND EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$') AS violation_count,
+         count_if(EML_STTS_CD = 'INVALID' AND workspace.dq_triage.dq_fn_is_valid_email_v1(EML_ID)) AS violation_count,
          999 AS exp_scanned, 0 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_ctct_c
   WHERE  EML_ID IS NOT NULL AND trim(EML_ID) <> ''
 UNION ALL
   SELECT 'CTCT_EML_STTS_NOT_NULL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(EML_STTS_CD IS NULL OR trim(EML_STTS_CD) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(EML_STTS_CD)) AS violation_count,
          1000 AS exp_scanned, 1 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_ctct_c
 UNION ALL
@@ -96,7 +96,7 @@ UNION ALL
 UNION ALL
   SELECT 'CTCT_IDNT_DOC_NOT_NULL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(IDNT_DOC_1_NO IS NULL OR trim(IDNT_DOC_1_NO) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(IDNT_DOC_1_NO)) AS violation_count,
          1000 AS exp_scanned, 0 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_ctct_c
   WHERE  IDNT_TYPE_1_CD IS NOT NULL AND trim(IDNT_TYPE_1_CD) <> ''
@@ -109,14 +109,14 @@ UNION ALL
 UNION ALL
   SELECT 'CTCT_MOBL_FMT' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(MOBL_NO NOT RLIKE '^04[0-9]{8}$') AS violation_count,
+         count_if(NOT workspace.dq_triage.dq_fn_is_au_mobile_v1(MOBL_NO)) AS violation_count,
          982 AS exp_scanned, 0 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_ctct_c
   WHERE  MOBL_NO IS NOT NULL AND trim(MOBL_NO) <> ''
 UNION ALL
   SELECT 'CTCT_MOBL_NOT_NULL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(MOBL_NO IS NULL OR trim(MOBL_NO) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(MOBL_NO)) AS violation_count,
          1000 AS exp_scanned, 18 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_ctct_c
 UNION ALL
@@ -154,7 +154,7 @@ UNION ALL
 UNION ALL
   SELECT 'SUBS_BNFT_TXT_NOT_NULL' AS rule_id, 'row_level' AS shape, 'shadow' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(BNFT_TXT IS NULL OR trim(BNFT_TXT) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(BNFT_TXT)) AS violation_count,
          1000 AS exp_scanned, 750 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_subs_c
 UNION ALL
@@ -166,7 +166,7 @@ UNION ALL
 UNION ALL
   SELECT 'SUBS_IMEI_NOT_NULL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(IMEI_ID IS NULL OR trim(IMEI_ID) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(IMEI_ID)) AS violation_count,
          1000 AS exp_scanned, 200 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_subs_c
 UNION ALL
@@ -178,14 +178,14 @@ UNION ALL
 UNION ALL
   SELECT 'SUBS_MSISDN_FMT' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(PRIM_RSRC_VALU_TXT NOT RLIKE '^04[0-9]{8}$') AS violation_count,
+         count_if(NOT workspace.dq_triage.dq_fn_is_au_mobile_v1(PRIM_RSRC_VALU_TXT)) AS violation_count,
          800 AS exp_scanned, 12 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_subs_c
   WHERE  PRIM_RSRC_TYPE_KEY = 1
 UNION ALL
   SELECT 'SUBS_MSISDN_SENTINEL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(lower(trim(PRIM_RSRC_VALU_TXT)) IN ('service-number-unknown','unknown','n/a','na','none','null','')) AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_sentinel_v1(PRIM_RSRC_VALU_TXT)) AS violation_count,
          800 AS exp_scanned, 12 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_subs_c
   WHERE  PRIM_RSRC_TYPE_KEY = 1
@@ -199,7 +199,7 @@ UNION ALL
 UNION ALL
   SELECT 'SUBS_NTWK_NOT_NULL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(NTWK_TECH_NM IS NULL OR trim(NTWK_TECH_NM) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(NTWK_TECH_NM)) AS violation_count,
          1000 AS exp_scanned, 16 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_subs_c
 UNION ALL
@@ -211,7 +211,7 @@ UNION ALL
 UNION ALL
   SELECT 'SUBS_SIM_NOT_NULL' AS rule_id, 'row_level' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
-         count_if(SIM_SERL_ID IS NULL OR trim(SIM_SERL_ID) = '') AS violation_count,
+         count_if(workspace.dq_triage.dq_fn_is_blank_v1(SIM_SERL_ID)) AS violation_count,
          800 AS exp_scanned, 0 AS exp_violations
   FROM   workspace.dq_triage.dq_mock_subs_c
   WHERE  PROD_TYPE_KEY <> 0
@@ -227,21 +227,18 @@ UNION ALL
          count(*) AS rows_scanned,
          count_if(lower(trim(s.SUBS_FRST_NM)) <> lower(trim(c.FRST_NM))) AS violation_count,
          1000 AS exp_scanned, 2 AS exp_violations
-  -- join from fixtures/rules.py join_sql; config.rule_registry cannot store it
   FROM   workspace.dq_triage.dq_mock_subs_c s JOIN workspace.dq_triage.dq_mock_ctct_c c ON s.CTCT_KEY = c.CTCT_KEY
 UNION ALL
   SELECT 'XREF_OPEN_TS_AGREEMENT' AS rule_id, 'cross_table' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
          count_if(s.ECF_OPEN_TS <> c.CTCT_ADD_TS) AS violation_count,
          1000 AS exp_scanned, 11 AS exp_violations
-  -- join from fixtures/rules.py join_sql; config.rule_registry cannot store it
   FROM   workspace.dq_triage.dq_mock_subs_c s JOIN workspace.dq_triage.dq_mock_ctct_c c ON s.CTCT_KEY = c.CTCT_KEY
 UNION ALL
   SELECT 'XREF_SUBS_CTCT_ORPHAN' AS rule_id, 'cross_table' AS shape, 'active' AS reg_status,
          count(*) AS rows_scanned,
          count_if(c.CTCT_KEY IS NULL) AS violation_count,
          1000 AS exp_scanned, 0 AS exp_violations
-  -- join from fixtures/rules.py join_sql; config.rule_registry cannot store it
   FROM   workspace.dq_triage.dq_mock_subs_c s LEFT JOIN workspace.dq_triage.dq_mock_ctct_c c ON s.CTCT_KEY = c.CTCT_KEY
 )
 SELECT rule_id, shape, reg_status,

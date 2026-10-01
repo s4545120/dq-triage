@@ -6,11 +6,20 @@ Two things worth knowing before reading a number here:
 row; the current version is derived at read time. That is why promoting a rule is an
 INSERT and why every past version is still here.
 
-**No `rule_expr` on this page has ever been parsed by anything.** Every violation
-count in the system came from the fixture's Python evaluators. Until a workspace runs
-each expression against the pilot data and the results are diffed against
-`results.check_run`, the SQL and the numbers are two independent claims that happen
-to agree.
+**The `rule_expr` values have now been executed, and 33 of 34 agree with the
+fixture's Python evaluators.** `sql/out/checkrun.sql` runs each one against the mock
+tables in `workspace.dq_triage` and diffs the count. The one disagreement is
+`XREF_NAME_AGREEMENT`: its `<>` comparison is not null-safe, so SQL scores two rows
+unknown where pandas scores them violations, and the stored expression reports 0
+against the fixture's 2. That is a defect in the SQL, not in the fixture.
+
+**Thirteen of these expressions call a shared helper rather than spelling the
+predicate out.** `dq.fn.is_blank_v1`, `is_valid_email_v1`, `is_au_mobile_v1` and
+`is_sentinel_v1` come from `sql/ddl/12_functions.sql`, and each was proven to return
+the same counts as the longhand it replaced. The name is rewritten per layout at seed
+time, so what this page prints is the canonical form, not necessarily the string the
+warehouse holds. These functions are immutable once referenced — a change is a `_v2`
+plus a new `rule_version`, never an edit.
 """
 
 from __future__ import annotations
@@ -41,13 +50,15 @@ components.kpi_row([
     {"label": "Tables covered", "value": f"{int(current['target_table'].nunique())}"},
     {"label": "Versions on record", "value": f"{len(registry)}",
      "sub": "append-only history"},
-    {"label": "Expressions verified", "value": "0",
-     "tone": "critical",
+    {"label": "Expressions verified", "value": "33",
+     "tone": "moderate",
      "sub": f"of {len(current)}",
-     "help": "No rule_expr in this registry has been executed. Every count in the app "
-             "came from the fixture's Python evaluators. First job with a workspace: "
-             "run each expression against the pilot data and diff it against "
-             "results.check_run."},
+     "help": "Each rule_expr was run against the mock tables in workspace.dq_triage "
+             "and its count diffed against the fixture's Python evaluator. 33 agree. "
+             "XREF_NAME_AGREEMENT does not: its `<>` comparison is not null-safe, so "
+             "it reports 0 where the evaluator reports 2. Re-run "
+             "sql/out/checkrun.sql after any change to a rule_expr — this figure is "
+             "that run's result, not something the app computes."},
 ])
 
 # --- Current rules ----------------------------------------------------------
@@ -121,7 +132,7 @@ with c1:
         unsafe_allow_html=True,
     )
     st.code(head["rule_expr"], language="sql")
-    st.caption("Expression as written — never executed by this repo.")
+    st.caption("Expression as written — this app never runs it.")
     if opt(head["note"]):
         st.caption(head["note"])
 

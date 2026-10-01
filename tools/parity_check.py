@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Diff what the app reads from Unity Catalog against what it reads from the fixture.
 
-`dq_app/data/databricks_source.py` had never executed. Its own docstring says the first
-job with a workspace is to run these queries and diff the result against the fixture —
-this is that job.
+`dq_app/data/databricks_source.py` has since run against `workspace.dq_triage`, and the
+job its docstring used to defer to — run every query and diff the result against the
+fixture — is this script.
 
     DATABRICKS_CONFIG_PROFILE=<profile> python3 tools/parity_check.py \
         --catalog workspace --schema dq_triage --warehouse <id>

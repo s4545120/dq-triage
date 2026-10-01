@@ -13,7 +13,9 @@ Deterministic: same inputs, same uuids, same output, every run. Safe to regenera
 
 | File | What it is |
 |---|---|
-| `rules.py` | 34 rules. SQL `rule_expr` for Databricks + a Python evaluator for here. The two must agree. |
+| `rules.py` | 34 rules. SQL `rule_expr` for Databricks + a Python evaluator for here. The two must agree. Every rule names a registered element (`cdes.cde_of`), or the build refuses it. |
+| `cdes.py` | 20 critical data elements over 26 bound columns, each with a declared tolerance. |
+| `thresholds.py` | The threshold job's advice, hand-authored: nine proposals, two decisions, and the fixture twin of `v_threshold_proposal_current`. |
 | `build_fixtures.py` | Evaluates the rules, back-projects 40 daily runs, writes cohorts and the register. |
 | `verify.py` | Python twin of `v_disposition_integrity`, plus fixture-consistency assertions. |
 | `out/*.parquet` | One file per table, named `<schema>.<table>.parquet`. |
@@ -44,8 +46,18 @@ This is the part to read before quoting any number from `out/`.
 - **the CDE register itself** (`config.cde_registry`). Which fields are critical, at
   what tier and on what regulatory basis, is a business judgement, and here it is one
   person's — see `cdes.py`. The *bindings* are hand-authored too, which is what
-  `discovered_by = 'manual'` on all twelve of them means: the classification sweep that
+  `discovered_by = 'manual'` on all twenty-six of them means: the classification sweep that
   would propose them from column names, value signatures and lineage does not exist yet.
+  The **tolerances** are the same person's: `tolerance_pct` is set from the criticality
+  tier (`cdes.py`: critical 0.0, high 0.5, medium 2.0, low 5.0), and it is a starting
+  point for a conversation with the business, not an agreed policy;
+- **every threshold proposal and review** (`results.threshold_proposal`,
+  `results.threshold_review`). Nine proposals on one pass, hand-written in
+  `thresholds.py`; the current limit, the rule version, the element's tolerance and the
+  history statistics are filled in by the builder so the hand can only supply the figure,
+  the basis and the reason. Three move a limit, six say keep; one is rejected, one
+  deferred, one left open for the app's write-path test to adopt. No model produced any
+  of it and `model_endpoint` is NULL.
 
 **Deliberately *not* synthesised:** violation samples for back-projected breaches.
 Fabricating evidence rows for a breach that never happened is the one shortcut worth
@@ -179,9 +191,9 @@ defects above survive the threshold comfortably.
 - **CDE criticality tiers are one person's judgement.** They are a starting point for a
   conversation with the business, not an agreed taxonomy. Addendum A lists it as an open
   question.
-- **No CDE has zero rules**, so the `no_rule` coverage finding is unexercised in this
-  fixture — the twelve bound columns all attract at least one rule. `scope_mismatch`,
-  `unvalidated` and `covered` all occur and are asserted by the app's conformance test.
+- **Every coverage finding is exercised** since 2026-09-28: four bindings carry
+  `no_rule` (two elements exist to carry a shadow rule, and two multi-column elements
+  have a column nothing checks), alongside `scope_mismatch`, `unvalidated` and `covered`.
 - **The CSVs are read from `~/Downloads`** and are not committed. Change the paths at the
   top of `build_fixtures.py` if they move.
 

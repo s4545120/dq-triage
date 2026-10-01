@@ -70,10 +70,12 @@ privilege is `MODIFY`, and `MODIFY` permits `UPDATE`, `DELETE` and `MERGE` as we
 
 The intent is achievable, but with two mechanisms rather than one:
 
-- `MODIFY` on exactly two tables, **named individually** — never on the schema, because
-  a schema-level grant silently extends to every table added later;
-- `delta.appendOnly = true` on both of those tables, which makes `UPDATE` and `DELETE`
-  fail for every principal, owner included.
+- `MODIFY` on exactly three tables, **named individually** — never on the schema, because
+  a schema-level grant silently extends to every table added later. Two until
+  2026-09-28; the third is `results.threshold_review`, the reviewer's decision on a
+  threshold proposal, and `07_grants.sql` says why it could not live anywhere else;
+- `delta.appendOnly = true` on all three of those tables, which makes `UPDATE` and
+  `DELETE` fail for every principal, owner included.
 
 **The headline claim is unaffected.** "The app cannot modify business data" rests on the
 *absence* of any grant on `prod.*`, and absence is the strongest form of that argument.
@@ -112,15 +114,20 @@ So enforcement needs both halves, and neither substitutes for the other:
 `fixtures/verify.py --inject-control-failure` exercises (2) against a fixture built with
 a deliberate duplicate approver, so the control test is itself tested.
 
-## Status: written, reviewed, never executed
+## Status: executed once, and the constructs to watch next time
 
-No statement in `sql/ddl/` has been run against Databricks. The only machine check that
-has happened is `fixtures/verify.py`, which diffs every `CREATE TABLE` here against the
-columns the fixture generator produces — that catches schema drift, and nothing else. It
-does not parse SQL and it does not know what Databricks accepts.
+Every statement here has run, as `sql/out/` rendered for `workspace.dq_triage` — eight
+tables, 23 constraints, four functions and five views. `RUNBOOK-personal-workspace.md`
+is the procedure and what it did and did not prove.
 
-Run `00`–`08` in a scratch catalog first. These are the constructs to watch, roughly in
-order of how likely they are to need a change:
+`fixtures/verify.py` remains the only check that runs on a laptop: it diffs every
+`CREATE TABLE` here against the columns the fixture generator produces, which catches
+schema drift and nothing else. It does not parse SQL and does not know what Databricks
+accepts.
+
+The table below survives the first run because it is the pre-flight for the **next**
+catalog, not a record of what failed. Run `00`–`08` in a scratch catalog first. These
+are the constructs to watch, roughly in order of how likely they are to need a change:
 
 | Construct | Where | Why it might not work first time |
 |---|---|---|

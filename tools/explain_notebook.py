@@ -49,6 +49,11 @@ NAMES = {
     "RULE_REGISTRY": _t("config", "rule_registry"),
     "PLAYBOOK": _t("config", "playbook"),
     "CDE_REGISTRY": _t("config", "cde_registry"),
+    # Notebook 06, the threshold job.
+    "PROPOSAL": _t("results", "threshold_proposal"),
+    "PROPOSAL_CUR": _t("results", "v_threshold_proposal_current"),
+    "RULE_CURRENT": _t("config", "v_rule_registry_current"),
+    "CDE_CURRENT": _t("config", "v_cde_registry_current"),
 }
 
 # Run-time values the notebook does not have yet. Shape is checked, values are not,

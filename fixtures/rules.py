@@ -59,6 +59,14 @@ class Rule:
     source_layer: str = "L2"
     status: str = "active"
     rule_version: int = 1
+    # The FROM-clause BODY for a cross-table rule: the joined table expression with
+    # its aliases and ON condition, never a whole SELECT and never the predicate.
+    # rule_expr stays the predicate and references these aliases, so it is stored
+    # once. Until 2026-09-28 this held a full SELECT including its own WHERE, which
+    # meant every cross-table rule carried two copies of its predicate and nothing
+    # kept them in step. config.rule_registry.join_sql is now the column that holds
+    # this, so sql/checkrun.py and jobs/run_checks.py read it from the registry rather
+    # than importing it from here.
     join_sql: str | None = None
     key_column: str = "SUBS_KEY"
     sample_columns: list[str] = field(default_factory=list)
@@ -315,7 +323,17 @@ RULES: list[Rule] = [
         target_table=CTCT_TABLE,
         target_column="EML_ID",
         rule_type="format",
-        rule_expr=r"NOT (EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$')",
+        rule_expr="NOT dq.fn.is_valid_email_v1(EML_ID)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr=r"NOT (EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$')",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_valid_email_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 2."
+                ),
+            )
+        ],
         scope_filter="EML_ID IS NOT NULL AND trim(EML_ID) <> ''",
         evaluator=_ctct_eml_fmt,
         severity="P1_block",
@@ -395,7 +413,17 @@ RULES: list[Rule] = [
         target_table=CTCT_TABLE,
         target_column="EML_ID",
         rule_type="not_null",
-        rule_expr="EML_ID IS NULL OR trim(EML_ID) = ''",
+        rule_expr="dq.fn.is_blank_v1(EML_ID)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="EML_ID IS NULL OR trim(EML_ID) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         evaluator=_ctct_eml_null,
         severity="P2_alert",
         key_column="CTCT_KEY",
@@ -407,7 +435,17 @@ RULES: list[Rule] = [
         target_table=CTCT_TABLE,
         target_column="EML_STTS_CD",
         rule_type="not_null",
-        rule_expr="EML_STTS_CD IS NULL OR trim(EML_STTS_CD) = ''",
+        rule_expr="dq.fn.is_blank_v1(EML_STTS_CD)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="EML_STTS_CD IS NULL OR trim(EML_STTS_CD) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         evaluator=_ctct_eml_stts_null,
         severity="P3_monitor",
         key_column="CTCT_KEY",
@@ -419,7 +457,17 @@ RULES: list[Rule] = [
         target_table=CTCT_TABLE,
         target_column="EML_STTS_CD",
         rule_type="consistency",
-        rule_expr=r"EML_STTS_CD = 'INVALID' AND EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$'",
+        rule_expr="EML_STTS_CD = 'INVALID' AND dq.fn.is_valid_email_v1(EML_ID)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr=r"EML_STTS_CD = 'INVALID' AND EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$'",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_valid_email_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 2."
+                ),
+            )
+        ],
         scope_filter="EML_ID IS NOT NULL AND trim(EML_ID) <> ''",
         evaluator=_ctct_eml_stts_consistent,
         severity="P2_alert",
@@ -433,7 +481,17 @@ RULES: list[Rule] = [
         target_table=CTCT_TABLE,
         target_column="MOBL_NO",
         rule_type="not_null",
-        rule_expr="MOBL_NO IS NULL OR trim(MOBL_NO) = ''",
+        rule_expr="dq.fn.is_blank_v1(MOBL_NO)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="MOBL_NO IS NULL OR trim(MOBL_NO) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         evaluator=_ctct_mobl_null,
         severity="P2_alert",
         key_column="CTCT_KEY",
@@ -445,7 +503,17 @@ RULES: list[Rule] = [
         target_table=CTCT_TABLE,
         target_column="MOBL_NO",
         rule_type="format",
-        rule_expr=r"MOBL_NO NOT RLIKE '^04[0-9]{8}$'",
+        rule_expr="NOT dq.fn.is_au_mobile_v1(MOBL_NO)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr=r"MOBL_NO NOT RLIKE '^04[0-9]{8}$'",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_au_mobile_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 2."
+                ),
+            )
+        ],
         scope_filter="MOBL_NO IS NOT NULL AND trim(MOBL_NO) <> ''",
         evaluator=_ctct_mobl_fmt,
         severity="P3_monitor",
@@ -510,7 +578,17 @@ RULES: list[Rule] = [
         target_table=CTCT_TABLE,
         target_column="IDNT_DOC_1_NO",
         rule_type="consistency",
-        rule_expr="IDNT_DOC_1_NO IS NULL OR trim(IDNT_DOC_1_NO) = ''",
+        rule_expr="dq.fn.is_blank_v1(IDNT_DOC_1_NO)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="IDNT_DOC_1_NO IS NULL OR trim(IDNT_DOC_1_NO) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         scope_filter="IDNT_TYPE_1_CD IS NOT NULL AND trim(IDNT_TYPE_1_CD) <> ''",
         evaluator=_ctct_idnt_doc_null,
         severity="P1_block",
@@ -550,7 +628,17 @@ RULES: list[Rule] = [
         target_table=SUBS_TABLE,
         target_column="PRIM_RSRC_VALU_TXT",
         rule_type="sentinel",
-        rule_expr="lower(trim(PRIM_RSRC_VALU_TXT)) IN ('service-number-unknown','unknown','n/a','na','none','null','')",
+        rule_expr="dq.fn.is_sentinel_v1(PRIM_RSRC_VALU_TXT)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="lower(trim(PRIM_RSRC_VALU_TXT)) IN ('service-number-unknown','unknown','n/a','na','none','null','')",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_sentinel_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 1."
+                ),
+            )
+        ],
         scope_filter="PRIM_RSRC_TYPE_KEY = 1",
         evaluator=_subs_msisdn_sentinel,
         severity="P1_block",
@@ -563,23 +651,39 @@ RULES: list[Rule] = [
         target_table=SUBS_TABLE,
         target_column="PRIM_RSRC_VALU_TXT",
         rule_type="format",
-        rule_expr=r"PRIM_RSRC_VALU_TXT NOT RLIKE '^04[0-9]{8}$'",
+        rule_expr="NOT dq.fn.is_au_mobile_v1(PRIM_RSRC_VALU_TXT)",
         scope_filter="PRIM_RSRC_TYPE_KEY = 1",
         evaluator=_subs_msisdn_fmt,
         severity="P2_alert",
-        rule_version=2,
+        rule_version=3,
         sample_columns=["SUBS_KEY", "PRIM_RSRC_VALU_TXT", "PRIM_RSRC_TYPE_KEY", "PROD_NM"],
+        # The only rule with three versions, and the only one whose history shows the
+        # two kinds of change apart: v1 -> v2 fixed what the rule MEASURES, v2 -> v3
+        # changed only how the predicate is WRITTEN. Keep them as separate versions;
+        # collapsing them would make a behaviour change look like a refactor.
         superseded=[
             dict(
                 rule_version=1,
                 scope_filter=None,
+                rule_expr=r"PRIM_RSRC_VALU_TXT NOT RLIKE '^04[0-9]{8}$'",
                 note=(
                     "v1 had no scope_filter and reported 212 violations, 200 of which were "
                     "Fixed Broadband service IDs in a different and correct format. Scoping to "
                     "PRIM_RSRC_TYPE_KEY = 1 took it to 12 real ones. This is the fix COH-B is "
                     "recommending for the two rules that still have the same defect."
                 ),
-            )
+            ),
+            dict(
+                rule_version=2,
+                rule_expr=r"PRIM_RSRC_VALU_TXT NOT RLIKE '^04[0-9]{8}$'",
+                note=(
+                    "v2 spelled the predicate out longhand. v3 calls dq.fn.is_au_mobile_v1, "
+                    "the shared helper declared in sql/ddl/12_functions.sql -- the same "
+                    "concept CTCT_MOBL_FMT checks on another table under an unrelated column "
+                    "name, which is why naming it once matters. Identical counts: 12 on the "
+                    "same data, scope_filter untouched."
+                ),
+            ),
         ],
     ),
     Rule(
@@ -600,7 +704,17 @@ RULES: list[Rule] = [
         target_table=SUBS_TABLE,
         target_column="IMEI_ID",
         rule_type="not_null",
-        rule_expr="IMEI_ID IS NULL OR trim(IMEI_ID) = ''",
+        rule_expr="dq.fn.is_blank_v1(IMEI_ID)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="IMEI_ID IS NULL OR trim(IMEI_ID) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         scope_filter=None,
         evaluator=_subs_imei_null,
         severity="P3_monitor",
@@ -613,7 +727,17 @@ RULES: list[Rule] = [
         target_table=SUBS_TABLE,
         target_column="SIM_SERL_ID",
         rule_type="not_null",
-        rule_expr="SIM_SERL_ID IS NULL OR trim(SIM_SERL_ID) = ''",
+        rule_expr="dq.fn.is_blank_v1(SIM_SERL_ID)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="SIM_SERL_ID IS NULL OR trim(SIM_SERL_ID) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         scope_filter="PROD_TYPE_KEY <> 0",
         evaluator=_subs_sim_null,
         severity="P2_alert",
@@ -626,7 +750,17 @@ RULES: list[Rule] = [
         target_table=SUBS_TABLE,
         target_column="NTWK_TECH_NM",
         rule_type="not_null",
-        rule_expr="NTWK_TECH_NM IS NULL OR trim(NTWK_TECH_NM) = ''",
+        rule_expr="dq.fn.is_blank_v1(NTWK_TECH_NM)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="NTWK_TECH_NM IS NULL OR trim(NTWK_TECH_NM) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         evaluator=_subs_ntwk_null,
         severity="P2_alert",
         sample_columns=["SUBS_KEY", "NTWK_TECH_NM", "PROD_NM", "PRIM_RSRC_TYPE_KEY"],
@@ -710,7 +844,17 @@ RULES: list[Rule] = [
         target_table=SUBS_TABLE,
         target_column="BNFT_TXT",
         rule_type="not_null",
-        rule_expr="BNFT_TXT IS NULL OR trim(BNFT_TXT) = ''",
+        rule_expr="dq.fn.is_blank_v1(BNFT_TXT)",
+        rule_version=2,
+        superseded=[
+            dict(
+                rule_version=1,
+                rule_expr="BNFT_TXT IS NULL OR trim(BNFT_TXT) = ''",
+                note=(
+                    "v1 spelled the predicate out longhand. v2 calls dq.fn.is_blank_v1, the shared helper declared in sql/ddl/12_functions.sql. Identical counts on the same data -- sql/out/checkrun.sql was re-run against workspace.dq_triage before and after and every figure held. One definition instead of 8."
+                ),
+            )
+        ],
         evaluator=_subs_bnft_txt_null,
         severity="P3_monitor",
         status="shadow",
@@ -729,9 +873,8 @@ RULES: list[Rule] = [
         rule_type="referential",
         rule_expr="c.CTCT_KEY IS NULL",
         join_sql=(
-            "SELECT s.* FROM prod.customer.subs_c s "
-            "LEFT JOIN prod.customer.ctct_c c ON s.CTCT_KEY = c.CTCT_KEY "
-            "WHERE c.CTCT_KEY IS NULL"
+            "prod.customer.subs_c s "
+            "LEFT JOIN prod.customer.ctct_c c ON s.CTCT_KEY = c.CTCT_KEY"
         ),
         evaluator=_xref_orphan,
         severity="P1_block",
@@ -744,9 +887,8 @@ RULES: list[Rule] = [
         rule_type="consistency",
         rule_expr="lower(trim(s.SUBS_FRST_NM)) <> lower(trim(c.FRST_NM))",
         join_sql=(
-            "SELECT s.SUBS_KEY, s.SUBS_FRST_NM, c.FRST_NM "
-            "FROM prod.customer.subs_c s JOIN prod.customer.ctct_c c ON s.CTCT_KEY = c.CTCT_KEY "
-            "WHERE lower(trim(s.SUBS_FRST_NM)) <> lower(trim(c.FRST_NM))"
+            "prod.customer.subs_c s "
+            "JOIN prod.customer.ctct_c c ON s.CTCT_KEY = c.CTCT_KEY"
         ),
         evaluator=_xref_name_agreement,
         severity="P2_alert",
@@ -759,9 +901,8 @@ RULES: list[Rule] = [
         rule_type="consistency",
         rule_expr="s.ECF_OPEN_TS <> c.CTCT_ADD_TS",
         join_sql=(
-            "SELECT s.SUBS_KEY, s.ECF_OPEN_TS, c.CTCT_ADD_TS "
-            "FROM prod.customer.subs_c s JOIN prod.customer.ctct_c c ON s.CTCT_KEY = c.CTCT_KEY "
-            "WHERE s.ECF_OPEN_TS <> c.CTCT_ADD_TS"
+            "prod.customer.subs_c s "
+            "JOIN prod.customer.ctct_c c ON s.CTCT_KEY = c.CTCT_KEY"
         ),
         evaluator=_xref_open_ts_agreement,
         severity="P2_alert",

@@ -44,13 +44,22 @@ GRANT USE SCHEMA  ON SCHEMA  {catalog}.results TO `{app_sp}`;
 GRANT SELECT ON SCHEMA {catalog}.config  TO `{app_sp}`;
 GRANT SELECT ON SCHEMA {catalog}.results TO `{app_sp}`;
 
--- The only two writes in the whole application. Table-level, never schema-level.
-GRANT MODIFY ON TABLE {catalog}.results.disposition   TO `{app_sp}`;
-GRANT MODIFY ON TABLE {catalog}.config.rule_registry  TO `{app_sp}`;
+-- The only three writes in the whole application. Table-level, never schema-level.
+-- Two until 2026-09-28; the third is the reviewer's decision on a threshold
+-- proposal, which had nowhere else to live -- adopting one is an append to
+-- rule_registry (already granted), but a rejection or deferral recorded nowhere is
+-- a proposal that comes back every pass. See 13_results_threshold.sql.
+GRANT MODIFY ON TABLE {catalog}.results.disposition       TO `{app_sp}`;
+GRANT MODIFY ON TABLE {catalog}.config.rule_registry      TO `{app_sp}`;
+GRANT MODIFY ON TABLE {catalog}.results.threshold_review  TO `{app_sp}`;
 
 -- Deliberately NOT granted, and each omission is load-bearing:
 --   * anything at all on any prod catalog          -> the headline claim
 --   * MODIFY on results.cohort / check_run         -> the app cannot fabricate a finding
+--   * MODIFY on results.threshold_proposal         -> the app cannot fabricate advice
+--                                                     to then adopt; the threshold job
+--                                                     writes it, as the triage job
+--                                                     writes cohort
 --   * MODIFY on results.violation_sample           -> the app cannot alter the evidence
 --   * MODIFY on config.playbook                    -> approaches change by review, not in-app
 --   * CREATE TABLE / MANAGE anywhere               -> the SP cannot grant itself more
@@ -81,8 +90,8 @@ GRANT SELECT ON SCHEMA {catalog}.results TO `{approver_group}`;
 -- and on a schedule; save the results with the control documentation.
 
 -- 3a. Everything the app SP can write, anywhere in the metastore.
---     EXPECTED: exactly two rows — dq.results.disposition and dq.config.rule_registry.
---     Any other row is a control failure.
+--     EXPECTED: exactly three rows — dq.results.disposition, dq.config.rule_registry
+--     and dq.results.threshold_review. Any other row is a control failure.
 SELECT table_catalog, table_schema, table_name, privilege_type
 FROM   system.information_schema.table_privileges
 WHERE  grantee = '{app_sp}'
@@ -103,10 +112,11 @@ FROM   system.information_schema.schema_privileges
 WHERE  grantee = '{app_sp}'
   AND  privilege_type IN ('MODIFY', 'ALL_PRIVILEGES');
 
--- 3d. appendOnly is still set on both app-written tables.
---     EXPECTED: both report true. Run DESCRIBE DETAIL and read the properties map.
+-- 3d. appendOnly is still set on every app-written table.
+--     EXPECTED: all three report true. Run DESCRIBE DETAIL and read the properties map.
 DESCRIBE DETAIL {catalog}.results.disposition;
 DESCRIBE DETAIL {catalog}.config.rule_registry;
+DESCRIBE DETAIL {catalog}.results.threshold_review;
 
 -- 3e. Has anyone rewritten the register? Non-INSERT operations on an appendOnly
 --     table should be impossible; this proves it stayed that way.

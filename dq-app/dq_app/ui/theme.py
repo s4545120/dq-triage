@@ -17,6 +17,7 @@ Three rules hold throughout:
 from __future__ import annotations
 
 import html
+import math
 
 import streamlit as st
 
@@ -241,6 +242,50 @@ DEFECT_MEANING = {
     "neither": "The data may be correct and the rule reasonable, and the "
                "disagreement between them is a business question rather than a "
                "defect on either side. Answer the question before changing anything.",
+}
+
+
+# What a threshold suggestion rests on, in the steward's words. `unchanged` is the
+# common case and is labelled as a verdict rather than as an absence: the model
+# was asked and said keep it, with a reason, which is not the same as not asking.
+THRESHOLD_BASIS_LABEL = {
+    "element_tolerance": "Element tolerance",
+    "run_history": "Run history",
+    "both": "Tolerance and history",
+    "unchanged": "Keep as is",
+}
+THRESHOLD_BASIS_TONE = {
+    "element_tolerance": "info",
+    "run_history": "info",
+    "both": "info",
+    "unchanged": "neutral",
+}
+# Where a proposal has got to -- v_threshold_proposal_current.review_state, in the
+# reviewer's words. `no_change` is advice that asked for nothing; `in_force` means
+# the registry already carries the figure, by adoption or by hand.
+THRESHOLD_STATE_LABEL = {
+    "open": "Awaiting review",
+    "deferred": "Deferred",
+    "adopted": "Adopted",
+    "rejected": "Rejected",
+    "in_force": "In force",
+    "no_change": "Keep as is",
+}
+THRESHOLD_STATE_TONE = {
+    "open": "high",
+    "deferred": "neutral",
+    "adopted": "success",
+    "rejected": "neutral",
+    "in_force": "info",
+    "no_change": "neutral",
+}
+THRESHOLD_BASIS_MEANING = {
+    "element_tolerance": "Set from the tolerance the CDE register declares on the "
+                         "element this check watches.",
+    "run_history": "Set from where the violation rate has sat across the run history.",
+    "both": "Set from the element's declared tolerance, with the run history saying "
+            "where the data sits against it.",
+    "unchanged": "The model was asked and advises keeping the current limit.",
 }
 
 
@@ -535,67 +580,120 @@ def segments(parts: list[tuple[float, str]]) -> str:
 def dot(tone: str) -> str:
     return f'<span class="dq-dot" style="background:{TONE.get(tone, TONE["neutral"])["fg"]}"></span>'
 
-def trend_chart(points: list[tuple], y_lo: float = 0.0, y_hi: float = 100.0) -> str:
-    """The headline figure's own history, drawn as a filled line under it.
+def _axis_ticks(lo: float, hi: float) -> list[float]:
+    """Three or four round values spanning `lo`..`hi`, clamped to a percentage."""
+    lo, hi = max(0.0, lo), min(100.0, hi)
+    span = max(hi - lo, 0.5)
+    step = next((s for s in (0.5, 1, 2, 5, 10, 20, 25, 50) if span / s <= 3), 50)
+    first = math.floor(lo / step) * step
+    last = math.ceil(hi / step) * step
+    if first == last:
+        # A flat series. Widen downward, or upward when it sits on the floor: a
+        # constant 0% (a check failing every row on every run) is otherwise one tick
+        # and a zero-height axis.
+        if last - step >= 0.0:
+            first = last - step
+        else:
+            last = first + step
+    return [first + i * step for i in range(int(round((last - first) / step)) + 1)]
 
-    A different drawing from `area_chart`, and deliberately: that one carries a value
-    axis and gridlines because it is read for a level. This one sits directly beneath
-    the number it belongs to, where the level is already on the page in 40px type, so
-    the only thing left to say is the shape and where the two ends sit. Gridlines and
-    a repeated y-axis at that size are noise, and the axis labels were competing with
-    the figure for the reader's first look.
 
-    Both ends are labelled with their date AND their value, so the chart still answers
-    "from what, to what" without a hover — nothing in a Streamlit markdown block can
-    be hovered for a tooltip.
+def target_chart(points: list[tuple], target: float | None = None,
+                 width: int = 560, height: int = 150) -> str:
+    """A score's history against the target it is held to, as inline SVG.
 
-    The end dot is red when the series finished below where it started. That is the
-    one place colour carries anything here, and it is doubled by the signed delta
-    written beside the figure above.
+    `points` are (label, value), oldest first. The value axis is fitted to the series
+    AND the target, so the dashed line is always on the chart: a trend drawn on an
+    axis that crops the target off the top shows a flat line and hides that the whole
+    of it is six points short. That costs the series some height when the gap is
+    large, and the gap is the thing being reported.
+
+    Three dates along the foot rather than one per point — the shape is the message —
+    and the value axis is labelled because nothing in a Streamlit markdown block can
+    be hovered for a reading.
+
+    The end dot is red when the latest value is under the target. That is the one
+    place colour carries anything here, and the words beside the figure say it too.
+
+    `width` is the viewBox width and should be near the width the chart is drawn at:
+    the labels are sized in viewBox units, so a 560-wide drawing squeezed into a
+    360px pane renders them at two-thirds size.
     """
-    vals = [v for _, v in points if v is not None]
+    vals = [float(v) for _, v in points if v is not None]
     if len(vals) < 2:
         return '<div class="dq-quiet">Not enough history to draw a trend.</div>'
+    points = [(lab, float(v)) for lab, v in points if v is not None]
 
-    w, h = 560.0, 126.0
-    pad_l, pad_r, pad_t, pad_b = 6.0, 6.0, 10.0, 22.0
-    span = (y_hi - y_lo) or 1.0
+    ticks = _axis_ticks(min(vals + ([target] if target is not None else [])),
+                        max(vals + ([target] if target is not None else [])))
+    y_lo, y_hi = ticks[0], ticks[-1]
+    w, h = float(width), float(height)
+    pad_l, pad_r, pad_t, pad_b = 38.0, 8.0, 9.0, 21.0
     plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
     step = plot_w / (len(points) - 1)
 
-    coords = [
-        (pad_l + i * step,
-         pad_t + plot_h - (float(v) - y_lo) / span * plot_h)
-        for i, (_, v) in enumerate(points)
-    ]
+    def y_of(v: float) -> float:
+        return pad_t + plot_h - (v - y_lo) / (y_hi - y_lo) * plot_h
+
+    coords = [(pad_l + i * step, y_of(v)) for i, (_, v) in enumerate(points)]
     line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
     floor = pad_t + plot_h
-    area = (f"{coords[0][0]:.1f},{floor:.1f} " + line
-            + f" {coords[-1][0]:.1f},{floor:.1f}")
+    area = f"{coords[0][0]:.1f},{floor:.1f} {line} {coords[-1][0]:.1f},{floor:.1f}"
 
-    fell = vals[-1] < vals[0]
-    end = TONE["critical"]["fg"] if fell else ACCENT
-    first_lab = f"{points[0][0]} {pct_text(vals[0], 1)}%"
-    last_lab = f"{points[-1][0]} {pct_text(vals[-1], 1)}%"
+    grid = "".join(
+        f'<line x1="{pad_l:.1f}" y1="{y_of(t):.1f}" x2="{w - pad_r:.1f}" '
+        f'y2="{y_of(t):.1f}" stroke="{NEUTRAL["border"]}" stroke-width="1"/>'
+        f'<text x="{pad_l - 7:.1f}" y="{y_of(t) + 3.5:.1f}" text-anchor="end" '
+        f'class="ax">{t:g}%</text>'
+        for t in ticks
+    )
+    goal = ""
+    if target is not None:
+        goal = (f'<line x1="{pad_l:.1f}" y1="{y_of(target):.1f}" x2="{w - pad_r:.1f}" '
+                f'y2="{y_of(target):.1f}" stroke="{NEUTRAL["text_2"]}" stroke-width="1.2" '
+                'stroke-dasharray="4 3"/>')
+    mid = len(points) // 2
+    dates = "".join(
+        f'<text x="{coords[i][0]:.1f}" y="{h - 5:.1f}" text-anchor="{anchor}" '
+        f'class="ax">{html.escape(str(points[i][0]))}</text>'
+        for i, anchor in ((0, "start"), (mid, "middle"), (len(points) - 1, "end"))
+        if len(points) > 2 or i != mid
+    )
+    under = target is not None and vals[-1] < target - 1e-9
+    end = TONE["critical"]["fg"] if under else ACCENT
     lx, ly = coords[-1]
+    said = (f"{points[0][0]} {pct_text(vals[0], 1)}% to "
+            f"{points[-1][0]} {pct_text(vals[-1], 1)}%"
+            + (f", target {target:.1f}%" if target is not None else ""))
 
     return (
         f'<svg viewBox="0 0 {w:.0f} {h:.0f}" class="dq-trend" role="img" '
-        f'aria-label="Quality from {html.escape(first_lab)} to {html.escape(last_lab)}">'
-        f'<defs><linearGradient id="dqTrendFill" x1="0" y1="0" x2="0" y2="1">'
-        f'<stop offset="0%" stop-color="{ACCENT}" stop-opacity=".22"/>'
-        f'<stop offset="100%" stop-color="{ACCENT}" stop-opacity=".02"/>'
-        "</linearGradient></defs>"
-        f'<polygon points="{area}" fill="url(#dqTrendFill)"/>'
-        f'<polyline points="{line}" fill="none" stroke="{ACCENT}" stroke-width="2" '
+        f'aria-label="{html.escape(said)}">'
+        + grid
+        + f'<polygon points="{area}" fill="{ACCENT}" fill-opacity=".08"/>'
+        + goal
+        + f'<polyline points="{line}" fill="none" stroke="{ACCENT}" stroke-width="2" '
         'stroke-linejoin="round" stroke-linecap="round"/>'
         f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="3.4" fill="{end}"/>'
-        f'<text x="{pad_l:.1f}" y="{h - 6:.1f}" text-anchor="start" class="ax">'
-        f"{html.escape(first_lab)}</text>"
-        f'<text x="{w - pad_r:.1f}" y="{h - 6:.1f}" text-anchor="end" class="ax">'
-        f"{html.escape(last_lab)}</text>"
-        "</svg>"
+        + dates
+        + "</svg>"
     )
+
+
+def target_bar(score: float | None, target: float | None, colour: str) -> str:
+    """A 0–100 bar filled to `score` with a tick where the target sits.
+
+    Always on the full scale, never zoomed to the interesting end: twenty of these
+    stack in a list and are read against each other, and a bar whose axis starts at
+    95 makes 97% look like a third.
+    """
+    fill = 0.0 if score is None else max(0.0, min(100.0, float(score)))
+    tick = ""
+    if target is not None:
+        at = max(0.0, min(100.0, float(target)))
+        tick = f'<i style="left:min({at:.2f}%, calc(100% - 2px))"></i>'
+    return (f'<span class="dq-tbar"><span style="width:{fill:.2f}%;'
+            f'background:{colour}"></span>{tick}</span>')
 
 
 def area_chart(points: list[tuple], y_lo: float = 0.0, y_hi: float = 100.0) -> str:
@@ -933,15 +1031,14 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-tilehd {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
   color: var(--dq-text-3); font-weight: 600; padding: .1rem 0 .3rem;
   display: flex; align-items: center; gap: .35rem; }}
-.dq-dimgrp {{ display: flex; align-items: center; gap: .45rem; flex-wrap: wrap;
-  margin: .9rem 0 .35rem; font-size: .92rem; color: {NEUTRAL["text"]}; }}
-.dq-dimgrp .q {{ font-size: .78rem; color: var(--dq-text-2); font-weight: 400; }}
 .dq-note {{ font-size: .82rem; color: var(--dq-text-2); line-height: 1.55;
   margin: .5rem 0 .2rem; }}
 .dq-note .dq-badge {{ margin-right: .3rem; }}
 
 /* --- Page header: title on the left, page-level actions on the right. ----- */
 .dq-page-hd {{ margin-bottom: .45rem; }}
+/* Beside the run picker, in one row: the row sets the spacing, not the title. */
+.st-key-dq_pillbar .dq-page-hd {{ margin-bottom: 0; }}
 /* line-height 1.35, not 1.2: most faces are ~1.25em from ascender to descender, so a
    1.2 line box leaves the capitals sitting on its top edge. Nothing is clipped — the
    box just fits the glyphs too closely to look deliberate. */
@@ -1185,52 +1282,96 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   flex: none; white-space: nowrap; }}
 .dq-delta.n {{ color: var(--dq-text-3); font-weight: 500; }}
 
-/* --- Hero: the headline figure with its own history under it. --------------
-   It used to lay out across the card — figure on the left, chart on the right — and
-   the chart got whatever width the figure did not need, which at this column width
-   was about 180px for a month of runs. Stacked, the chart gets the full card and the
-   figure gets the full type size, and the reading order matches the sentence: how
-   good, out of what, and which way it has been going. */
+/* --- Hero: the headline figure, its target, and its history against it. ----
+   Stacked — figure, target line, chart, one sentence — rather than figure beside
+   chart: side by side the chart got whatever width the figure did not need, which
+   was about 180px for a month of runs. The reading order is the sentence: how good,
+   against what, and which way it has been going. */
 .dq-hero {{ flex-direction: column; gap: 0; justify-content: flex-start;
   min-height: clamp(9rem, 12vw, 11.5rem); }}
-.dq-hero .lab {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--dq-text-3); font-weight: 600;
-  display: flex; align-items: center; gap: .35rem; }}
-.dq-hero .val {{ font-size: var(--dq-fs-hero); margin-top: .35rem; }}
-.dq-hero .sub {{ font-size: clamp(.72rem, .86vw, .8rem); color: var(--dq-text-2);
-  margin-top: .4rem; line-height: 1.55; }}
-/* The chart sits on the card floor whatever the subline above it wrapped to, so the
-   hero and the tile grid beside it keep the same outside height. */
-.dq-trend {{ width: 100%; height: auto; display: block; margin-top: auto;
-  padding-top: .6rem; overflow: visible; }}
+.dq-hero .ttl, .dq-cov .ttl {{ margin-bottom: .1rem; justify-content: flex-start; }}
+.dq-hero .ttl .dq-hint, .dq-cov .ttl .dq-hint {{ margin-left: -.15rem; margin-right: auto; }}
+.dq-hero .val {{ font-size: var(--dq-fs-hero); margin-top: .2rem;
+  display: flex; align-items: baseline; gap: .55rem; }}
+.dq-hero .val .dq-delta {{ font-size: .34em; letter-spacing: 0; }}
+.dq-hero .sub {{ font-size: clamp(.76rem, .9vw, .84rem); color: var(--dq-text-2);
+  margin-top: .25rem; line-height: 1.55; }}
+.dq-hero .say {{ font-size: clamp(.76rem, .9vw, .84rem); color: var(--dq-text-2);
+  line-height: 1.55; margin-top: .55rem; }}
+.dq-hero .say b {{ color: {NEUTRAL["text"]}; font-weight: 620; }}
+/* The chart's own legend: a solid stroke and a dashed one, drawn as borders so they
+   match the two lines in the SVG without a second drawing. */
+.dq-lg {{ display: inline-flex; align-items: center; gap: .35rem; flex: none;
+  font-size: clamp(.7rem, .82vw, .78rem); font-weight: 400; color: var(--dq-text-2);
+  white-space: nowrap; }}
+.dq-lg i {{ display: inline-block; width: 15px; border-top: 2px solid {ACCENT}; }}
+.dq-lg i.dash {{ border-top: 2px dashed {NEUTRAL["text_2"]}; margin-left: .55rem; }}
+.dq-below {{ color: {TONE["critical"]["fg"]}; }}
+/* The chart sits on the card floor whatever the lines above it wrapped to. */
+.dq-trend {{ width: 100%; height: auto; display: block; padding-top: .6rem;
+  overflow: visible; }}
 .dq-trend .ax {{ font-size: 11px; fill: {NEUTRAL["text_3"]};
   font-family: inherit; font-variant-numeric: tabular-nums; }}
+
+/* --- Monitoring coverage: how much of the register something validates. ------
+   One bar in three shares, then the same three as a legend with their counts — the
+   bar for the proportion, the rows for the numbers. Shades of the accent, not the
+   status tones: "not validated" is a statement about the rule set, and painting it
+   amber beside a red score would rank a gap in the register with a defect in the
+   data. Open problems ride on the card floor under a rule. */
+.dq-cov .val .of {{ font-size: .5em; font-weight: 550; color: var(--dq-text-2); }}
+.dq-cov3 {{ display: flex; gap: 3px; height: 9px; margin: .75rem 0 .55rem; }}
+.dq-cov3 > span {{ display: block; height: 100%; border-radius: 3px; min-width: 4px; }}
+.dq-cov .row {{ display: flex; align-items: center; gap: .45rem;
+  font-size: clamp(.78rem, .92vw, .86rem); color: {NEUTRAL["text"]}; padding: .2rem 0; }}
+.dq-cov .row i {{ width: .5rem; height: .5rem; border-radius: 50%; flex: none; }}
+.dq-cov .row b {{ margin-left: auto; font-weight: 550; font-variant-numeric: tabular-nums; }}
+.dq-cov .row:last-of-type {{ margin-bottom: .5rem; }}
+/* The card is a keyed container, because its floor is a control: the open-problems
+   row is a real button and the way into Triage. So the outline moves from the markup
+   to the container, exactly as it does for the two lower cards. The container fills
+   the column and the row is pushed to its floor, which keeps this card and the hero
+   beside it the same height with the rule across both at the same level.
+
+   The selectors are doubled on purpose. The equal-height rule above reaches every
+   block inside a card row at specificity (0,3,0) and would stretch the row to share
+   the card with the figures above it; these have to out-rank it, not just follow it. */
+.st-key-dq_covcard.st-key-dq_covcard.st-key-dq_covcard {{
+  border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["surface"]}; gap: 0; padding: 0; overflow: hidden;
+}}
+/* Streamlit wraps a keyed container in a layout div the equal-height rule does not
+   name, and that div does not grow — so the card stopped at its own content, 40px
+   short of the hero. The negative margin is the one Streamlit gives the hero's
+   markdown container: the hero overhangs its column by a rem, so this must too or
+   the two floors sit a rem apart. */
+[data-testid="stLayoutWrapper"]:has(> .st-key-dq_covcard) {{
+  flex: 1 1 auto; margin-bottom: -1rem; }}
+.st-key-dq_covcard .dq-card {{ border: none; background: transparent; height: auto; }}
+.st-key-dq_covcard [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.st-key-dq_covcard.st-key-dq_covcard.st-key-dq_covcard > :has(.st-key-dqrow_op_queue),
+.st-key-dq_covcard.st-key-dq_covcard .st-key-dqrow_op_queue.st-key-dqrow_op_queue {{
+  flex: 0 0 auto; margin-top: auto; }}
+.st-key-dqrow_op_queue .dq-rowgrid {{ padding: var(--dq-pad-y) var(--dq-pad); }}
+.st-key-dqrow_op_queue .stack .t1 {{ font-size: clamp(.82rem, .96vw, .9rem);
+  font-weight: 620; }}
+.st-key-dqrow_op_queue .stack .t2 {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); }}
+/* A count and an arrow: the arrow is what says the row goes somewhere. */
+.dq-rowgrid .opn {{ display: inline-flex; align-items: center; gap: .45rem;
+  color: var(--dq-text-3); overflow: visible; }}
+.st-key-dqrow_op_queue .opn {{ font-size: clamp(1.15rem, 1.5vw, 1.45rem);
+  font-weight: 650; color: {NEUTRAL["text"]}; font-variant-numeric: tabular-nums; }}
+.st-key-dqrow_op_queue .opn svg {{ color: var(--dq-text-3); }}
+[class*="st-key-dqrow_"]:hover .opn svg {{ color: {ACCENT}; }}
 .dq-area {{ width: 100%; height: clamp(76px, 7vw, 108px); display: block; }}
 .dq-area .ax {{ font-size: 9px; fill: {NEUTRAL["text_3"]};
   font-family: inherit; font-variant-numeric: tabular-nums; }}
 
-/* --- What is being watched: six counts of the estate. -----------------------
-   One markdown block holding a CSS grid, NOT two rows of st.columns. The columns
-   version is what put the tiles on top of the search field below them: the
-   equal-height rule further down makes every wrapper inside a card row a flex item
-   with min-height:0, and the two nested column rows inside the tile column were
-   flex items themselves — so they shrank below their content and the content spilled
-   out of the bottom of the block. A grid has no wrappers to shrink, and it equalises
-   the six heights for free, which is what the flex rule was there to do. */
-.dq-watch {{ display: flex; flex-direction: column; height: 100%; min-width: 0; }}
-.dq-watch .hd {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--dq-text-3); font-weight: 600; padding: .1rem 0 .45rem;
-  display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }}
-/* The denominator note rides in the heading, in sentence case, because the two
-   figures beside each other — 20 scored, 34 run — are the single thing a reader is
-   most likely to think is a bug on this page. */
-.dq-watch .hd .q {{ font-size: .72rem; letter-spacing: 0; text-transform: none;
-  font-weight: 400; color: var(--dq-text-3); }}
+/* A grid of `.dq-tile` figures. One markdown block holding a CSS grid, not a row of
+   st.columns: the grid equalises the tile heights for free and has no wrappers to
+   shrink. The check drawer's two figures are its one user. */
 .dq-tilegrid {{ flex: 1 1 auto; display: grid; gap: clamp(.45rem, .7vw, .7rem);
   grid-template-columns: repeat(3, minmax(0, 1fr)); }}
-/* On the scorecard the tile labels reserve two lines so six figures line up across
-   a row. In the drawer there are two tiles and every label is one line, so the
-   reserved second line is just a gap above the number. */
 .dq-tilegrid.compact .dq-tile .lab {{ min-height: 0; }}
 
 /* --- Recent runs --------------------------------------------------------- */
@@ -1413,48 +1554,151 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   .dq-lineage .arrow {{ padding: 0; transform: rotate(90deg); }}
 }}
 
-/* The scorecard's element list and the header of the pane beside it. The dot is the
-   element's criticality; its tooltip and the right pane's badge say it in words. */
+/* --- The scorecard's two lower cards: the element list, and one element. ------
+   Each card is a keyed container, not a block of markup, because both hold real
+   controls — the list's rows and its Priority / All switch, the pane's check rows
+   and its drawer button. So the border moves onto the container, the gap Streamlit
+   stacks blocks with goes to zero (it is counted against the container's height
+   whether or not it is drawn — see `.st-key-dq_strip`), and each block inside
+   carries its own padding. */
+.st-key-dq_elcard, .st-key-dq_elpane {{
+  border: 1px solid var(--dq-border); border-radius: 10px;
+  background: {NEUTRAL["surface"]}; gap: 0; padding: 0;
+}}
+/* With the gap gone, the `margin-bottom: -1rem` Streamlit puts on every markdown
+   container to cancel it pulls the next block up over this one's last line. */
+.st-key-dq_elcard [data-testid="stMarkdownContainer"],
+.st-key-dq_elpane [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.dq-elcard-hd {{ padding: .9rem 1rem .55rem; }}
+.dq-elcard-hd .t {{ font-size: clamp(.86rem, 1vw, .95rem); font-weight: 620;
+  color: {NEUTRAL["text"]}; display: flex; align-items: center; gap: .4rem; }}
+.dq-elcard-hd .q {{ font-size: clamp(.74rem, .88vw, .82rem); color: var(--dq-text-2);
+  margin-top: .2rem; line-height: 1.5; }}
+.st-key-dq_elcard [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"]) {{
+  padding: 0 1rem .7rem; }}
+/* The row boxes run edge to edge inside their card: the card draws the outline, so
+   the box keeps only the rules above and below it, and its end rows lose the corner
+   radius they take when the box is the outline. */
+.st-key-dq_elcard .st-key-dqrows_elist, .st-key-dq_elpane .st-key-dqrows_checks,
+.st-key-dq_elpane .st-key-dqrows_problems {{
+  border: none; border-top: 1px solid var(--dq-border); border-radius: 0;
+  background: transparent; scrollbar-gutter: auto;
+}}
+.st-key-dq_elpane .st-key-dqrows_checks, .st-key-dq_elpane .st-key-dqrows_problems {{
+  border-top: none; }}
+.st-key-dq_elpane .st-key-dqrows_problems .dq-rowgrid {{ padding: .6rem 1rem; }}
+.st-key-dq_elcard [class*="st-key-dqrow_"], .st-key-dq_elpane [class*="st-key-dqrow_"] {{
+  border-radius: 0 !important; }}
+.dq-elfoot {{ display: flex; flex-wrap: wrap; justify-content: space-between;
+  gap: .2rem 1rem; border-top: 1px solid var(--dq-border);
+  padding: .6rem 1rem .7rem; font-size: var(--dq-fs-sub); color: var(--dq-text-2); }}
+.dq-elfoot i {{ display: inline-block; width: 2px; height: .8rem; margin: 0 .3rem 0 .8rem;
+  background: {NEUTRAL["text"]}; vertical-align: -.12rem; }}
+
+/* One row of either list: a name and its figure, a 0–100 bar with the target ticked
+   on it, and a line saying where the figure stands against that target. The dot is
+   the element's criticality; the row's tooltip says it in words. */
+.dq-el {{ display: flex; flex-direction: column; gap: .32rem; }}
+.dq-el .l1, .dq-el .l2 {{ display: flex; align-items: baseline;
+  justify-content: space-between; gap: .75rem; min-width: 0; }}
+.dq-el .nm {{ font-size: clamp(.8rem, .94vw, .88rem); font-weight: 500;
+  color: {NEUTRAL["text"]}; overflow: hidden; text-overflow: ellipsis; min-width: 0; }}
+.dq-el .sc {{ font-size: clamp(.8rem, .94vw, .88rem); font-weight: 650; flex: none;
+  font-variant-numeric: tabular-nums; }}
+.dq-el .sc .of {{ font-weight: 400; color: var(--dq-text-2); font-size: 1em;
+  text-align: left; }}
+.dq-el .l2 {{ font-size: clamp(.72rem, .85vw, .79rem); color: var(--dq-text-2); }}
+.dq-el .l2 > :first-child {{ overflow: hidden; text-overflow: ellipsis; min-width: 0; }}
+.dq-el .l2 > :last-child {{ flex: none; font-variant-numeric: tabular-nums; }}
 .dq-eldot {{ display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
   margin-right: .42rem; vertical-align: .06rem; }}
 .dq-rowgrid .stack .t2.sans {{ font-family: inherit; }}
-.dq-elhd {{ display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start;
-  border: 1px solid var(--dq-border); border-radius: 10px; background: {NEUTRAL["surface"]};
-  padding: .8rem 1rem; margin: .15rem 0 .5rem; }}
-.dq-elhd .l {{ min-width: 0; }}
-.dq-elhd .n {{ font-size: clamp(1rem, 1.2vw, 1.15rem); font-weight: 620; color: {NEUTRAL["text"]}; }}
-.dq-elhd .b {{ margin: .3rem 0 .25rem; display: flex; flex-wrap: wrap; gap: .3rem; }}
-.dq-elhd .w {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: .74rem; color: var(--dq-text-3); overflow-wrap: anywhere; }}
-.dq-elhd .r {{ text-align: right; flex: 0 0 auto; }}
-.dq-elhd .s {{ font-size: clamp(1.5rem, 2vw, 1.9rem); font-weight: 650; line-height: 1.1;
-  font-variant-numeric: tabular-nums; }}
-.dq-elhd .s span {{ font-size: .6em; margin-left: .05em; }}
-.dq-elhd .d {{ font-size: .74rem; color: var(--dq-text-3); margin: .1rem 0 .2rem; }}
+.dq-tbar {{ position: relative; display: block; height: 6px; border-radius: 3px;
+  background: #eef0f3; margin: .12rem 0; }}
+.dq-tbar > span {{ display: block; height: 100%; border-radius: 3px; min-width: 2px; }}
+.dq-tbar > i {{ position: absolute; top: -3px; width: 2px; height: 12px;
+  border-radius: 1px; background: {NEUTRAL["text"]}; }}
+/* Three lines, so the row is taller than the two-line `.stack` rows — and the height
+   is asked for on the row container, for the reason given at `st-key-dqrow_` below. */
+[class*="st-key-dqrow_"]:has(.dq-el) {{ min-height: 4.7rem; }}
+[class*="st-key-dqrow_"] .dq-rowgrid:has(.dq-el) {{ padding: .7rem 1rem; }}
+/* The compact row: the bar rides on the second line, between nothing and the words.
+   Two lines instead of three, for the check list in its fixed-height tab. The bar is
+   let out of the ellipsis rule the line's first child otherwise gets — clipped, it
+   loses the target tick, which stands 3px proud of it. */
+.dq-el.c2 {{ gap: .34rem; }}
+.dq-el.c2 .l2 {{ align-items: center; justify-content: flex-start; }}
+.dq-el.c2 .l2 > .dq-tbar {{ flex: 0 1 32%; min-width: 3.5rem; margin: 0; overflow: visible; }}
+.dq-el.c2 .l2 > span:nth-of-type(2) {{ flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; }}
+[class*="st-key-dqrow_"]:has(.dq-el.c2) {{ min-height: 3.5rem; }}
+[class*="st-key-dqrow_"] .dq-rowgrid:has(.dq-el.c2) {{ padding: .55rem 1rem; }}
 
-/* The two scorecard panes wrap rather than squeeze. Streamlit only stacks columns
-   below a 640px VIEWPORT, and the page can be far narrower than the viewport once the
-   sidebar is open — so the floor is set on the columns themselves: the list never
-   narrower than 18rem, the table never narrower than 32rem, and whichever does not
-   fit goes to the next line at full width. */
-/* Clear air between the metric cards and the two panes: they answer different
-   questions — how is the estate, and how is this element — and at the old spacing
-   the element card read as a seventh tile. */
-.st-key-dq_elsplit {{ margin-top: 1.6rem; }}
-/* The toggle beside "Failing checks" sits on the heading's baseline rather than
-   floating above it, and its label is never cut. */
-.st-key-dq_elsplit [data-testid="stColumn"]:has(.dq-elhd) .stCheckbox {{
-  margin-bottom: .45rem; }}
-.st-key-dq_elsplit [data-testid="stColumn"]:has(.dq-elhd) .stCheckbox label p {{
-  white-space: nowrap; }}
-/* Matched by what each column holds, not by `>` from the container: Streamlit puts
-   wrapper blocks between the keyed container and its columns. */
-.st-key-dq_elsplit [data-testid="stHorizontalBlock"]:has(.st-key-dqrows_elist) {{
-  flex-wrap: wrap; }}
-.st-key-dq_elsplit [data-testid="stColumn"]:has(.st-key-dqrows_elist) {{
-  flex: 1.3 1 18rem !important; min-width: 18rem; }}
-.st-key-dq_elsplit [data-testid="stColumn"]:has(.dq-elhd) {{
-  flex: 2.4 1 32rem !important; min-width: min(32rem, 100%); }}
+/* The pane's own header — which element, and its figure against its target — sits
+   above the tabs, so it is on screen whichever of them is open. */
+.dq-elhd {{ padding: .9rem 1rem .5rem; }}
+.dq-elhd .k {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--dq-text-3); font-weight: 600; }}
+.dq-elhd .n {{ font-size: clamp(.92rem, 1.08vw, 1.02rem); font-weight: 620;
+  color: {NEUTRAL["text"]}; margin-top: .3rem; }}
+.dq-elhd .b {{ margin: .35rem 0 .2rem; display: flex; flex-wrap: wrap; gap: .3rem; }}
+/* One line, always: the header's height is what keeps this card level with the list,
+   and an element bound to three columns wrapped it to two. */
+.dq-elhd .w {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .72rem; color: var(--dq-text-3); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }}
+.dq-elhd .sr {{ display: flex; align-items: baseline; flex-wrap: wrap; gap: .1rem .7rem;
+  margin-top: .45rem; font-size: clamp(.78rem, .92vw, .86rem); color: var(--dq-text-2); }}
+.dq-elhd .s {{ font-size: clamp(1.35rem, 1.8vw, 1.7rem); font-weight: 650; line-height: 1.15;
+  font-variant-numeric: tabular-nums; letter-spacing: -.01em; }}
+
+/* The tabs. The bar is inset to the card's gutter and its rule runs edge to edge;
+   the panels lose Streamlit's top padding because each body is a fixed-height box
+   that brings its own. Every body is the same height (`TAB_BODY` in scorecard.py)
+   and scrolls inside, which is the whole point: nine checks or a hundred sampled
+   rows change what is in the card, never how tall it is. */
+.st-key-dq_elpane .stTabs [role="tablist"] {{ padding: 0 1rem; }}
+.st-key-dq_elpane .stTabs [data-testid="stTabPanel"] {{ padding-top: 0; }}
+.st-key-dq_eltab_overview, .st-key-dq_eltab_rows, .st-key-dq_eltab_nochecks,
+.st-key-dq_eltab_notriage {{ padding: .8rem 1rem .6rem; gap: .55rem; }}
+.dq-elover .d {{ font-size: clamp(.74rem, .88vw, .82rem); color: var(--dq-text-2);
+  margin-bottom: .2rem; }}
+.dq-elover .dq-trend {{ padding-top: .35rem; }}
+.dq-elnote {{ background: {NEUTRAL["canvas"]}; border-radius: 8px; padding: .65rem .8rem;
+  margin-top: .7rem; font-size: clamp(.78rem, .92vw, .86rem); line-height: 1.55;
+  color: var(--dq-text-2); }}
+.dq-elnote b {{ color: {NEUTRAL["text"]}; font-weight: 620; }}
+
+/* The two cards wrap rather than squeeze. Streamlit only stacks columns below a
+   640px VIEWPORT, and the page can be far narrower than the viewport once the
+   sidebar is open — so the floor is set on the columns themselves, and whichever
+   does not fit goes to the next line at full width. Matched by what each column
+   holds, not by `>` from the container: Streamlit puts wrapper blocks between the
+   keyed container and its columns. */
+/* Clear air between the two rows of cards, scaled with the page. It has to be asked
+   for: the hero's markdown container carries Streamlit's `margin-bottom: -1rem`,
+   which cancels the 1rem gap between the rows and leaves them 3px apart. */
+.st-key-dq_elsplit {{ margin-top: clamp(1.1rem, 2vw, 1.9rem); }}
+.st-key-dq_elsplit [data-testid="stHorizontalBlock"]:has(.st-key-dq_elcard) {{
+  flex-wrap: wrap; align-items: stretch; }}
+/* Both cards fill the row, so their floors meet whatever each one holds. The fixed
+   body heights in scorecard.py make them the same height to begin with; this is what
+   holds when a header wraps or a font loads late. Each wrapper between the column
+   and the card has to pass the height on — Streamlit puts a block and an unnamed
+   layout div between them, and neither grows unless told to. */
+.st-key-dq_elsplit [data-testid="stColumn"]:is(:has(.st-key-dq_elcard), :has(.st-key-dq_elpane)) {{
+  display: flex; flex-direction: column; }}
+.st-key-dq_elsplit [data-testid="stColumn"]:is(:has(.st-key-dq_elcard), :has(.st-key-dq_elpane))
+  > [data-testid="stVerticalBlock"],
+[data-testid="stLayoutWrapper"]:is(:has(> .st-key-dq_elcard), :has(> .st-key-dq_elpane)),
+.st-key-dq_elcard, .st-key-dq_elpane {{
+  flex: 1 1 auto; display: flex; flex-direction: column; }}
+/* The legend is the list's foot, on the card's floor rather than under the last row. */
+.st-key-dq_elcard > [data-testid="stElementContainer"]:last-child {{ margin-top: auto; }}
+.st-key-dq_elsplit [data-testid="stColumn"]:has(.st-key-dq_elcard) {{
+  flex: 1 1 17rem !important; min-width: min(17rem, 100%); }}
+.st-key-dq_elsplit [data-testid="stColumn"]:has(.st-key-dq_elpane) {{
+  flex: 1.5 1 24rem !important; min-width: min(24rem, 100%); }}
 
 /* The header sits OUTSIDE the scroll box so it does not scroll away, which means
    its cells have to line up with rows drawn inside it: the box's own side padding

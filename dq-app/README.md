@@ -35,12 +35,13 @@ process; this app records that it was authorised and that someone reported doing
 That is a claim you can check three ways, in increasing order of how much they are
 worth:
 
-1. Read `dq_app/data/databricks_source.py` — the only two statements it writes are
-   `INSERT`s, to `results.disposition` and `config.rule_registry`.
+1. Read `dq_app/data/databricks_source.py` — the only three statements it writes are
+   `INSERT`s, to `results.disposition`, `config.rule_registry` and, since 2026-09-28,
+   `results.threshold_review`.
 2. `config.playbook` has no `fix_body`, `fix_sql`, `job_id` or `notebook_path`. The
    Playbook page prints its own column list so the absence is visible.
 3. **The grants.** `sql/ddl/07_grants.sql` gives the app's service principal `MODIFY`
-   on exactly those two tables and nothing on any `prod.*` table, and both are
+   on exactly those three tables and nothing on any `prod.*` table, and all three are
    `delta.appendOnly = true`. A workspace admin can demonstrate the guarantee from
    Unity Catalog alone, without reading any of this code. That is the one that counts.
 
@@ -50,7 +51,7 @@ Five in the sidebar, two reached by drilling in.
 
 | Page | What it is for |
 |---|---|
-| **Scorecard** | The health of the data, and what is being watched. A row-weighted quality figure scoped to the registered elements, six counts of the estate, and every failing check — select one to see what it looks for and the rows that actually failed. Critical-element coverage and recent runs close the page. |
+| **Scorecard** | The health of the data against what it is held to. Four cards: the row-weighted quality figure with its target and 30-day trend; how much of the CDE register something validates; every registered element with its score drawn against its target, largest shortfall first; and the element picked — its trend and every check on it, each with its own pass rate and limit. Select a check to see what it looks for and the rows that actually failed. |
 | **Tables** | The table-monitor inventory: watched catalog items with current quality, findings, trend and rule counts. |
 | **Triage** | One row per problem. Opens with the grouping — *21 breaching checks, 6 live problems* — because that ratio is the queue's whole claim, and closes with **Resolution**: whether problems reach a recorded outcome and whether fixes hold. |
 | **Register** | The append-only event log as an audit artefact: period filter, CSV export, problems with nothing recorded listed explicitly, and the control test. |
@@ -59,8 +60,8 @@ Five in the sidebar, two reached by drilling in.
 | *Problem detail* | Three blocks in the order a steward works — what we think is wrong, what we're going by, what was decided — then the stored record. Reached from **Triage**. Not in the sidebar, for the same reason. |
 
 There is no **Data elements** page. It was deleted on 2026-09-16 and folded into the
-scorecard: the `Scope · 10 CDEs` button opens the element list, and the issue board's
-`Review` opens one element in place. The register behind it is untouched — it still
+scorecard: its element list is the register, and "Every binding and what checks
+it" opens one element in place. The register behind it is untouched — it still
 owns the quality figure's denominator.
 
 ## Architecture
@@ -75,7 +76,7 @@ dq_app/
   data/
     adapter.py              THE SEAM. every page imports from here
     local_source.py         fixtures/out/*.parquet          (default)
-    databricks_source.py    Unity Catalog                   (never executed)
+    databricks_source.py    Unity Catalog                   (live, workspace.dq_triage)
     identity.py             who is acting, and how we know
   ui/
     theme.py                palette, status vocabulary, SVG icon set, CSS
@@ -208,8 +209,9 @@ byte for byte and skips only on a clone where `fixtures/out/` has never been bui
 
 ### Switching it to a workspace later
 
-The workspace path is written and reviewed but has never been executed. Turning it on
-is four changes and three prerequisites, all noted inline:
+This is done — `app.yaml` ships with `DQ_APP_DATA_SOURCE=databricks` against
+`workspace.dq_triage` and the deployed app reads Unity Catalog. The steps below are
+kept as the record of what turning it on takes, for the next catalog:
 
 1. Set `DQ_APP_DATA_SOURCE=databricks` and uncomment the workspace block in
    `app.yaml`; uncomment the two client libraries in `requirements.txt`.
@@ -225,8 +227,21 @@ is four changes and three prerequisites, all noted inline:
 
 ## Known gaps
 
-- **Nothing here has run against a real workspace.** `databricks_source.py` is written
-  and reviewed, never executed — same status as `sql/ddl/`.
+- **A laptop cannot write the register, by design.** `run-workspace.sh` reads Unity
+  Catalog fine; writes are refused, because there is no `x-forwarded-email` header off
+  a Databricks App, so `identity.py` stamps `actor_source = 'local_standin'` and two
+  CHECK constraints on `dq_results_disposition` reject the row. Deploy to write.
+- **No profiler has ever run in the warehouse.** The twelve `cde_profile` rows in
+  `workspace.dq_triage` all carry one `profile_ts` and the writer string
+  `job:dq-cde-profiler`, which is a constant in `fixtures/profile.py` — they are the
+  laptop's pandas output, loaded verbatim by `seed_results.sql`. So
+  `v_cde_coverage.never_profiled` answers "is there a profile row" and not "has a
+  profiler run here". Today those coincide; at the second table they will not.
+- **Two cross-table rules attach to no CDE binding and nothing reports it.**
+  `XREF_OPEN_TS_AGREEMENT` and `XREF_SUBS_CTCT_ORPHAN` carry `target_column = NULL`
+  and no `cde_id`, so neither join path in `v_cde_coverage` reaches them and they are
+  absent from every coverage figure. One is breaching; the other is P1_block. The
+  unattached set has no surface anywhere in the app.
 - **Violation samples do not line up with cohorts in the fixture.** The check runner
   only sampled the final run, while each cohort's `member_result_ids` point at the run
   that raised it, so no cohort has evidence rows from its own raising run. The detail

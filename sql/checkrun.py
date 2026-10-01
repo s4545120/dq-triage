@@ -14,14 +14,13 @@ The registry holds four rule shapes and only one of them fits that template:
   row_level    27 rules  count_if(expr)
   uniqueness    3 rules  a window function — needs a subquery, not an aggregate
   variance      2 rules  a whole-table test; violation_count is rows_scanned or 0
-  cross_table   3 rules  needs a join the registry has nowhere to store
+  cross_table   3 rules  needs the join in config.rule_registry.join_sql
 
-The joins for the last three live in fixtures/rules.py as `join_sql` — real, correct,
-and invisible to Databricks because config.rule_registry has no column for them. They
-are emitted here from that source, which is exactly why this file has to be generated
-rather than written by hand: it is carrying a dependency the schema does not yet
-express. Adding a `join_sql` column to the registry is the fix; until then this script
-is where that knowledge lives.
+The last three read their join from `config.rule_registry.join_sql`, added 2026-09-28.
+Before that the column did not exist, the joins lived in fixtures/rules.py, and this
+script rebuilt each one by hand — hardcoding both table names and the join key, and
+inferring LEFT JOIN from whether the rule id contained "ORPHAN". All of that is gone:
+the join is now data like everything else, and this file reads it.
 
 EXPECTED VALUES come from the final run in results.check_run.parquet — 34 verdicts,
 21 breach, 11 pass, 2 skipped. Shadow rules are included and marked, because a shadow
@@ -59,6 +58,11 @@ def main() -> int:
     ap.add_argument("--schema", default="udp_brnz")
     ap.add_argument("--src-prefix", default="dq_mock_")
     ap.add_argument("--prefix", default="dq_")
+    ap.add_argument("--fn-prefix", default=None,
+                    help="Replaces the `dq.fn.` prefix on the shared predicate helpers "
+                         "in rule_expr. Default <catalog>.<schema>.<prefix>fn_, the "
+                         "layout render.py produces. Pass <catalog>.fn. to keep the "
+                         "two-schema layout sql/ddl/ declares.")
     a = ap.parse_args()
 
     q = f"{a.catalog}.{a.schema}."
@@ -67,11 +71,14 @@ def main() -> int:
         "prod.customer.subs_c": f"{q}{a.src_prefix}subs_c",
     }
     tbl = lambda t: rewrite.get(t, t)
+    # See the note in seed.py. The same rewrite has to happen here, or this file
+    # diffs a query the seeded registry will never actually run.
+    fn_prefix = a.fn_prefix or f"{q}{a.prefix}fn_"
 
-    import rules as fixture_rules
-    joins = {r.rule_id: r.join_sql for r in fixture_rules.RULES if getattr(r, "join_sql", None)}
+    import rules as fixture_rules   # still needed for sample_columns and key_column
 
     reg = pd.read_parquet(FIX / "config.rule_registry.parquet")
+    reg["rule_expr"] = reg["rule_expr"].str.replace("dq.fn.", fn_prefix, regex=False)
     cur = reg.sort_values("rule_version").groupby("rule_id").tail(1)
 
     cr = pd.read_parquet(FIX / "results.check_run.parquet")
@@ -109,20 +116,19 @@ def main() -> int:
                           f" {exp.violation_count} AS exp_violations"
                           f"\n  FROM   {t}{where}")
         else:  # cross_table
-            j = joins[r.rule_id]
+            # The join comes from config.rule_registry.join_sql, used verbatim. Until
+            # 2026-09-28 this rebuilt it by hand -- hardcoding both table names and the
+            # key, and inferring LEFT JOIN from the rule id -- because the registry had
+            # no column to hold it. Now it does.
+            j = r.join_sql
             for k, v in rewrite.items():
                 j = j.replace(k, v)
-            scope = ("LEFT JOIN" if "LEFT JOIN" in j else "JOIN")
-            s_tbl, c_tbl = tbl("prod.customer.subs_c"), tbl("prod.customer.ctct_c")
-            on = "s.CTCT_KEY = c.CTCT_KEY"
-            pred = r.rule_expr
             blocks.append(
                 f"{hdr}\n         count(*) AS rows_scanned,"
-                f"\n         count_if({pred}) AS violation_count,"
+                f"\n         count_if({r.rule_expr}) AS violation_count,"
                 f"\n         {exp.rows_scanned} AS exp_scanned,"
                 f" {exp.violation_count} AS exp_violations"
-                f"\n  -- join from fixtures/rules.py join_sql; config.rule_registry cannot store it"
-                f"\n  FROM   {s_tbl} s {scope} {c_tbl} c ON {on}")
+                f"\n  FROM   {j}")
 
     body = "\nUNION ALL\n".join(blocks)
     sql = f'''-- =====================================================================
@@ -272,11 +278,12 @@ FROM   actual a JOIN meta m ON m.rule_id = a.rule_id;
         scope = f" AND ({r.scope_filter})" if pd.notna(r.scope_filter) else ""
 
         if sh == "cross_table":
+            j = r.join_sql
+            for k, v in rewrite.items():
+                j = j.replace(k, v)
             qual = lambda c: ("s." + c) if c in heads.get("subs_c", ()) else ("c." + c)
             src = (f"SELECT {', '.join(qual(c) + ' AS ' + c for c in dict.fromkeys([key] + cols))}"
-                   f"\n          FROM {tbl('prod.customer.subs_c')} s"
-                   f" {'LEFT JOIN' if 'ORPHAN' in r.rule_id else 'JOIN'}"
-                   f" {tbl('prod.customer.ctct_c')} c ON s.CTCT_KEY = c.CTCT_KEY"
+                   f"\n          FROM {j}"
                    f"\n          WHERE {r.rule_expr} LIMIT 100")
         elif sh == "uniqueness":
             src = (f"SELECT * FROM (SELECT *, {r.rule_expr} AS __dup FROM {t})"
@@ -330,8 +337,8 @@ CROSS  JOIN (SELECT result_id, run_id FROM {cr_tbl}
     print(f"wrote sql/out/samples_insert.sql — the violating rows themselves")
     for k, v in sorted(counts.items()):
         print(f"    {k:12} {v}")
-    print("\ncross-table joins sourced from fixtures/rules.py join_sql —")
-    print("the registry has no column for them, which is the finding, not a workaround")
+    print("\ncross-table joins read from config.rule_registry.join_sql —")
+    print("data like every other part of a rule, no longer carried in Python")
     return 0
 
 

@@ -78,7 +78,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'CTCT_EML_FMT', 'workspace.dq_triage.dq_
        to_json(struct(v.CTCT_KEY, v.EML_ID, v.EML_STTS_CD, v.SRCE_NSRT_TS)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_ctct_c
-          WHERE (NOT (EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$')) AND (EML_ID IS NOT NULL AND trim(EML_ID) <> '') LIMIT 100) v
+          WHERE (NOT workspace.dq_triage.dq_fn_is_valid_email_v1(EML_ID)) AND (EML_ID IS NOT NULL AND trim(EML_ID) <> '') LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'CTCT_EML_FMT') cr;
 
@@ -90,7 +90,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'CTCT_EML_NOT_NULL', 'workspace.dq_triag
        to_json(struct(v.CTCT_KEY, v.EML_ID, v.EML_STTS_CD)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_ctct_c
-          WHERE (EML_ID IS NULL OR trim(EML_ID) = '') LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(EML_ID)) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'CTCT_EML_NOT_NULL') cr;
 
@@ -114,7 +114,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'CTCT_EML_STTS_CONSISTENT', 'workspace.d
        to_json(struct(v.CTCT_KEY, v.EML_ID, v.EML_STTS_CD)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_ctct_c
-          WHERE (EML_STTS_CD = 'INVALID' AND EML_ID RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$') AND (EML_ID IS NOT NULL AND trim(EML_ID) <> '') LIMIT 100) v
+          WHERE (EML_STTS_CD = 'INVALID' AND workspace.dq_triage.dq_fn_is_valid_email_v1(EML_ID)) AND (EML_ID IS NOT NULL AND trim(EML_ID) <> '') LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'CTCT_EML_STTS_CONSISTENT') cr;
 
@@ -126,7 +126,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'CTCT_EML_STTS_NOT_NULL', 'workspace.dq_
        to_json(struct(v.CTCT_KEY, v.EML_ID, v.EML_STTS_CD)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_ctct_c
-          WHERE (EML_STTS_CD IS NULL OR trim(EML_STTS_CD) = '') LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(EML_STTS_CD)) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'CTCT_EML_STTS_NOT_NULL') cr;
 
@@ -162,7 +162,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'CTCT_IDNT_DOC_NOT_NULL', 'workspace.dq_
        to_json(struct(v.CTCT_KEY, v.IDNT_TYPE_1_CD, v.IDNT_DOC_1_NO)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_ctct_c
-          WHERE (IDNT_DOC_1_NO IS NULL OR trim(IDNT_DOC_1_NO) = '') AND (IDNT_TYPE_1_CD IS NOT NULL AND trim(IDNT_TYPE_1_CD) <> '') LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(IDNT_DOC_1_NO)) AND (IDNT_TYPE_1_CD IS NOT NULL AND trim(IDNT_TYPE_1_CD) <> '') LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'CTCT_IDNT_DOC_NOT_NULL') cr;
 
@@ -186,7 +186,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'CTCT_MOBL_FMT', 'workspace.dq_triage.dq
        to_json(struct(v.CTCT_KEY, v.MOBL_NO)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_ctct_c
-          WHERE (MOBL_NO NOT RLIKE '^04[0-9]{8}$') AND (MOBL_NO IS NOT NULL AND trim(MOBL_NO) <> '') LIMIT 100) v
+          WHERE (NOT workspace.dq_triage.dq_fn_is_au_mobile_v1(MOBL_NO)) AND (MOBL_NO IS NOT NULL AND trim(MOBL_NO) <> '') LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'CTCT_MOBL_FMT') cr;
 
@@ -198,7 +198,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'CTCT_MOBL_NOT_NULL', 'workspace.dq_tria
        to_json(struct(v.CTCT_KEY, v.MOBL_NO, v.PHN_NO, v.PREF_CTCT_MODE_FLG)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_ctct_c
-          WHERE (MOBL_NO IS NULL OR trim(MOBL_NO) = '') LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(MOBL_NO)) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'CTCT_MOBL_NOT_NULL') cr;
 
@@ -270,7 +270,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'SUBS_BNFT_TXT_NOT_NULL', 'workspace.dq_
        to_json(struct(v.SUBS_KEY, v.BNFT_TXT, v.PROD_OFFR_DS)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_subs_c
-          WHERE (BNFT_TXT IS NULL OR trim(BNFT_TXT) = '') LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(BNFT_TXT)) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'SUBS_BNFT_TXT_NOT_NULL') cr;
 
@@ -294,7 +294,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'SUBS_IMEI_NOT_NULL', 'workspace.dq_tria
        to_json(struct(v.SUBS_KEY, v.IMEI_ID, v.PROD_NM, v.PROD_TYPE_KEY)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_subs_c
-          WHERE (IMEI_ID IS NULL OR trim(IMEI_ID) = '') LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(IMEI_ID)) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'SUBS_IMEI_NOT_NULL') cr;
 
@@ -318,7 +318,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'SUBS_MSISDN_FMT', 'workspace.dq_triage.
        to_json(struct(v.SUBS_KEY, v.PRIM_RSRC_VALU_TXT, v.PRIM_RSRC_TYPE_KEY, v.PROD_NM)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_subs_c
-          WHERE (PRIM_RSRC_VALU_TXT NOT RLIKE '^04[0-9]{8}$') AND (PRIM_RSRC_TYPE_KEY = 1) LIMIT 100) v
+          WHERE (NOT workspace.dq_triage.dq_fn_is_au_mobile_v1(PRIM_RSRC_VALU_TXT)) AND (PRIM_RSRC_TYPE_KEY = 1) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'SUBS_MSISDN_FMT') cr;
 
@@ -330,7 +330,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'SUBS_MSISDN_SENTINEL', 'workspace.dq_tr
        to_json(struct(v.SUBS_KEY, v.PRIM_RSRC_VALU_TXT, v.PROD_NM, v.SUBS_STTS_KEY)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_subs_c
-          WHERE (lower(trim(PRIM_RSRC_VALU_TXT)) IN ('service-number-unknown','unknown','n/a','na','none','null','')) AND (PRIM_RSRC_TYPE_KEY = 1) LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_sentinel_v1(PRIM_RSRC_VALU_TXT)) AND (PRIM_RSRC_TYPE_KEY = 1) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'SUBS_MSISDN_SENTINEL') cr;
 
@@ -354,7 +354,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'SUBS_NTWK_NOT_NULL', 'workspace.dq_tria
        to_json(struct(v.SUBS_KEY, v.NTWK_TECH_NM, v.PROD_NM, v.PRIM_RSRC_TYPE_KEY)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_subs_c
-          WHERE (NTWK_TECH_NM IS NULL OR trim(NTWK_TECH_NM) = '') LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(NTWK_TECH_NM)) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'SUBS_NTWK_NOT_NULL') cr;
 
@@ -378,7 +378,7 @@ SELECT uuid(), cr.result_id, cr.run_id, 'SUBS_SIM_NOT_NULL', 'workspace.dq_triag
        to_json(struct(v.SUBS_KEY, v.SIM_SERL_ID, v.PROD_NM)),
        current_timestamp()
 FROM   (SELECT * FROM workspace.dq_triage.dq_mock_subs_c
-          WHERE (SIM_SERL_ID IS NULL OR trim(SIM_SERL_ID) = '') AND (PROD_TYPE_KEY <> 0) LIMIT 100) v
+          WHERE (workspace.dq_triage.dq_fn_is_blank_v1(SIM_SERL_ID)) AND (PROD_TYPE_KEY <> 0) LIMIT 100) v
 CROSS  JOIN (SELECT result_id, run_id FROM workspace.dq_triage.dq_results_check_run
              WHERE run_id = '99c95b1f-76db-56c0-9acd-9b0744a41a4f' AND rule_id = 'SUBS_SIM_NOT_NULL') cr;
 

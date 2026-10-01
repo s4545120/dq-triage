@@ -28,3 +28,43 @@ env:
   # a readable message from databricks_source._cursor, not a connection timeout.
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: sql-warehouse
+
+  # --- Outbound notification. OFF unless DQ_NOTIFY is set. -------------------
+  #
+  # Triggered by one event only: `reviewed` with `decision = 'accepted'`, authored
+  # by a platform-vouched user. A threshold crossing notifies nobody — it surfaces
+  # a candidate in the app and a person decides. See dq_app/domain/notify.py.
+  #
+  #   off   (default) nothing is composed and nothing is sent.
+  #   log   compose and write to the app log. Use this first: it shows exactly what
+  #         would go out, against the real workspace, sending nothing.
+  #   job   trigger the Lakeflow job below, passing the composed message as
+  #         parameters. The app holds no mail credential — the job does.
+  #
+  - name: DQ_NOTIFY
+    value: job
+  #
+  # Recipients. A bare list is the catch-all; `group: addresses` routes by the
+  # cohort's owner_group. An unrouted cohort sends to nobody and says so in the log.
+  #
+  # Test routing: every accepted review goes to one address. Example of a routed
+  # form: "*: dq-stewards@example.com; dq-stewards-customer: crm-owners@example.com"
+  - name: DQ_NOTIFY_TO
+    value: "lijinrui46@gmail.com"
+  #
+  # Only for DQ_NOTIFY=job. The app's service principal needs CAN_RUN on it and
+  # nothing more. `valueFrom` needs a `job` resource attached in Configure →
+  # Resources; the literal id works too if you would rather not attach one.
+  #
+  # "DQ Triage - review accepted": notebooks/05_notify_via_job_email.py, which sends
+  # nothing — Databricks emails the job's on_success list. No credential anywhere.
+  # Recipients are fixed on the JOB, so DQ_NOTIFY_TO above is not what delivers.
+  # Point this at a job running notebook 04 instead to send the composed message.
+  - name: DQ_NOTIFY_JOB_ID
+    value: "778228344540483"
+  #
+  # Makes the message's "Open in DQ Triage" link absolute. Without it the message
+  # still sends, without a link.
+  #
+  - name: DQ_APP_URL
+    value: https://dq-triage-7474655497286421.aws.databricksapps.com

@@ -29,6 +29,7 @@ register is seeded and this module only reads it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import date, datetime
@@ -37,7 +38,8 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import identity
-from dq_app.domain import coverage, lifecycle
+from dq_app.data import notify as _notify_transport
+from dq_app.domain import coverage, lifecycle, thresholds
 
 APP_VERSION = "dq-triage-app/1.0.0"
 
@@ -151,6 +153,33 @@ def get_rule_registry_current() -> pd.DataFrame:
     return latest[latest["status"] != "retired"].reset_index(drop=True)
 
 
+@st.cache_data(**_CACHE)
+def get_threshold_proposals() -> pd.DataFrame:
+    return _impl.threshold_proposals()
+
+
+@st.cache_data(**_CACHE)
+def _base_threshold_reviews() -> pd.DataFrame:
+    return _impl.threshold_reviews()
+
+
+def get_threshold_reviews() -> pd.DataFrame:
+    """Every reviewer decision, including any recorded in this session."""
+    base = _base_threshold_reviews()
+    pending = getattr(_impl, "pending_threshold_reviews", lambda: [])()
+    if not pending:
+        return base
+    return pd.concat([base, pd.DataFrame(pending)], ignore_index=True)
+
+
+def get_threshold_proposal_current() -> pd.DataFrame:
+    """One row per rule: its latest proposal with the latest review folded in — the
+    Python twin of `v_threshold_proposal_current`, computed so a review recorded in
+    this session shows before any warehouse could re-run the view."""
+    return thresholds.derive_proposal_current(
+        get_threshold_proposals(), get_threshold_reviews(), get_rule_registry())
+
+
 def get_cde_registry_current() -> pd.DataFrame:
     """Latest non-retired version of each element, with `effective_to` derived.
     The Python twin of `v_cde_registry_current`."""
@@ -191,12 +220,19 @@ def append_disposition(
     external_ref: str | None = None,
     approach_type_taken: str | None = None,
     playbook_id: str | None = None,
+    title: str | None = None,
 ) -> dict:
     """Append one event to the register. The app's primary write.
 
     Validation lives in `domain.lifecycle.validate_event` — pure, and tested without
     a Streamlit runtime. What happens here is only the stamping: identity from the
     platform, sequence from the events already on the cohort, and the write itself.
+
+    `title` is the caller's already-rendered problem title, carried through only so
+    an outbound notification can use the same words the page does.
+    `ui/components.problem_title` is the one definition of what a problem is called,
+    and deriving it a second time down here would let one cohort go out under two
+    names. Omit it and nothing breaks: the subject falls back to the cohort id.
     """
     who = identity.current()
     prior_all = get_dispositions()
@@ -248,7 +284,49 @@ def append_disposition(
     }
     _impl.write_disposition(row)
     clear_cache()
+    _notify(row, title)
     return row
+
+
+def notification_enabled() -> bool:
+    """Is any outbound notification configured? Off unless `DQ_NOTIFY` says so."""
+    return _notify_transport.enabled()
+
+
+def notification_recipients(cohort) -> tuple[str, ...]:
+    """Who accepting this problem would email, for the decision form to disclose.
+
+    Through the seam rather than importing `data.notify` in a page, for the reason
+    the module docstring gives: a page asks this module, never a source module.
+    Empty when notification is off, which is the default and which the page renders
+    as silence.
+    """
+    return _notify_transport.recipients_preview(cohort)
+
+
+def _notify(row: dict, title: str | None) -> None:
+    """Offer the event to the notification transport, which is off by default.
+
+    Everything here is wrapped, and the result is discarded. The register write has
+    already succeeded by this point: whether a message went out must not change what
+    the page tells the steward about their own decision, and an exception raised here
+    would surface as a failed write, which would be a lie.
+
+    The read-back is what `data/notify.dispatch` means by `confirmed` — see that
+    module for why a send is derived from an observed row rather than an assumed one.
+    """
+    if not _notify_transport.enabled():
+        return
+    try:
+        confirmed = _impl.confirm_disposition(row["disposition_id"])
+        all_cohorts = get_cohorts()
+        match = all_cohorts[all_cohorts["cohort_id"] == row["cohort_id"]]
+        cohort = None if match.empty else match.iloc[0].to_dict()
+        _notify_transport.dispatch(row, cohort, title=title, confirmed=confirmed)
+    except Exception:  # noqa: BLE001 — a notification can never fail a write.
+        logging.getLogger("dq_app.notify").exception(
+            "notification path failed after a successful register write"
+        )
 
 
 def promote_rule(rule_id: str, note: str) -> dict:
@@ -284,6 +362,81 @@ def promote_rule(rule_id: str, note: str) -> dict:
             "note": note,
         }
     )
-    _impl.promote_rule(row)
+    _impl.append_rule_version(row)
     clear_cache()
     return row
+
+
+# The domain refuses reviews; this is the same exception under the name the page uses.
+ReviewRejected = thresholds.ReviewRejected
+
+
+def review_threshold(
+    proposal_id: str,
+    decision: str,
+    *,
+    reason: str | None = None,
+    review_by_date: date | None = None,
+) -> dict:
+    """Decide a threshold proposal. The app's third write — and, on adoption, the
+    second one too.
+
+    Adopting appends a `rule_version` carrying the proposed limit, exactly as
+    `promote_rule` appends one carrying a new status: same table, same grant, same
+    append. The review row then records which version that was. Rejecting and
+    deferring write the review row only. Validation is `domain.thresholds.
+    validate_review`, pure and tested without a runtime; what happens here is the
+    stamping and the two inserts.
+
+    The order is adopt-then-record, deliberately: a review row claiming an adoption
+    that never landed in the registry is the worse of the two failures.
+    """
+    current = get_threshold_proposal_current()
+    match = current[current["proposal_id"] == proposal_id]
+    if match.empty:
+        raise ReviewRejected("That proposal is not the latest for its rule, or does not exist.")
+    p = match.iloc[0]
+    who = identity.current()
+    thresholds.validate_review(
+        decision, reason=reason, review_by_date=review_by_date,
+        state=str(p["review_state"]))
+
+    now = datetime.now()
+    adopted_version = None
+    if decision == "adopted":
+        reg = get_rule_registry()
+        versions = reg[reg["rule_id"] == p["rule_id"]].sort_values("rule_version")
+        latest = versions.iloc[-1]
+        adopted_version = int(latest["rule_version"]) + 1
+        row = latest.to_dict()
+        row.update({
+            "rule_version": adopted_version,
+            "fail_threshold_pct": float(p["proposed_threshold_pct"]),
+            "effective_from": now,
+            "created_by": who.email,
+            "created_at": now,
+            "note": (f"v{adopted_version}: fail_threshold_pct "
+                     f"{float(latest['fail_threshold_pct']):g}% -> "
+                     f"{float(p['proposed_threshold_pct']):g}%, adopting threshold "
+                     f"proposal {proposal_id[:8]} ({p['basis']}). "
+                     + (reason or "").strip()).strip(),
+        })
+        _impl.append_rule_version(row)
+
+    review = {
+        "review_id": str(uuid.uuid4()),
+        "proposal_id": proposal_id,
+        "event_ts": now,
+        "ingest_ts": now,
+        "actor_identity": who.email,
+        "actor_display_name": who.display_name,
+        "actor_source": who.source,
+        "decision": decision,
+        "reason": (reason or None),
+        "review_by_date": review_by_date if decision == "deferred" else None,
+        "adopted_rule_version": adopted_version,
+        "app_version": APP_VERSION,
+    }
+    _impl.write_threshold_review(review)
+    clear_cache()
+    return review

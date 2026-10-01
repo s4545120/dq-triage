@@ -67,8 +67,8 @@ table predates. Both the app SP and the check-runner SP must exist before `07` a
 Views last is the rule that matters: `11_views_cde.sql` reads `cde_registry`,
 `cde_profile`, `rule_registry` and `check_run`, so it fails if any is missing.
 
-**Before running, read the constructs table in `README.md` § "Status: written,
-reviewed, never executed".** It lists every construct here that might not work first
+**Before running, read the constructs table in `README.md` § "Status: executed once,
+and the constructs to watch next time".** It lists every construct here that might not work first
 time — liquid clustering, the `ARRAY<STRUCT<>>` columns, `MAX_BY` over an all-NULL
 ordering, `SELECT * EXCEPT`, `LATERAL VIEW explode`, `split_part` with a negative
 index — with what to do about each. That table is the pre-flight; this file is the
@@ -228,7 +228,7 @@ the header of `ddl/12_functions.sql` for why the NULL asymmetry is deliberate.
 
 | Query | Expected |
 |---|---|
-| 3a | exactly two rows — app SP writes `disposition` and `rule_registry` |
+| 3a | exactly three rows — app SP writes `disposition`, `rule_registry` and `threshold_review` |
 | 3b | zero rows — nothing outside the catalog. The headline claim |
 | 3c | zero rows — no schema-level MODIFY |
 | 3d | `appendOnly` true on both app-written tables |
@@ -502,7 +502,7 @@ there when you seed real data.
 ### What this variant does not prove — and it is the important half
 
 **The entire control claim is untestable here.** `07_grants.sql` §3 is the evidence
-that the app service principal can write two tables and nothing else, and holds nothing
+that the app service principal can write three tables and nothing else, and holds nothing
 outside the catalog. Without grant privileges you cannot run it, cannot create the
 service principals, and therefore cannot demonstrate the one claim the whole design
 makes.

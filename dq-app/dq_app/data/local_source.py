@@ -26,6 +26,7 @@ import streamlit as st
 
 _PENDING_KEY = "_pending_disposition_events"
 _PENDING_RULES_KEY = "_pending_rule_versions"
+_PENDING_REVIEWS_KEY = "_pending_threshold_reviews"
 
 
 # Deployed, only `dq-app/` is shipped — the app source path is the folder holding
@@ -96,6 +97,15 @@ def cde_profile() -> pd.DataFrame:
     return _read("results.cde_profile")
 
 
+def threshold_proposals() -> pd.DataFrame:
+    return _read("results.threshold_proposal")
+
+
+def threshold_reviews() -> pd.DataFrame:
+    """As generated. Session-recorded reviews are layered on by the adapter."""
+    return _read("results.threshold_review")
+
+
 # --- Writes -----------------------------------------------------------------
 
 
@@ -103,8 +113,18 @@ def write_disposition(row: dict) -> None:
     st.session_state.setdefault(_PENDING_KEY, []).append(row)
 
 
-def promote_rule(row: dict) -> None:
+def append_rule_version(row: dict) -> None:
+    """A new version of a rule: a promotion, or an adopted threshold. The same
+    append either way, which is the point of the registry being append-only."""
     st.session_state.setdefault(_PENDING_RULES_KEY, []).append(row)
+
+
+def promote_rule(row: dict) -> None:
+    append_rule_version(row)
+
+
+def write_threshold_review(row: dict) -> None:
+    st.session_state.setdefault(_PENDING_REVIEWS_KEY, []).append(row)
 
 
 def pending_events() -> list[dict]:
@@ -115,9 +135,21 @@ def pending_rules() -> list[dict]:
     return list(st.session_state.get(_PENDING_RULES_KEY, []))
 
 
+def pending_threshold_reviews() -> list[dict]:
+    return list(st.session_state.get(_PENDING_REVIEWS_KEY, []))
+
+
 def discard_pending() -> None:
     st.session_state[_PENDING_KEY] = []
     st.session_state[_PENDING_RULES_KEY] = []
+    st.session_state[_PENDING_REVIEWS_KEY] = []
+
+
+def confirm_disposition(disposition_id: str) -> bool:
+    """Always False. Nothing written here reaches a table, so there is no row to
+    read back and nothing an outbound notification could be derived from — which is
+    exactly why local and fixture modes can never emit one. See data/notify.py."""
+    return False
 
 
 def durable() -> bool:

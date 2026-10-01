@@ -58,12 +58,14 @@ def _bound(registry: pd.DataFrame) -> list[dict]:
 
 
 def _attached(binding: dict, rules: pd.DataFrame) -> pd.DataFrame:
+    """The rule names its element; its column, where it has one, narrows it to one
+    binding. Twin of the join in sql/ddl/11_views_cde.sql."""
     by_cde = rules["cde_id"] == binding["cde_id"]
-    by_column = (
+    column_ok = rules["target_column"].isna() | (
         (rules["target_table"] == binding["target_table"])
         & (rules["target_column"] == binding["target_column"])
     )
-    return rules[by_cde | by_column]
+    return rules[by_cde & column_ok]
 
 
 # Rule types that check the VALUES rather than their presence or their agreement

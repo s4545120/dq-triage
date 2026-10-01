@@ -130,10 +130,17 @@ with back:
 age = (pd.Timestamp.now() - row["raised_ts"]).days
 cde_cov = adapter.get_cde_coverage()
 registry = adapter.get_rule_registry_current()
+# Whether an outbound notification is configured at all. Used only to tell the
+# difference between "off" (say nothing) and "on but unrouted" (say that).
+notify_on = adapter.notification_enabled()
 elements, unattached = components.cohort_elements(extra["member_rule_ids"], cde_cov)
+# Held in a name rather than inlined because the decision form passes it to the
+# register append, which carries it to an outbound notification. One derivation, so
+# a problem cannot be called one thing on this page and another in an inbox.
+problem_title = components.problem_title(extra, elements, registry, 140)
 st.markdown(
     '<div class="dq-page-hd" style="margin-bottom:.2rem">'
-    f'<div class="t">{html.escape(components.problem_title(extra, elements, registry, 140))}'
+    f'<div class="t">{html.escape(problem_title)}'
     "</div>"
     # The title says what and what kind of wrong; the claim's first sentence under it
     # says why, in the model's words. It used to BE the title — see `claim_sentence`.
@@ -499,11 +506,50 @@ if st.session_state.get("_decide_open") and allowed:
                 )
                 review_by = st.date_input("Review by", value=date.today() + timedelta(days=30),
                                           help="Deferrals only.")
+
+                # The one place in the app where a person can cause a message to
+                # leave the container, so the one place that has to say so — before
+                # the button, not after it. Written to cover every decision at once
+                # rather than reacting to the radio: widgets inside `st.form` do not
+                # rerun until submit, so a line that changed with the selection would
+                # be describing the previous one.
+                # Three conditions have to hold before an acceptance emails anyone,
+                # and each false one is a different sentence. Saying "accepting
+                # emails X" on a laptop would be the page promising something the
+                # write path refuses: session-only events are never read back, so
+                # `notify.dispatch` returns `unconfirmed` and sends nothing.
+                _notify_to = adapter.notification_recipients(extra)
+                if notify_on and not adapter.writes_are_durable():
+                    st.caption(
+                        "Accepting sends nothing here — writes are session-only.",
+                        help="A notification is composed from the register row read "
+                             "back after the write. Nothing written on a laptop "
+                             "reaches a table, so there is no row and no message. "
+                             "Deploy to send.",
+                    )
+                elif _notify_to:
+                    st.caption(
+                        f"Accepting emails {', '.join(_notify_to)}. "
+                        "Defer, reject and no action send nothing.",
+                        help="Sent only after the event is written and read back "
+                             "out of the register, so nothing goes out that is not "
+                             "already an audit record. The message carries your "
+                             "name and this reason.",
+                    )
+                elif notify_on:
+                    st.caption(
+                        f"Accepting sends nothing — {extra['owner_group']} has no "
+                        "notification route.",
+                        help="DQ_NOTIFY is on but DQ_NOTIFY_TO has no entry for this "
+                             "owner group and no catch-all.",
+                    )
+
                 if st.form_submit_button("Append to register", type="primary"):
                     try:
                         adapter.append_disposition(
                             chosen, "reviewed", decision=decision, reason=reason or None,
                             review_by_date=review_by if decision == "deferred" else None,
+                            title=problem_title,
                         )
                         st.session_state["_decide_open"] = False
                         st.rerun()
@@ -519,7 +565,7 @@ if st.session_state.get("_decide_open") and allowed:
             )
             if st.button("Approve", type="primary", key="_approve"):
                 try:
-                    adapter.append_disposition(chosen, "approved")
+                    adapter.append_disposition(chosen, "approved", title=problem_title)
                     st.session_state["_decide_open"] = False
                     st.rerun()
                 except adapter.WriteRejected as exc:

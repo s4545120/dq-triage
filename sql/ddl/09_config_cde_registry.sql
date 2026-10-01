@@ -43,6 +43,21 @@
 -- that against the scope_filter on every rule attached to the binding and reports a
 -- mismatch. That is how a rule defect becomes visible without anyone having to
 -- notice it by hand.
+--
+-- TOLERANCE_PCT IS THE SAME KIND OF CLAIM, ABOUT THE LIMIT RATHER THAN THE SCOPE.
+-- It is the organisation's statement of how many violating rows this element may
+-- carry before the business considers it broken -- a percentage of rows in scope,
+-- declared on the ELEMENT, once, rather than re-decided on every rule that happens
+-- to watch it. It exists so that "what should the threshold on this rule be?" has
+-- an answer that does not come from the run history alone: history says where the
+-- data sits, and only a declaration says where it is allowed to sit. The triage
+-- job reads it into every brief and treats it as a CEILING -- a rule may be
+-- stricter than its element, never looser -- and it is that ceiling, not the
+-- model, that stops a threshold suggestion from being "raise the limit until the
+-- check passes". NULL means no tolerance has been declared, which is honest and is
+-- what the brief says in that case. It is not severity and not criticality:
+-- criticality is how much the element matters, tolerance is how much of it may be
+-- wrong, and the two are set by the same steward for different reasons.
 
 CREATE TABLE IF NOT EXISTS {catalog}.config.cde_registry (
   cde_id             STRING    NOT NULL COMMENT 'stable identifier, survives versioning, e.g. CDE_CUST_EMAIL',
@@ -55,6 +70,7 @@ CREATE TABLE IF NOT EXISTS {catalog}.config.cde_registry (
   criticality        STRING    NOT NULL COMMENT 'critical | high | medium | low. Feeds cohort.rank_score — NEVER check_run.severity, which is copied verbatim from the rule registry and adjusted downstream by nothing',
   pii                BOOLEAN   NOT NULL COMMENT 'TRUE where values identify a person. Where TRUE, cde_profile stores masked signatures and counts only, never an exemplar value',
   regulatory_basis   STRING             COMMENT 'why it is critical in compliance terms, free text, e.g. KYC identity evidence',
+  tolerance_pct      DOUBLE             COMMENT 'the stated organisational tolerance for violating rows on this element, as a percentage of rows in scope. A CEILING on fail_threshold_pct for any rule attached to a binding of this element -- a rule may be stricter, never looser. Read into every triage brief as the organisational basis for a threshold suggestion. NULL means no tolerance has been declared, and the brief says so. Not severity, not criticality -- see header note',
   bindings           ARRAY<STRUCT<
                        target_table:          STRING,
                        target_column:         STRING,
@@ -88,6 +104,11 @@ ALTER TABLE {catalog}.config.cde_registry
 ALTER TABLE {catalog}.config.cde_registry
   ADD CONSTRAINT cde_registry_version_positive
   CHECK (cde_version >= 1);
+
+-- A tolerance is a share of rows in scope. NULL is "not declared", not zero.
+ALTER TABLE {catalog}.config.cde_registry
+  ADD CONSTRAINT cde_registry_tolerance_range
+  CHECK (tolerance_pct IS NULL OR (tolerance_pct >= 0.0 AND tolerance_pct <= 100.0));
 
 -- A registered CDE with no bindings is a definition nothing can act on. Proposed
 -- rows are allowed to be empty — that is exactly the state between registering an

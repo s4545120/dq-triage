@@ -71,6 +71,18 @@ class Binding:
         )
 
 
+# THE ORGANISATION'S TOLERANCE, BY TIER. What share of an element's rows may be
+# wrong before the business calls it broken -- the value written to
+# config.cde_registry.tolerance_pct, and the CEILING the triage job holds every
+# threshold suggestion under. Tiered by criticality because that is how such a
+# policy is usually first stated, and set here explicitly rather than derived at
+# read time so the register carries the declaration and not a rule for making one.
+# Like the criticality tiers themselves these are one person's starting point for a
+# conversation with the business, not an agreed policy; an element that needs a
+# different figure says so on its own row.
+TOLERANCE_BY_CRITICALITY = {"critical": 0.0, "high": 0.5, "medium": 2.0, "low": 5.0}
+
+
 @dataclass
 class CDE:
     cde_id: str
@@ -83,6 +95,10 @@ class CDE:
     business_term: str | None = None
     expected_signature: str | None = None
     regulatory_basis: str | None = None
+    # The declared tolerance. None here means "take the tier default" and is
+    # resolved in __post_init__, so every registered element carries a figure and
+    # the NULL the DDL permits is reserved for an element nobody has decided on.
+    tolerance_pct: float | None = None
     business_domain: str = "Customer"
     owner_group: str = "dq-stewards-customer"
     status: str = "registered"
@@ -93,6 +109,10 @@ class CDE:
     # make config.rule_registry.cde_id look load-bearing when the column match
     # already did the work, and would leave that join path untested.
     explicit_rule_ids: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.tolerance_pct is None:
+            self.tolerance_pct = TOLERANCE_BY_CRITICALITY[self.criticality]
 
 
 # ---------------------------------------------------------------------------
@@ -139,10 +159,17 @@ CDES: list[CDE] = [
         criticality="high",
         pii=True,
         regulatory_basis="Privacy Act 1988 (Cth) APP 10 — quality of personal information",
-        bindings=[Binding(CTCT_TABLE, "EML_ID")],
+        bindings=[
+            Binding(CTCT_TABLE, "EML_ID"),
+            # The source's own verdict on the address is part of the element, not
+            # an element of its own: a rule names its element and attaches by the
+            # column it reads, so the two rules on EML_STTS_CD need this binding.
+            Binding(CTCT_TABLE, "EML_STTS_CD"),
+        ],
         note=(
-            "The best-covered element in the register: seven active rules, one composite "
-            "and six specific. Registered as high rather than critical because an "
+            "The best-covered element in the register: nine active rules over two "
+            "columns -- one composite and six specific on the address, two on the "
+            "source's own status code. Registered as high rather than critical because an "
             "undeliverable address delays a communication; it does not misidentify a person."),
     ),
     CDE(
@@ -347,17 +374,237 @@ CDES: list[CDE] = [
             "correctly-scoped twin SUBS_BILL_OFFR_NOT_ZERO checks a different column on the "
             "same rows and returns zero."),
     ),
+
+    # ------------------------------------------------------------------
+    # The second ten, registered 2026-09-28 when DQ became CDE-only: every
+    # rule must name its element, so every column a rule watches is now an
+    # element somebody has declared. These are the one person's starting
+    # point that the first ten are, and say so; the business confirms the
+    # tier, the tolerance and whether the element belongs on the list at all.
+    # Two of them exist to carry a shadow rule and so start with no active
+    # rule -- the `no_rule` finding the first ten never exercised.
+    # ------------------------------------------------------------------
+    CDE(
+        cde_id="CDE_CUST_KEY",
+        cde_name="Customer record key",
+        business_term="Customer key",
+        data_class="account_id",
+        definition=(
+            "The surrogate key of the contact record. Every subscription points at one; "
+            "a key that is not unique or that a subscription cannot resolve is a broken "
+            "customer, whatever else is right about the row."),
+        expected_signature=r"^\d{7}$",
+        criticality="critical",
+        pii=False,
+        bindings=[Binding(CTCT_TABLE, "CTCT_KEY")],
+        explicit_rule_ids=["XREF_SUBS_CTCT_ORPHAN"],
+        note=(
+            "Uniqueness by column match; the orphan check is cross-table, carries no "
+            "target_column, and attaches by tag -- it is a rule about whether this key "
+            "resolves, so this is its element."),
+    ),
+    CDE(
+        cde_id="CDE_SUBS_KEY",
+        cde_name="Subscription record key",
+        business_term="Subscription key",
+        data_class="account_id",
+        definition="The surrogate key of the subscription record.",
+        expected_signature=r"^\d{7}$",
+        criticality="critical",
+        pii=False,
+        bindings=[Binding(SUBS_TABLE, "SUBS_KEY")],
+        business_domain="Subscription",
+        owner_group="dq-stewards-subscription",
+    ),
+    CDE(
+        cde_id="CDE_VULNERABLE_CUSTOMER",
+        cde_name="Vulnerable customer indicator",
+        business_term="Special-care status",
+        data_class="other",
+        definition=(
+            "Whether the contact is recorded as needing special care -- financial "
+            "hardship, accessibility, or another vulnerability the business must act "
+            "on. A flag that is never set is a customer never protected."),
+        expected_signature=r"^[YN]$",
+        criticality="critical",
+        pii=True,
+        regulatory_basis="Telecommunications Consumer Protections Code C628 — vulnerable customers and financial hardship",
+        bindings=[Binding(CTCT_TABLE, "SPCL_CARE_STTS")],
+        note=(
+            "The pilot data reads 'N' on all 1000 rows, and the variance rule that "
+            "watches it says so. Whether that is a defaulted field or a population with "
+            "no vulnerable customers is COH-F's open question."),
+    ),
+    CDE(
+        cde_id="CDE_PREF_LANGUAGE",
+        cde_name="Preferred language",
+        business_term="Contact language",
+        data_class="other",
+        definition="The language the contact prefers to be served in.",
+        expected_signature=None,
+        criticality="low",
+        pii=False,
+        bindings=[Binding(CTCT_TABLE, "PREF_LANG_NM")],
+        note=(
+            "Its only rule is in shadow, so this element registers with no active rule "
+            "against it -- the no_rule finding, present in the register on purpose."),
+    ),
+    CDE(
+        cde_id="CDE_SUBS_STATUS",
+        cde_name="Subscription status and reason",
+        business_term="Subscription lifecycle status",
+        data_class="other",
+        definition=(
+            "Whether the subscription is active, cancelled or suspended, and why. The "
+            "reason is only meaningful once the status is something other than active."),
+        expected_signature=None,
+        criticality="high",
+        pii=False,
+        bindings=[
+            Binding(SUBS_TABLE, "SUBS_STTS_KEY"),
+            Binding(
+                SUBS_TABLE, "SUBS_STTS_RSN_KEY",
+                populated_when="the subscription is not active",
+                expected_scope_filter="SUBS_STTS_KEY <> 1",
+                scope_fn=lambda df: df.SUBS_STTS_KEY != "1",
+            ),
+        ],
+        business_domain="Subscription",
+        owner_group="dq-stewards-subscription",
+        note=(
+            "Two bindings, one rule: the reason is checked, the status itself is not. "
+            "The status binding is a no_rule finding until somebody writes one."),
+    ),
+    CDE(
+        cde_id="CDE_SUBS_ACTIVATION",
+        cde_name="Service activation timestamps",
+        business_term="Activation date",
+        data_class="other",
+        definition=(
+            "When the service was first activated and when it was originally provisioned. "
+            "The start of billing and of the contract term."),
+        expected_signature=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
+        criticality="high",
+        pii=False,
+        regulatory_basis="Telecommunications Consumer Protections Code C628 — billing accuracy",
+        bindings=[
+            Binding(SUBS_TABLE, "ORIG_ACTV_TS"),
+            Binding(SUBS_TABLE, "INIT_ACTV_TS"),
+        ],
+        business_domain="Subscription",
+        owner_group="dq-stewards-subscription",
+    ),
+    CDE(
+        cde_id="CDE_RECORD_LIFECYCLE",
+        cde_name="Record lifecycle timestamps",
+        business_term="Record open and close",
+        data_class="other",
+        definition=(
+            "When the subscription record was opened in the warehouse and, once "
+            "cancelled, when it was closed. Agreement with the contact record's own "
+            "timestamps is what says the two tables loaded from the same event."),
+        expected_signature=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
+        criticality="medium",
+        pii=False,
+        bindings=[
+            Binding(SUBS_TABLE, "ECF_OPEN_TS"),
+            Binding(
+                SUBS_TABLE, "ECF_CLSE_TS",
+                # Prose only, no expected_scope_filter: the agreement rule on this
+                # column checks BOTH directions -- closed without a cancel, cancelled
+                # without a close -- and must run unscoped to do so. Declaring a scope
+                # here would accuse a correct rule of a mismatch.
+                populated_when="once the subscription is cancelled",
+            ),
+        ],
+        explicit_rule_ids=["XREF_OPEN_TS_AGREEMENT"],
+        business_domain="Subscription",
+        owner_group="dq-stewards-subscription",
+    ),
+    CDE(
+        cde_id="CDE_NETWORK_TECH",
+        cde_name="Network technology",
+        business_term="Access technology",
+        data_class="other",
+        definition="The network the service runs on -- 4G, 5G, NBN and its variants.",
+        expected_signature=None,
+        criticality="medium",
+        pii=False,
+        bindings=[Binding(SUBS_TABLE, "NTWK_TECH_NM")],
+        business_domain="Subscription",
+        owner_group="dq-stewards-subscription",
+    ),
+    CDE(
+        cde_id="CDE_BILL_OFFER",
+        cde_name="Main billing offer",
+        business_term="Billing offer key",
+        data_class="account_id",
+        definition=(
+            "The offer a postpaid service is billed under. Prepaid services have none, "
+            "for the same reason they have no billing account."),
+        expected_signature=r"^\d{7}$",
+        criticality="high",
+        pii=False,
+        regulatory_basis="Telecommunications Consumer Protections Code C628 — billing accuracy",
+        bindings=[Binding(
+            SUBS_TABLE, "MAIN_BILL_OFFR_KEY",
+            populated_when="postpaid services only",
+            expected_scope_filter="BILL_SUBS_TYPE_CD = 'POSTPAID'",
+            scope_fn=_postpaid,
+        )],
+        business_domain="Billing",
+        owner_group="dq-stewards-billing",
+        note=(
+            "The correctly-scoped counterpart to Primary billing account: its rule "
+            "carries the scope the binding declares, so the coverage view finds no "
+            "mismatch here and one there."),
+    ),
+    CDE(
+        cde_id="CDE_BENEFIT_TEXT",
+        cde_name="Benefit description",
+        business_term="Plan benefit",
+        data_class="other",
+        definition="Free-text description of the benefit attached to the plan, where one exists.",
+        expected_signature=None,
+        criticality="low",
+        pii=False,
+        bindings=[Binding(SUBS_TABLE, "BNFT_TXT")],
+        business_domain="Subscription",
+        owner_group="dq-stewards-subscription",
+        note=(
+            "Registered so that its shadow rule names an element, as every rule must. "
+            "Low: 75% blank is probably an optional field, which is exactly why the rule "
+            "is still in shadow."),
+    ),
 ]
 
 
 def rule_cde_map() -> dict[str, str]:
-    """rule_id -> cde_id for rules a column join cannot reach.
-
-    Column-matched rules are deliberately absent: the view attaches those on
-    (target_table, target_column), and pre-tagging them here would leave that join
-    path unexercised in the fixture.
-    """
+    """rule_id -> cde_id for the rules tagged explicitly: the cross-table ones, whose
+    target_column is NULL by design, and the two email-status rules, whose column is
+    an attribute of the email element rather than an element of its own."""
     return {rid: c.cde_id for c in CDES for rid in c.explicit_rule_ids}
+
+
+def cde_of(rule_id: str, target_table: str, target_column: str | None) -> str:
+    """The element a rule names. Every rule names exactly one, since 2026-09-28:
+    `config.rule_registry.cde_id` is NOT NULL and the check runner takes its
+    worklist from the register, so a rule on no element is not a monitoring rule.
+
+    The explicit tag wins; otherwise the bound column the rule targets. A rule that
+    resolves to neither is refused here, on a laptop, rather than at the INSERT.
+    """
+    explicit = rule_cde_map()
+    if rule_id in explicit:
+        return explicit[rule_id]
+    for c in CDES:
+        for b in bindings_of(c):
+            if b.target_table == target_table and b.target_column == target_column:
+                return c.cde_id
+    raise KeyError(
+        f"{rule_id} targets {target_table}.{target_column}, which no registered element "
+        "binds. Register the element first -- a rule names its element, never the "
+        "other way round.")
 
 
 def bindings_of(cde: CDE) -> list[Binding]:

@@ -42,13 +42,19 @@ DDL_FOR = {
     "results.disposition": "06_results_disposition.sql",
     "config.cde_registry": "09_config_cde_registry.sql",
     "results.cde_profile": "10_results_cde_profile.sql",
+    "results.threshold_proposal": "13_results_threshold.sql",
+    "results.threshold_review": "13_results_threshold.sql",
 }
 
 
-def ddl_columns(fname: str) -> set[str]:
+def ddl_columns(fname: str, table: str | None = None) -> set[str]:
+    text = (DDL_DIR / fname).read_text()
+    if table:
+        # 13_results_threshold.sql declares two tables; pick the one asked for.
+        text = text[text.index(f"CREATE TABLE IF NOT EXISTS {{catalog}}.{table} ("):]
     body = re.search(
         r"CREATE TABLE IF NOT EXISTS [^(]+\((.*?)\n\)\s*\nUSING DELTA",
-        (DDL_DIR / fname).read_text(), re.S).group(1)
+        text, re.S).group(1)
     cols = set()
     for line in body.splitlines():
         line = line.strip()
@@ -64,7 +70,7 @@ for tbl, fname in DDL_FOR.items():
     if tbl not in T:
         findings.append(f"schema_drift: {tbl} has DDL but no fixture output")
         continue
-    declared, produced = ddl_columns(fname), set(T[tbl].columns)
+    declared, produced = ddl_columns(fname, tbl), set(T[tbl].columns)
     for c in sorted(produced - declared):
         findings.append(f"schema_drift: {tbl}.{c} is written by the generator but "
                         f"not declared in {fname} -- the INSERT would fail on Databricks")
@@ -74,8 +80,9 @@ for tbl, fname in DDL_FOR.items():
 
 # --- 4. The notebook that will really write results.cohort ------------------
 # fixtures/ stands in for the triage job locally. The job itself is
-# notebooks/03_group_and_advise.ipynb, and it has never been executed -- so the only
-# thing that can check its write against the DDL is a reader, or this.
+# notebooks/03_group_and_advise.ipynb, which HAS now run on workspace.dq_triage -- but a
+# laptop still cannot run it (Spark, a gateway client, a warehouse), so this check stays
+# the only thing that can diff its write cell against the DDL without one.
 NOTEBOOK = Path(__file__).parent.parent / "notebooks" / "03_group_and_advise.ipynb"
 if NOTEBOOK.exists():
     import json as _json
@@ -175,6 +182,13 @@ d = disp[disp.decision.isin(["deferred", "rejected"])]
 assert d.reason.notna().all() and (d.reason.str.strip() != "").all(), "deferral/rejection without reason"
 assert disp[disp.decision == "deferred"].review_by_date.notna().all(), "deferral without review_by_date"
 
+# A check cannot fail more rows than it read. The back-projection once jittered
+# the variance rules to 1072 of 1000 -- a score below zero on a critical element.
+over = runs[runs.violation_count > runs.rows_scanned]
+for _, r in over.iterrows():
+    findings.append(f"violations_exceed_scanned: {r.rule_id} {r.run_ts} "
+                    f"{r.violation_count} of {r.rows_scanned}")
+
 # Every cohort member must point at a real check_run row that actually breached.
 res = runs.set_index("result_id")
 for _, c in coh.iterrows():
@@ -228,6 +242,44 @@ for _, c in coh.iterrows():
         assert rid not in list(c.member_rule_ids), \
             f"{c.cohort_id} lists {rid} as both a member and not covered"
 
+# --- Threshold proposals and reviews -----------------------------------------
+# The CHECK constraints in 13_results_threshold.sql, as Python, plus the one thing
+# that is a join: the current limit a proposal quotes must be one the rule carried.
+prop, rev = T["results.threshold_proposal"], T["results.threshold_review"]
+BASES = ("element_tolerance", "run_history", "both", "unchanged")
+assert prop.proposal_id.is_unique, "proposal_id not unique"
+assert prop.basis.isin(BASES).all(), "unknown threshold basis"
+assert prop.proposed_threshold_pct.between(0.0, 100.0).all(), "proposal out of range"
+assert ((prop.basis == "unchanged") ==
+        (prop.proposed_threshold_pct == prop.current_threshold_pct)).all(), \
+    "a proposal says unchanged and is not, or the reverse"
+capped = prop[prop.tolerance_pct.notna()]
+assert (capped.proposed_threshold_pct <= capped.tolerance_pct).all(), \
+    "a proposal exceeds the tolerance its element declares -- the ceiling is the point"
+_reg_all = T["config.rule_registry"]
+for _, p in prop.iterrows():
+    carried = set(_reg_all[_reg_all.rule_id == p.rule_id].fail_threshold_pct.astype(float))
+    assert float(p.current_threshold_pct) in carried, \
+        f"{p.rule_id} proposal quotes a current limit no version of the rule carried"
+    assert str(p.rationale).strip() and str(p.reviewer).strip(), f"{p.rule_id}: blank advice"
+    assert p.cde_id in set(cde.cde_id), f"{p.rule_id} proposal names unknown element {p.cde_id}"
+assert rev.review_id.is_unique, "review_id not unique"
+assert rev.proposal_id.isin(prop.proposal_id).all(), "review of an unknown proposal"
+assert rev.decision.isin(["adopted", "rejected", "deferred"]).all(), "unknown review decision"
+need_reason = rev[rev.decision != "adopted"]
+assert need_reason.reason.notna().all() and (need_reason.reason.str.strip() != "").all(), \
+    "rejection or deferral without a reason"
+assert rev[rev.decision == "deferred"].review_by_date.notna().all(), "deferral without a date"
+assert rev[rev.decision == "adopted"].adopted_rule_version.notna().all(), \
+    "adoption that names no rule version"
+assert (rev.actor_source == "obo_user").all() and rev.actor_identity.notna().all(), \
+    "a threshold review not from a platform identity"
+# The fixture must hold at least one proposal that moves a limit and at least one
+# left open, or the page and the write-path test have nothing to show.
+assert (prop.basis != "unchanged").any(), "no proposal moves a limit"
+_cur_view = T["results.v_threshold_proposal_current"]
+assert (_cur_view.review_state == "open").any(), "no open proposal for the app to decide"
+
 # --- CDE register, profile and coverage -------------------------------------
 # The ordering claim, checked rather than asserted in prose: an element is
 # registered before anything profiles it, and only a registered element is
@@ -257,6 +309,26 @@ for _, r in prof[prof.pii].iterrows():
     for sig in r.top_signatures:
         assert sig["signature"] == "<rare>" or sig["row_count"] >= 5, \
             f"{r.cde_id}/{r.target_column} exposes a signature seen on {sig['row_count']} row(s)"
+
+# A RULE NAMES ITS ELEMENT, and where it has a column that column is one of the
+# element's bindings. cde_id is NOT NULL in the DDL; this is the half a NOT NULL
+# cannot say, and the reason every active rule attaches to something.
+_cur_cde = cde.sort_values("cde_version").groupby("cde_id").tail(1)
+_bound = {(c.cde_id, b["target_table"], b["target_column"])
+          for _, c in _cur_cde.iterrows() if c.status == "registered"
+          for b in c.bindings if b["binding_status"] == "bound"}
+_cur_rules = T["config.rule_registry"].sort_values("rule_version").groupby("rule_id").tail(1)
+for _, r in _cur_rules[_cur_rules.status != "retired"].iterrows():
+    assert pd.notna(r.cde_id), f"{r.rule_id} names no element"
+    assert r.cde_id in set(_cur_cde.cde_id), f"{r.rule_id} names unknown element {r.cde_id}"
+    if pd.notna(r.target_column):
+        assert (r.cde_id, r.target_table, r.target_column) in _bound, \
+            f"{r.rule_id} targets {r.target_table}.{r.target_column}, which is not a " \
+            f"binding of {r.cde_id} -- the rule would attach to nothing"
+_attached_ids = {rid for ids in cov.rule_ids for rid in ids}
+_active = set(_cur_rules[_cur_rules.status == "active"].rule_id)
+assert _active <= _attached_ids, \
+    f"active rules attached to no binding: {sorted(_active - _attached_ids)}"
 
 # Coverage is derived, so it must not invent or lose a binding.
 bound_count = sum(1 for _, c in cde.iterrows() if c.status == "registered"

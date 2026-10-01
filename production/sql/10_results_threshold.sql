@@ -1,0 +1,134 @@
+-- DEPLOY STEP 10 of 14 — copied from sql/ddl/13_results_threshold.sql
+-- by tools/build_production.py. Placeholders are NOT substituted.
+--
+-- threshold_proposal and threshold_review — the detection limit, advised and decided
+--
+-- Substitute {catalog} before execution. Runs after 01 and 09, whose tables these
+-- reference by id, and before 14_views_threshold.sql.
+--
+-- WHAT THIS IS, AND WHAT IT IS NOT. A rule's fail_threshold_pct is the line between
+-- normal variation and a breach, and until now it was set once, by hand, and never
+-- revisited. threshold_proposal is a job's advice on where that line should be, one
+-- row per rule per pass, made from the two things a limit can rest on: the tolerance
+-- the CDE register declares on the element (organisational — what the business will
+-- accept) and where the violation rate has sat across the run history (empirical —
+-- where the data is). It is DETECTION advice, about the rule, and has nothing to do
+-- with triage: no cohort, no hypothesis, no disposition. The triage job neither reads
+-- nor writes it.
+--
+-- THE CEILING IS A ROW-LEVEL CONSTRAINT HERE. tolerance_pct is copied onto the row at
+-- proposal time, so "never above the element's tolerance" is a CHECK on this table,
+-- not a join. A model asked to advise on a limit can answer "whatever makes the check
+-- pass"; the tolerance is what stops that, and this is where it is enforced last —
+-- after the job's own validator and before anything reads the row.
+--
+-- current_threshold_pct IS COPIED FROM THE REGISTRY, NEVER FROM THE MODEL. The "from"
+-- half of a proposal is a fact. rule_version pins which version was advised on, so a
+-- proposal made against v2 is not mistaken for advice about v3.
+--
+-- threshold_review IS THE DECISION, AND IT IS THE APP'S THIRD WRITE. A reviewer
+-- adopts, rejects or defers a proposal. Adopting also appends a rule_version to
+-- config.rule_registry carrying the proposed limit — the same table and the same
+-- append the app already performs to promote a shadow rule — and adopted_rule_version
+-- records which. Rejections and deferrals have nowhere else to live: without this
+-- table a rejected proposal is indistinguishable from one nobody looked at and comes
+-- back every pass. 07_grants.sql names it as the third MODIFY grant and says so.
+-- Append-only, like the register; a change of mind is a new row.
+
+CREATE TABLE IF NOT EXISTS {catalog}.results.threshold_proposal (
+  proposal_id            STRING    NOT NULL COMMENT 'uuid, unique per proposal row',
+  proposal_run_id        STRING    NOT NULL COMMENT 'groups every proposal produced by one pass of the threshold job',
+  proposed_ts            TIMESTAMP NOT NULL COMMENT 'when the pass ran',
+  rule_id                STRING    NOT NULL COMMENT 'the rule advised on',
+  rule_version           INT       NOT NULL COMMENT 'the version advised on. A proposal against v2 is not advice about v3',
+  cde_id                 STRING    NOT NULL COMMENT 'the element the rule monitors, from the registry -- the organisational basis comes from here',
+  target_table           STRING    NOT NULL COMMENT 'denormalised from the registry',
+  target_column          STRING             COMMENT 'denormalised from the registry; NULL for a cross-table rule',
+  current_threshold_pct  DOUBLE    NOT NULL COMMENT 'fail_threshold_pct in force when the proposal was made. Copied from the registry, never from the model',
+  proposed_threshold_pct DOUBLE    NOT NULL COMMENT 'the limit the model would set',
+  tolerance_pct          DOUBLE             COMMENT 'the tolerance the element declared at proposal time -- the ceiling. NULL where none was declared, in which case the expected advice is unchanged',
+  basis                  STRING    NOT NULL COMMENT 'element_tolerance | run_history | both | unchanged. unchanged means proposed equals current, with the reason stated',
+  rationale              STRING    NOT NULL COMMENT 'the figures the proposal rests on, in prose, for the reviewer',
+  reviewer               STRING    NOT NULL COMMENT 'the team asked to review it -- a team, not a person. Normally the owner_group of the rule',
+  runs_observed          INT                COMMENT 'runs with a pass or breach verdict in the history the model was shown',
+  pct_min                DOUBLE             COMMENT 'violation_pct across those runs',
+  pct_median             DOUBLE             COMMENT 'violation_pct across those runs',
+  pct_p90                DOUBLE             COMMENT 'violation_pct across those runs',
+  pct_max                DOUBLE             COMMENT 'violation_pct across those runs',
+  runs_breaching         INT                COMMENT 'of runs_observed, how many breached the current limit',
+  latest_violation_pct   DOUBLE             COMMENT 'violation_pct on the latest run',
+  model_endpoint         STRING             COMMENT 'which serving endpoint produced this',
+  model_input_payload    STRING             COMMENT 'JSON of exactly what the endpoint was shown -- the brief and the provenance, retained for audit',
+  job_run_id             STRING             COMMENT 'the Lakeflow run that produced this row'
+)
+USING DELTA
+CLUSTER BY (rule_id, proposed_ts)
+COMMENT 'Advice from the threshold job on the fail_threshold_pct of each rule, one row per rule per pass. Detection advice, about the rule, made against the tolerance the element declares and the run history. Never applied by anything here: a limit changes only when a person adopts a proposal and a new rule_version is appended. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE {catalog}.results.threshold_proposal
+  ADD CONSTRAINT threshold_proposal_range
+  CHECK (proposed_threshold_pct >= 0.0 AND proposed_threshold_pct <= 100.0);
+
+ALTER TABLE {catalog}.results.threshold_proposal
+  ADD CONSTRAINT threshold_proposal_basis_enum
+  CHECK (basis IN ('element_tolerance', 'run_history', 'both', 'unchanged'));
+
+-- `unchanged` means exactly that the numbers are equal, so a reader can trust the
+-- word without comparing them.
+ALTER TABLE {catalog}.results.threshold_proposal
+  ADD CONSTRAINT threshold_proposal_unchanged_means_unchanged
+  CHECK ((basis = 'unchanged') = (proposed_threshold_pct = current_threshold_pct));
+
+-- THE CEILING. A rule may be stricter than its element, never looser.
+ALTER TABLE {catalog}.results.threshold_proposal
+  ADD CONSTRAINT threshold_proposal_under_tolerance
+  CHECK (tolerance_pct IS NULL OR proposed_threshold_pct <= tolerance_pct);
+
+
+CREATE TABLE IF NOT EXISTS {catalog}.results.threshold_review (
+  review_id            STRING    NOT NULL COMMENT 'uuid, unique per review row',
+  proposal_id          STRING    NOT NULL COMMENT 'the proposal decided',
+  event_ts             TIMESTAMP NOT NULL COMMENT 'when the reviewer decided',
+  ingest_ts            TIMESTAMP NOT NULL COMMENT 'when the row was written',
+  actor_identity       STRING             COMMENT 'the acting principal -- the OBO user, never a typed-in name',
+  actor_display_name   STRING             COMMENT 'human-readable name for rendering; identity above is the one that counts',
+  actor_source         STRING    NOT NULL COMMENT 'obo_user | service_principal. How we know who acted',
+  decision             STRING    NOT NULL COMMENT 'adopted | rejected | deferred',
+  reason               STRING             COMMENT 'why. Required for rejected and deferred',
+  review_by_date       DATE               COMMENT 'deferred only: when the proposal resurfaces. Required when deferred',
+  adopted_rule_version INT                COMMENT 'adopted only: the rule_version appended to config.rule_registry carrying the proposed limit. Required when adopted',
+  app_version          STRING             COMMENT 'which build of the app wrote this'
+)
+USING DELTA
+CLUSTER BY (proposal_id, event_ts)
+COMMENT 'The decision of a reviewer on a threshold proposal. Adopting also appends a rule_version to config.rule_registry; rejecting and deferring are recorded here and nowhere else. The third write of the app. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE {catalog}.results.threshold_review
+  ADD CONSTRAINT threshold_review_decision_enum
+  CHECK (decision IN ('adopted', 'rejected', 'deferred'));
+
+ALTER TABLE {catalog}.results.threshold_review
+  ADD CONSTRAINT threshold_review_actor_source_enum
+  CHECK (actor_source IN ('obo_user', 'service_principal'));
+
+-- A rejection or deferral without a reason is not a decision, it is silence.
+ALTER TABLE {catalog}.results.threshold_review
+  ADD CONSTRAINT threshold_review_reason_required
+  CHECK (decision = 'adopted' OR (reason IS NOT NULL AND length(trim(reason)) > 0));
+
+-- A deferral without a resurface date is a disappearance.
+ALTER TABLE {catalog}.results.threshold_review
+  ADD CONSTRAINT threshold_review_deferral_has_date
+  CHECK (decision <> 'deferred' OR review_by_date IS NOT NULL);
+
+-- An adoption names the rule_version it created, or it did not happen.
+ALTER TABLE {catalog}.results.threshold_review
+  ADD CONSTRAINT threshold_review_adoption_names_version
+  CHECK (decision <> 'adopted' OR adopted_rule_version IS NOT NULL);
+
+-- Every review is a person's, and the platform vouches for who.
+ALTER TABLE {catalog}.results.threshold_review
+  ADD CONSTRAINT threshold_review_has_identity
+  CHECK (actor_identity IS NOT NULL AND actor_source = 'obo_user');

@@ -7,38 +7,50 @@
 -- =====================================================================
 
 -- 1. Row counts. Expected: 35, 6, 10.
-SELECT 'workspace.dq_triage.dq_config_rule_registry' AS t, count(*) AS actual, 35 AS expected FROM workspace.dq_triage.dq_config_rule_registry;
+SELECT 'workspace.dq_triage.dq_config_rule_registry' AS t, count(*) AS actual, 48 AS expected FROM workspace.dq_triage.dq_config_rule_registry;
 SELECT 'workspace.dq_triage.dq_config_playbook' AS t, count(*) AS actual, 6 AS expected FROM workspace.dq_triage.dq_config_playbook;
-SELECT 'workspace.dq_triage.dq_config_cde_registry' AS t, count(*) AS actual, 10 AS expected FROM workspace.dq_triage.dq_config_cde_registry;
+SELECT 'workspace.dq_triage.dq_config_cde_registry' AS t, count(*) AS actual, 20 AS expected FROM workspace.dq_triage.dq_config_cde_registry;
 
 -- 2. rule_expr round-trip. EXPECTED: zero rows.
 --    Any row here is an escaping failure — do not proceed to the check runner.
 WITH expected(rule_id, rule_version, len) AS (VALUES
   ('CTCT_EML_FMT', 1, 72),
+  ('CTCT_EML_FMT', 2, 55),
   ('CTCT_EML_NO_AT', 1, 21),
   ('CTCT_EML_WHITESPACE', 1, 18),
   ('CTCT_EML_DOMAIN_TLD', 1, 64),
   ('CTCT_EML_DOUBLE_DOT', 1, 18),
   ('CTCT_EML_TRAILING_DOT', 1, 16),
   ('CTCT_EML_NOT_NULL', 1, 35),
+  ('CTCT_EML_NOT_NULL', 2, 45),
   ('CTCT_EML_STTS_NOT_NULL', 1, 45),
+  ('CTCT_EML_STTS_NOT_NULL', 2, 50),
   ('CTCT_EML_STTS_CONSISTENT', 1, 94),
+  ('CTCT_EML_STTS_CONSISTENT', 2, 79),
   ('CTCT_MOBL_NOT_NULL', 1, 37),
+  ('CTCT_MOBL_NOT_NULL', 2, 46),
   ('CTCT_MOBL_FMT', 1, 32),
+  ('CTCT_MOBL_FMT', 2, 54),
   ('CTCT_PHN_FMT', 1, 30),
   ('CTCT_KEY_UNIQUE', 1, 41),
   ('CTCT_BRTH_PARSEABLE', 1, 56),
   ('CTCT_BRTH_PLAUSIBLE', 1, 44),
   ('CTCT_IDNT_DOC_NOT_NULL', 1, 49),
+  ('CTCT_IDNT_DOC_NOT_NULL', 2, 52),
   ('CTCT_SPCL_CARE_VARIANCE', 1, 57),
   ('CTCT_PREF_LANG_VARIANCE', 1, 55),
   ('SUBS_MSISDN_SENTINEL', 1, 99),
+  ('SUBS_MSISDN_SENTINEL', 2, 60),
   ('SUBS_MSISDN_FMT', 1, 43),
   ('SUBS_MSISDN_FMT', 2, 43),
+  ('SUBS_MSISDN_FMT', 3, 65),
   ('SUBS_MSISDN_UNIQUE', 1, 51),
   ('SUBS_IMEI_NOT_NULL', 1, 37),
+  ('SUBS_IMEI_NOT_NULL', 2, 46),
   ('SUBS_SIM_NOT_NULL', 1, 45),
+  ('SUBS_SIM_NOT_NULL', 2, 50),
   ('SUBS_NTWK_NOT_NULL', 1, 47),
+  ('SUBS_NTWK_NOT_NULL', 2, 51),
   ('SUBS_PRIM_ACCT_NOT_ZERO', 1, 17),
   ('SUBS_BILL_OFFR_NOT_ZERO', 1, 22),
   ('SUBS_ACTV_TS_CONSISTENT', 1, 28),
@@ -46,6 +58,7 @@ WITH expected(rule_id, rule_version, len) AS (VALUES
   ('SUBS_KEY_UNIQUE', 1, 41),
   ('SUBS_CLSE_TS_CONSISTENT', 1, 48),
   ('SUBS_BNFT_TXT_NOT_NULL', 1, 39),
+  ('SUBS_BNFT_TXT_NOT_NULL', 2, 47),
   ('XREF_SUBS_CTCT_ORPHAN', 1, 18),
   ('XREF_NAME_AGREEMENT', 1, 53),
   ('XREF_OPEN_TS_AGREEMENT', 1, 30)

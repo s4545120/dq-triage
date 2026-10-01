@@ -4,14 +4,17 @@ Local, against the generated fixture (the default — no workspace needed):
 
     ../.venv/bin/streamlit run app.py
 
-Deployed as a Databricks App, still on the fixture — `app.yaml` keeps
-DQ_APP_DATA_SOURCE=local and the app carries its own copy of the dataset at
-dq_app/fixture_data/, because only this directory ships. No catalog, no warehouse:
+Deployed as the Databricks App `dq-triage`, reading Unity Catalog — `app.yaml` sets
+DQ_APP_DATA_SOURCE=databricks against workspace.dq_triage and takes the warehouse id
+from the `sql-warehouse` resource attached to the app rather than discovering it:
 
     databricks sync . /Workspace/Users/<you>/dq-app-src
     databricks apps deploy dq-triage --source-code-path /Workspace/Users/<you>/dq-app-src
 
-Workspace mode exists and is wired, but has never been run. See README.md, Deploy.
+Set the source back to `local` and comment out the rest of that block for the
+self-contained demo. The app then reads its own copy of the dataset at
+dq_app/fixture_data/, because only this directory ships — nothing else can reach the
+container. See README.md, Deploy.
 
 Built to `dq-triage-agent-spec.md` v1.0. The retired v0.1 execution spec is gone from
 this app along with everything it implied: no executor, no mutable incident state, no
@@ -26,7 +29,8 @@ to `PAGES` therefore does not put it in the sidebar; `SIDEBAR` does.
 
 The `Data elements` page was removed on 2026-09-16. The CDE model behind it was not:
 `v_cde_coverage` still owns the scorecard's denominator. What went is the browsing
-surface, replaced by the scope panel and the issue board on the scorecard.
+surface, replaced by the scorecard's element list and the drawer it opens. (The scope
+panel that first replaced it went on 2026-09-22 — the element list is the same list.)
 
 The `Register` page was removed on 2026-09-17. The register itself is untouched —
 `results.disposition` is still the append-only audit artefact, still the app's primary
@@ -57,6 +61,8 @@ PAGES = {
                       icon=":material/inbox:"),
     "rules": st.Page("dq_app/ui/pages/rule_registry.py", title="Rules",
                      icon=":material/rule:"),
+    "thresholds": st.Page("dq_app/ui/pages/thresholds.py", title="Thresholds",
+                          icon=":material/tune:"),
     # Drill-downs. Registered so `st.switch_page` can reach them, deliberately absent
     # from SIDEBAR below — each is opened from the page above it, never from a click
     # in the nav, and opening one cold shows an empty selector.
@@ -72,7 +78,10 @@ SIDEBAR = {
     # the Register, and with that page gone a group label reading "Evidence" over a
     # single rule-authoring link described nothing. What a rule IS is part of what is
     # being watched, which is what Monitor already means here.
-    "Monitor": ["scorecard", "tables", "rules"],
+    # `Thresholds` is under Monitor with `Rules` because a limit is a property of
+    # a rule and of what is being watched -- detection, not triage. The decisions
+    # made there are about rules, never about problems.
+    "Monitor": ["scorecard", "tables", "rules", "thresholds"],
     "Work": ["triage"],
 }
 

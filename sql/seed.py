@@ -87,7 +87,8 @@ def binding_lit(b, rewrite) -> str:
 
 
 RESULTS = ["results.check_run", "results.cde_profile",
-           "results.cohort", "results.disposition"]
+           "results.cohort", "results.disposition",
+           "results.threshold_proposal", "results.threshold_review"]
 
 # Struct field order must match the column declaration in ddl/, not the dict.
 STRUCT_FIELDS = {
@@ -115,6 +116,11 @@ def main() -> int:
     ap.add_argument("--schema", default="udp_brnz")
     ap.add_argument("--prefix", default="dq_")
     ap.add_argument("--src-prefix", default="dq_mock_")
+    ap.add_argument("--fn-prefix", default=None,
+                    help="Replaces the `dq.fn.` prefix on the shared predicate helpers "
+                         "in rule_expr. Default <catalog>.<schema>.<prefix>fn_, the "
+                         "layout render.py produces. Pass <catalog>.fn. to keep the "
+                         "two-schema layout sql/ddl/ declares.")
     a = ap.parse_args()
 
     q = f"{a.catalog}.{a.schema}."
@@ -122,6 +128,13 @@ def main() -> int:
         "prod.customer.ctct_c": f"{q}{a.src_prefix}ctct_c",
         "prod.customer.subs_c": f"{q}{a.src_prefix}subs_c",
     }
+    # 13 rule_expr values call a shared predicate helper from 12_functions.sql, and
+    # the helper's qualified name differs between the two layouts: dq.fn.is_blank_v1
+    # where sql/ddl/ gives it a schema, dq_triage.dq_fn_is_blank_v1 once render.py
+    # folds the split into a prefix. The fixture stores the first -- a real name the
+    # app can print, not a placeholder -- and this rewrites it, which is exactly what
+    # already happens to prod.customer.* two lines up.
+    fn_prefix = a.fn_prefix or f"{q}{a.prefix}fn_"
 
     OUT.mkdir(exist_ok=True)
     parts = [
@@ -155,6 +168,18 @@ def main() -> int:
         if "target_table" in df.columns:
             df = df.copy()
             df["target_table"] = df["target_table"].map(lambda x: rewrite.get(x, x))
+
+        if "rule_expr" in df.columns:
+            df = df.copy()
+            df["rule_expr"] = df["rule_expr"].str.replace("dq.fn.", fn_prefix, regex=False)
+
+        # join_sql carries table names inside a FROM body, so it takes the SAME source
+        # rewrite target_table does. Miss this and a cross-table rule is seeded
+        # pointing at prod.customer.*, which exists nowhere.
+        if "join_sql" in df.columns:
+            df = df.copy()
+            for src, dst in rewrite.items():
+                df["join_sql"] = df["join_sql"].str.replace(src, dst, regex=False)
 
         parts.append(f"\n-- ---------- {tgt}  ({len(df)} rows) ----------")
         parts.append(f"INSERT INTO {tgt}\n  ({', '.join(df.columns)})\nVALUES")
@@ -201,6 +226,9 @@ def main() -> int:
         "--   cohort        hypotheses and recommendations WRITTEN BY HAND.",
         "--                 model_input_payload is a stub. No endpoint ran.",
         "--   disposition   invented event chains and invented identities.",
+        "--   threshold_proposal / threshold_review",
+        "--                 hand-authored advice and two invented decisions.",
+        "--                 No threshold job has run. Notebook 06 is what would.",
         "--",
         "-- No cohort references the final run, so seeding the 39 prior runs",
         "-- leaves every member_result_ids link intact and your real run standing",

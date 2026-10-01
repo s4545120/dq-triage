@@ -23,6 +23,7 @@ PAGES = [
     "dq_app/ui/pages/triage.py",
     "dq_app/ui/pages/triage_detail.py",
     "dq_app/ui/pages/rule_registry.py",
+    "dq_app/ui/pages/thresholds.py",
 ]
 
 SCORECARD = "dq_app/ui/pages/scorecard.py"
@@ -276,10 +277,11 @@ def test_the_check_panel_names_the_element_a_cross_table_rule_attaches_to():
     assert "Customer name" in shown, shown
 
 
-def test_the_check_panel_says_when_a_check_is_not_scored():
-    """Two denominators live on the scorecard and the panel is where the difference
-    becomes concrete. `SUBS_IMEI_NOT_NULL` is attached to an element, so it is
-    scored; a check on an unregistered column must say plainly that it is not."""
+def test_every_failing_check_is_on_a_registered_element():
+    """Since 2026-09-28 a rule names its element, so the second denominator the
+    scorecard used to carry -- checks on no registered column, not scored -- is
+    empty by construction. The fixture must contain no such check, and the panel
+    must not tell a scored check it is not."""
     import pandas as pd
 
     cov_path = APP_DIR.parent / "fixtures" / "out" / "results.v_cde_coverage.parquet"
@@ -292,13 +294,11 @@ def test_the_check_panel_says_when_a_check_is_not_scored():
     runs = pd.read_parquet(runs_path)
     latest = runs.loc[runs["run_ts"].idxmax(), "run_id"]
     failing = set(runs[(runs["run_id"] == latest) & (runs["status"] == "breach")]["rule_id"])
+    assert failing <= attached, sorted(failing - attached)
 
-    unscored = sorted(failing - attached)
-    assert unscored, "fixture no longer has a failing check outside the register"
-
-    at = _run(SCORECARD, _check_pick=unscored[0])
+    at = _run(SCORECARD, _check_pick=sorted(failing)[0])
     shown = " ".join(str(c.value) for c in at.caption)
-    assert "does not move the quality figure" in shown
+    assert "does not move the quality figure" not in shown
 
 
 def test_the_scope_button_is_gone_because_the_element_list_replaced_it():
@@ -310,116 +310,268 @@ def test_the_scope_button_is_gone_because_the_element_list_replaced_it():
     assert "Scored on" not in _body(at)
 
 
-def test_the_element_band_lists_every_element_with_its_kind_and_score():
-    """The band is an inventory, not an issue queue. Every registered element is on
-    it — a covered element is as much a fact about the register as a gap — and each
-    carries the two things the band exists to report: what kind of element it is and
-    how the data behind it scores."""
-    at = _run(SCORECARD)
-    rows = [str(m.value) for m in at.markdown
-            if 'class="dq-rowgrid' in str(m.value) and "head" not in str(m.value)[:60]]
-    # Outside the problem link: since 2026-09-22 a problem's title names its element,
-    # so a failing-check row that links to COH-A mentions the element too.
-    band = [r for r in rows if "Customer email address" in r.split('class="link"')[0]]
-    assert band, "the element band does not list Customer email address"
-    assert "Email address" in band[0], "the element's kind is not on its row"
-    assert "%" in band[0], "the element's score is not on its row"
+def _rows(at, of: str) -> list[str]:
+    """The markup of every clickable row in one of the scorecard's two lists — `of`
+    is "elements" or "checks". Both are drawn by the same helper, so they are told
+    apart by what only one of them prints: a check row counts its failing rows."""
+    rows = [str(m.value) for m in at.markdown if '<span class="dq-el' in str(m.value)]
+    is_check = lambda r: "failing rows" in r  # noqa: E731
+    return [r for r in rows if is_check(r) == (of == "checks")]
 
-    body = _body(at)
-    assert "10 registered elements" in body, "the band is not listing every element"
-    # Covered elements are listed too, so the band cannot be read as a gap list.
+
+def test_the_element_list_shows_five_by_default_and_every_element_on_request():
+    """The list is an inventory sorted so its top is where to look first. Five rows
+    by default; all twenty one click away — a covered element is as much a fact
+    about the register as a gap, so `All` lists every one of them with its score."""
+    at = _run(SCORECARD)
+    assert len(_rows(at, "elements")) == 5
+
+    at = _run(SCORECARD, _elist_show="all")
+    rows = _rows(at, "elements")
+    assert len(rows) == 20, len(rows)
+    email = [r for r in rows if "Customer email address" in r]
+    assert email and "%" in email[0], "the element's score is not on its row"
     assert any("Mobile service number (MSISDN)" in r for r in rows)
+
+
+def test_the_element_counts_add_up_to_the_register():
+    """Below, meeting and unassessed are one partition of the register. If the three
+    ever stop summing to the number of elements, a row is being counted twice or
+    dropped, and the line is the only place a reader would see it."""
+    body = _body(_run(SCORECARD))
+    counts = re.search(r"(\d+) below target · (\d+) meeting target · (\d+) unassessed", body)
+    assert counts, "the list no longer states how the register splits"
+    assert sum(int(n) for n in counts.groups()) == 20
+
+
+def test_the_largest_shortfall_is_first_and_picked_by_default():
+    """Largest target gap first, and the page opens on it. Vulnerable customer
+    indicator scores 0% against a zero-tolerance target, which no other element in
+    the fixture comes near."""
+    at = _run(SCORECARD)
+    first = _rows(at, "elements")[0]
+    assert "Vulnerable customer indicator" in first
+    assert "below target" in first
+    head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
+    assert head and "Vulnerable customer indicator" in head[0]
 
 
 def test_the_element_band_recommends_nothing():
     """A "What to do" column stood here until 2026-09-17 — "write a rule", "fix the
     rule's scope", "see COH b42685aa". Recommending the fix for a gap in the register
     is out of scope for this app; the band reports what the register holds."""
-    at = _run(SCORECARD)
+    at = _run(SCORECARD, _elist_show="all")
     body = _body(at)
     for advice in ["What to do", "write a rule", "fix the rule's scope",
                    "add a format rule", "Needs work"]:
         assert advice not in body, advice
 
 
-def test_an_unvalidated_element_shows_its_coverage_beside_its_score():
+def test_an_unvalidated_element_is_not_assessed_against_its_target():
     """The quietest failure on the page. `Identity document number` is registered
     critical, has one check, and that check passes on every row — so it scores 100%
-    while nothing examines what the column contains. The score alone would read as
-    the healthiest element in the register, which is why the coverage column sits
-    next to it rather than instead of it."""
-    at = _run(SCORECARD)
-    rows = [str(m.value) for m in at.markdown
-            if 'class="dq-rowgrid' in str(m.value)]
-    row = [r for r in rows if "Identity document number" in r]
-    assert row, "the identity document element is not on the band"
-    assert "Not validated" in row[0], row[0]
+    while nothing examines what the column contains. "Meets target" beside that
+    would be the page vouching for data nobody has looked at; the row says what the
+    register says instead."""
+    at = _run(SCORECARD, _elist_show="all")
+    row = [r for r in _rows(at, "elements") if "Identity document number" in r]
+    assert row, "the identity document element is not on the list"
+    assert "Not assessed · Not validated" in row[0], row[0]
+    assert "Meets target" not in row[0]
 
 
-def _fail_rows(at) -> list[str]:
-    """The failing-checks table's rows — every clickable row that is not an element
-    in the list beside it."""
-    return [str(m.value) for m in at.markdown
-            if 'class="dq-rowgrid' in str(m.value) and "dq-eldot" not in str(m.value)
-            and "Show the checks" not in str(m.value) and "head" not in str(m.value)[:60]]
-
-
-def test_picking_an_element_narrows_the_failing_checks_to_it():
-    """The element list is the filter. Picking Customer date of birth must drop the
-    checks on every other element and say what it is showing — the cut the
-    dimension grouping cannot make, because `format` spans an email, a mobile number
-    and a date of birth."""
+def test_picking_an_element_lists_its_checks_and_no_other_element_s():
+    """The element list is the filter. Picking Customer date of birth must show the
+    checks on it — passing ones too, since the score is all of them — and none of
+    the email checks, and say which element it is showing."""
     EMAIL = "Contact email contains an @"
     DOB = "Date of birth parses as a real ISO date"
 
-    unfiltered = _body(_run(SCORECARD))
-    assert EMAIL in unfiltered and DOB in unfiltered, \
-        "the fixture no longer fails both an email and a DOB check — rewrite this"
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
+    assert EMAIL in " ".join(_rows(at, "checks")), \
+        "the fixture no longer fails that email check — rewrite this"
 
     at = _run(SCORECARD, _elem_scope="CDE_CUST_DOB")
-    rows = " ".join(_fail_rows(at))
+    rows = " ".join(_rows(at, "checks"))
     assert DOB in rows, "the DOB check is not listed under the DOB element"
     assert EMAIL not in rows, "an email check survived picking the DOB element"
     head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
     assert head and "Customer date of birth" in head[0], "the pane does not say what it shows"
 
 
-def test_checks_on_no_registered_element_have_their_own_entry_rather_than_hiding():
-    """14 of the 34 rules in the fixture are attached to no registered element. A
-    list shaped by the register that could only ever narrow to it would hide them
-    behind a control that does not admit to hiding anything."""
+def test_the_check_breakdown_lists_passing_checks_with_their_own_target():
+    """An element's score is every check on it, so a breakdown of only the failures
+    cannot be added back up to the figure above it. Customer contact mobile number
+    has one check failing and one passing; both are listed, each against the limit
+    it was judged on."""
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_MOBILE")
+    rows = _rows(at, "checks")
+    assert len(rows) == 2, rows
+    assert any("Below target" in r for r in rows)
+    assert any("Meets target" in r for r in rows)
+    assert all("\u2265 " in r for r in rows), "a check row is missing its target"
+
+
+def test_a_passing_check_opens_too():
+    """Every row of the breakdown opens the drawer. A passing check has the same
+    rule and the same arithmetic and no failed rows, and must say so rather than
+    print an empty sample table under "The rows that failed"."""
+    at = _run(SCORECARD, _check_pick="CTCT_MOBL_FMT")
+    shown = " ".join(str(c.value) for c in at.caption)
+    assert "No row failed this check" in shown
+    assert "The rows that failed" not in _body(at)
+
+
+def test_the_scorecard_has_a_way_into_the_triage_queue():
+    """The open-problems count is a button, not a figure: it is the page's link to
+    the queue, and it went missing once already when the tiles were redrawn."""
     at = _run(SCORECARD)
-    assert "Not on a registered element" in _body(at), "no entry for unattached checks"
-
-    at = _run(SCORECARD, _elem_scope="__none__")
-    rows = " ".join(_fail_rows(at))
-    assert "Special-care status" in rows
-    # Attached checks are the half this entry excludes.
-    assert "Contact email contains an @" not in rows
-    assert "Not counted in the quality score" in _body(at)
+    assert any(b.key == "_open_dqrow_op_queue" for b in at.button)
+    assert "Open problems" in _body(at)
 
 
-def test_an_element_shows_its_own_score_in_the_pane():
-    """The drill-down's point: the element's DQ score, the same row-weighted
-    arithmetic as the headline over that element's own checks. Customer email address
-    is 7 checks, 521 bad rows of 6,993 scanned: 92.5%, printed 92.6 at one place."""
+def test_an_element_links_to_the_problem_its_failing_checks_belong_to():
+    """Until 2026-10-01 every failing check row named its problem. The breakdown
+    rows do not, so the pane carries the problem itself: one row per problem,
+    titled as the queue titles it, and it opens that problem."""
+    from dq_app.data import adapter
+    from dq_app.domain import metrics
+
+    runs = adapter.get_check_runs()
+    owner = metrics.live_cohorts(runs, adapter.get_cohorts())
+    cohort_id = owner["CTCT_EML_FMT"]
+    title = _titles()[cohort_id][0]
+
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
+    assert any(b.key == f"_open_dqrow_pb_{cohort_id}" for b in at.button), \
+        "the email element does not link to the problem carrying its checks"
+    assert "Triage · 1" in [t.label for t in at.tabs]
+    assert title in _body(at)
+
+
+def test_an_element_with_nothing_failing_links_to_no_problem():
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_KEY")
+    assert "Triage" in [t.label for t in at.tabs]
+    assert not any(str(b.key).startswith("_open_dqrow_pb_") for b in at.button)
+    assert "no problem to open" in _text(at)
+
+
+def test_the_unattached_entry_is_absent_when_every_check_names_an_element():
+    """`Not on a registered element` was its own entry while 14 of 34 rules attached
+    to nothing. Every rule names its element now, so the entry has nothing to list
+    and must not appear -- an empty bucket that still shows reads as a finding."""
+    at = _run(SCORECARD, _elist_show="all")
+    assert "Not on a registered element" not in _body(at)
+    assert "Not counted in the quality score" not in _body(at)
+
+
+def test_an_element_shows_its_score_against_its_target():
+    """The pane's point: the element's score, the same row-weighted arithmetic as the
+    headline over that element's own checks, beside the target the register sets on
+    it. Customer email address is nine checks, 522 bad rows of 8,993 scanned — 94.2%
+    — against a 0.5% tolerance."""
     at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
     head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
     assert head, "the pane has no element header"
     assert "Customer email address" in head[0]
-    assert re.search(r">9\d\.\d<span>%</span>", head[0]), head[0]
-    assert "since" in head[0] and "dq-spark" in head[0], "no trend beside the score"
+    assert ">94.2%<" in head[0], head[0]
+    assert "Target \u2265 99.5%" in head[0]
+    assert "5.3 pts below" in head[0]
+    over = [str(m.value) for m in at.markdown if 'class="dq-elover"' in str(m.value)]
+    assert over and "since last run" in over[0] and "dq-trend" in over[0], \
+        "the Overview tab has no trend"
+
+
+def test_the_element_card_is_four_tabs_labelled_with_what_is_behind_them():
+    """The card is one height whatever the element holds, because everything that
+    varies in length is behind a tab that scrolls inside. Stacked, nine checks ran
+    it to three times the height of the list beside it. Each label carries its
+    count, so nobody opens a tab to find out whether there is anything in it."""
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
+    labels = [t.label for t in at.tabs]
+    assert [lb.split(" · ")[0] for lb in labels] == [
+        "Overview", "Checks", "Sample rows", "Triage"], labels
+    assert labels[1] == "Checks · 9" and labels[3] == "Triage · 1", labels
+    assert re.fullmatch(r"Sample rows · [\d,]+", labels[2]), labels
+
+    # An element with nothing failing has nothing to count, and says so in words.
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_KEY")
+    assert [t.label for t in at.tabs][2:] == ["Sample rows", "Triage"]
+
+
+def test_the_sample_rows_tab_shows_the_actual_rows_of_the_check_picked():
+    """The rows behind the counts, without opening a drawer: one check at a time,
+    as the columns they are. Same rows and same cap as the check drawer — the tab
+    is a second door onto the one PII surface, not a wider one."""
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_MSISDN")
+    picker = [sb for sb in at.selectbox if sb.key == "_rows_check_CDE_CUST_MSISDN"]
+    assert picker, "no check picker in the Sample rows tab"
+    assert len(picker[0].options) == 2, picker[0].options
+    frames = [df.value for df in at.dataframe]
+    assert any("PRIM_RSRC_VALU_TXT" in f.columns for f in frames), \
+        "sampled rows are not rendered as columns in the tab"
+
+    picker[0].select("SUBS_MSISDN_SENTINEL").run()
+    assert not at.exception
+    values = [f["PRIM_RSRC_VALU_TXT"].tolist() for f in (df.value for df in at.dataframe)
+              if "PRIM_RSRC_VALU_TXT" in f.columns]
+    assert any("service-number-unknown" in v for v in values)
+
+
+def test_the_overall_figure_states_its_target():
+    """The headline's target is the element tolerances weighted by the rows the
+    score is — `targets.blended_target`. The card has to print it, say how far off
+    the score is, and draw it."""
+    hero = [str(m.value) for m in _run(SCORECARD).markdown
+            if 'class="dq-card dq-hero"' in str(m.value)]
+    assert hero, "no headline card"
+    assert re.search(r"Target \u2265 9\d(\.\d+)?%", hero[0]), hero[0]
+    assert "below</span>" in hero[0]
+    assert "stroke-dasharray" in hero[0], "the target line is not drawn"
+    assert "checked rows passed" in hero[0], "the operands are gone"
+
+
+def test_the_page_renders_with_no_tolerance_declared(monkeypatch):
+    """The workspace until `migrate_cde_scope.sql` runs: `config.cde_registry` has no
+    `tolerance_pct` column at all, and the deployed app reads that table. The page
+    has to say there is no target, not assume one and not fall over."""
+    from dq_app.data import adapter
+
+    current = adapter.get_cde_registry_current()
+    monkeypatch.setattr(adapter, "get_cde_registry_current",
+                        lambda: current.drop(columns=["tolerance_pct"]))
+
+    at = _run(SCORECARD, _elist_show="all")
+    body = _body(at)
+    assert "No target" in body
+    assert "Target \u2265" not in body
+    assert "0 below target · 0 meeting target · 20 unassessed" in body
+    rows = _rows(at, "elements")
+    assert len(rows) == 20
+    assert not any("Meets target" in r or "pts below" in r for r in rows)
 
 
 def test_a_scope_mismatch_score_is_not_coloured_as_bad_data():
     """Primary billing account scores 50%, and the register says the rule is wrong,
-    not the data. The pane prints the figure and the coverage note, never red."""
+    not the data. Neither the list nor the pane may print that in red or call it
+    below target, and the one rule the register disputes is labelled as disputed."""
     from dq_app.ui import theme
 
-    at = _run(SCORECARD, _elem_scope="CDE_BILLING_ACCOUNT")
+    red = theme.TONE["critical"]["fg"]
+    at = _run(SCORECARD, _elem_scope="CDE_BILLING_ACCOUNT", _elist_show="all")
     head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)][0]
-    assert "Scope mismatch" in head
-    assert theme.TONE["critical"]["fg"] not in head.split('class="r"')[1].split("<svg viewBox=\"0 0 120")[0]
+    assert "Scope mismatch" in head and "Not assessed" in head
+    assert red not in head and "dq-below" not in head
+    # No target line either: a dashed line 49 points above the series is the same
+    # verdict, drawn instead of written.
+    over = [str(m.value) for m in at.markdown if 'class="dq-elover"' in str(m.value)][0]
+    assert "dq-trend" in over and "stroke-dasharray" not in over and red not in over
+
+    row = [r for r in _rows(at, "elements") if "Primary billing account" in r][0]
+    assert red not in row and "below target" not in row
+
+    check = _rows(at, "checks")[0]
+    assert "Rule scope disputed" in check and red not in check
 
 
 def test_the_element_panel_names_the_rules_contradicting_a_scope():
@@ -430,20 +582,23 @@ def test_the_element_panel_names_the_rules_contradicting_a_scope():
     assert "SUBS_IMEI_NOT_NULL" in shown, shown
 
 
-def test_grouping_by_dimension_shows_every_dimension_that_has_a_failing_check():
-    """The four dimensions stopped being cards and became a grouping. The prose that
-    defines them — "Validity" is a term of art — has to survive the move."""
-    at = _run(SCORECARD, _fail_group=True)
+def test_a_check_row_carries_its_dimension():
+    """The four dimensions were cards, then a grouping toggle, and are now a line in
+    each check's hover text and a badge in its drawer. "Validity" is a term of art,
+    so wherever it is printed it is still defined."""
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
     body = _body(at)
-    for name in ["Completeness", "Validity", "Consistency"]:
-        assert name in body, name
+    assert "Validity — Does the value look like what it claims to be." in body
+    assert "Completeness — Is the value there at all." in body
+
+    at = _run(SCORECARD, _check_pick="CTCT_EML_FMT")
+    assert "conforms to the shape it is supposed to have" in _body(at)
 
 
-def test_a_dimension_with_a_failing_check_never_reads_as_a_clean_100():
-    """Consistency scores 99.9% with one check failing. Printed at zero decimals that
-    is "100%", sitting beside the words that say it is failing — the header
-    contradicting itself, with nothing to tell the reader which half is wrong.
-    `theme.pct_text` is what stops it, and this is the case that motivated it."""
+def test_a_failing_score_never_reads_as_a_clean_100():
+    """99.9% printed at zero decimals is "100%", sitting beside the words that say
+    it is failing — the row contradicting itself, with nothing to tell the reader
+    which half is wrong. `theme.pct_text` is what stops it."""
     from dq_app.ui import theme
 
     assert theme.pct_text(99.9) == "99.9"
@@ -452,15 +607,12 @@ def test_a_dimension_with_a_failing_check_never_reads_as_a_clean_100():
     assert theme.pct_text(0.0) == "0"
     assert theme.pct_text(None) == "—"
 
-    at = _run(SCORECARD, _fail_group=True)
-    # Every group header printed here belongs to a dimension with at least one
-    # failing check — the table only lists failing checks — so none of them may read
-    # as a clean 100.
-    headers = [str(m.value) for m in at.markdown if 'class="dq-dimgrp"' in str(m.value)]
-    assert headers
-    for header in headers:
-        shown = re.search(r">([\d.]+)% scored<", header)
-        assert not (shown and shown.group(1) == "100"), header
+    # `Contact email is present` fails one row in a thousand: 99.9%, below a
+    # zero-tolerance limit.
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
+    row = [r for r in _rows(at, "checks") if "Contact email is present" in r]
+    assert row, "the fixture no longer has the one-in-a-thousand email check"
+    assert ">99.9%<" in row[0] and "Below target" in row[0], row[0]
 
 
 # --- Titles, elements and tabs (2026-09-22) ----------------------------------
@@ -503,16 +655,24 @@ def test_the_rule_defect_title_says_the_rule_is_wrong_and_names_both_elements():
     assert {e["coverage_gap"] for e in els} == {"scope_mismatch"}
 
 
-def test_a_problem_on_no_registered_element_falls_back_to_its_columns():
-    """Three problems touch no element. Their titles name the columns their checks
-    read rather than going blank or inventing an element."""
+def test_every_problem_names_an_element_and_the_fallback_still_works():
+    """Since 2026-09-28 every rule names its element, so no problem is on no
+    registered element and the column fallback in `components.problem_title` has
+    no fixture case. It stays, for a registry that predates the rule, and is
+    exercised here directly rather than through a problem that cannot exist."""
+    import pandas as pd
+    from dq_app.ui import components
+
     bare = [v for v in _titles().values() if not v[1]]
-    assert bare, "every cohort has an element — the fallback is untested"
-    for title, _, loose, _ in bare:
-        assert loose, title
-        subject = title.rpartition(" — ")[0]
-        # A column, or a cross-table check's own name. Never one bare table.
-        assert subject not in {"subs_c", "ctct_c"}, title
+    assert not bare, "a problem on no registered element -- a rule attached to nothing"
+
+    cohorts = _cohorts()
+    registry = pd.read_parquet(
+        APP_DIR.parent / "fixtures" / "out" / "config.rule_registry.parquet")
+    target = cohorts.sort_values("member_count").iloc[-1]
+    title = components.problem_title(target, [], registry, 140)
+    assert title and "—" in title, title
+    assert "EML_ID" in title or "email" in title.lower(), title
 
 
 def test_an_element_is_one_chip_however_many_columns_bind_it():
@@ -546,7 +706,10 @@ def test_the_detail_header_carries_the_title_the_claim_and_the_elements():
     assert "A change to the CRM contact export" in body   # the claim, under the title
     pills = at.get("button_group")
     assert pills, "no element pills on the detail page"
-    assert f"{len(loose)} checks on no registered element" in body
+    if loose:
+        assert f"{len(loose)} checks on no registered element" in body
+    else:
+        assert "on no registered element" not in body
 
 
 def test_an_element_pill_opens_the_element_drawer():

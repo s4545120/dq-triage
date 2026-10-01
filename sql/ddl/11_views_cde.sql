@@ -34,13 +34,14 @@ WHERE  rn = 1
 -- The view the whole component exists for. Every other table here describes what
 -- broke; this one describes what is not being looked at.
 --
--- A RULE ATTACHES TO A BINDING TWO WAYS, and it needs both. The obvious way is a
--- column match. That misses every cross-table rule, because those carry
--- target_column = NULL by design — XREF_NAME_AGREEMENT checks that a subscription's
--- first name agrees with its contact's, which is unambiguously a name rule and
--- unreachable by any column join. So config.rule_registry.cde_id exists to let a
--- rule say which element it covers, and the join below is the OR of the two. A rule
--- matching both ways still attaches once.
+-- A RULE ATTACHES TO A BINDING BY NAMING THE ELEMENT. config.rule_registry.cde_id
+-- is NOT NULL, and where the rule has a target_column that column must be one of
+-- the element's bindings and the rule attaches to that binding only. A cross-table
+-- rule carries target_column = NULL by design — XREF_NAME_AGREEMENT checks that a
+-- subscription's first name agrees with its contact's, which is a name rule and
+-- unreachable by any column join — and attaches to every binding of its element.
+-- Until 2026-09-28 the join was `cde_id OR column match`, so that 20 rules could
+-- attach by column and 14 attach to nothing; now every rule attaches, once.
 --
 -- SCOPE MISMATCH IS A RULE DEFECT, DETECTED STRUCTURALLY. Where a binding declares
 -- expected_scope_filter — this element is only populated for these rows — and an
@@ -87,9 +88,15 @@ attached AS (
     v.status          AS latest_status,
     v.violation_count AS latest_violations
   FROM bound b
+  -- The rule names its element (cde_id is NOT NULL since 2026-09-28), and the
+  -- column narrows it: a rule with a target_column attaches to that one binding of
+  -- the element, and a cross-table rule with none attaches to every binding of it.
+  -- Until 2026-09-28 this was `cde_id OR column match`, which let a tagged rule
+  -- with a column attach to every binding of a multi-column element.
   LEFT JOIN active_rules r
     ON  r.cde_id = b.cde_id
-    OR (r.target_table = b.target_table AND r.target_column = b.target_column)
+    AND (r.target_column IS NULL
+         OR (r.target_table = b.target_table AND r.target_column = b.target_column))
   LEFT JOIN verdicts v ON v.rule_id = r.rule_id
 ),
 rolled AS (

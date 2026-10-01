@@ -69,20 +69,20 @@ def bound_columns(registry: pd.DataFrame) -> list[dict]:
 
 
 def _attached(binding: dict, rules: pd.DataFrame) -> pd.DataFrame:
-    """Rules covering one binding: named explicitly, or targeting that column.
+    """Rules covering one binding: those that name its element, narrowed by column.
 
-    Both paths are needed. The column match carries almost every rule and needs no
-    curation. The explicit `cde_id` exists for cross-table rules, which carry
-    target_column = NULL by design and would otherwise be invisible here — a name
-    agreement check between two tables is unambiguously a name rule and no column
-    join will ever find it.
+    A rule names its element (`cde_id` is NOT NULL since 2026-09-28). One with a
+    target_column attaches to that binding of the element only; a cross-table rule
+    with none — a name agreement check between two tables is a name rule and no
+    column join will ever find it — attaches to every binding of the element. The
+    twin of the join in `sql/ddl/11_views_cde.sql`, pinned by a conformance test.
     """
     by_cde = rules["cde_id"] == binding["cde_id"]
-    by_column = (
+    column_ok = rules["target_column"].isna() | (
         (rules["target_table"] == binding["target_table"])
         & (rules["target_column"] == binding["target_column"])
     )
-    return rules[by_cde | by_column]
+    return rules[by_cde & column_ok]
 
 
 def classify_gap(rule_count: int, unscoped: list[str], rule_types: list[str]) -> str:

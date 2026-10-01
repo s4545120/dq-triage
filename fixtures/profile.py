@@ -185,6 +185,7 @@ def build_cde_registry(effective_from, registered_by: str) -> pd.DataFrame:
             criticality=c.criticality,
             pii=c.pii,
             regulatory_basis=c.regulatory_basis,
+            tolerance_pct=c.tolerance_pct,
             bindings=[b.to_struct() for b in c.bindings],
             business_domain=c.business_domain,
             owner_group=c.owner_group,

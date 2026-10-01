@@ -18,8 +18,9 @@ has never been made and is the first item under *Known gaps* in `CLAUDE.md`.
 
 **Proves half the control.** `render.py` drops `07_grants.sql`, but the Databricks App
 has a service principal of its own, so `sql/grants_sandpit.sql` renders the grant model
-for this layout and step 10 issues it: `MODIFY` on exactly two tables, `SELECT` table by
-table rather than schema-wide, and `delta.appendOnly` behind both. Its § 4 proof queries
+for this layout and step 10 issues it: `MODIFY` on exactly three tables (the register,
+the rule registry and, since 2026-09-28, the threshold review), `SELECT` table by
+table rather than schema-wide, and `delta.appendOnly` behind all three. Its § 4 proof queries
 are the evidence.
 
 **Does not prove the human half.** There are no steward or approver groups here, and the
@@ -201,6 +202,17 @@ regenerated `sql/out/seed_results.sql`.
 
 `fixtures/verify.py` check 4 diffs the notebook's write cell against the DDL, so a
 column added to one and not the other is caught before you get here.
+
+Three such migrations are generated and **not applied**, each with a `.py` beside it
+that says why it takes the shape it does: `sql/out/migrate_fn_adoption.sql` (the
+shared helpers), `sql/out/migrate_join_sql.sql` (cross-table joins into the
+registry) and `sql/out/migrate_cde_scope.sql` (a tolerance on every element, the
+second ten elements, every rule naming its element, and — by pointing at the rendered
+files — the threshold tables and the changed coverage view). Apply the last one before
+running notebook 06 at all, and before the next run of notebook 03 if you want its
+briefs to carry a tolerance. Its part 5 is the verification: no current rule without
+an element, no rule column outside its element's bindings, twenty elements with a
+tolerance each.
 
 ## If you change the target names
 

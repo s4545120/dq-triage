@@ -2,12 +2,14 @@
 --
 -- Substitute {catalog} and {check_runner_sp} before execution.
 --
--- Additive. Nothing in 00-11 changes, and no rule is obliged to use these: a
--- rule_expr is still an arbitrary SQL boolean and always will be. These exist for
--- the four idioms that are written out longhand in more than one rule today, where
--- two copies can drift apart without anyone noticing.
+-- NO LONGER OPTIONAL. This file was additive until 2026-09-27 and its header said
+-- so. Thirteen rules in config.rule_registry now CALL these helpers, so a catalog
+-- without them holds a registry it cannot execute. Deploy this BEFORE the registry is
+-- populated -- it sits at that point in the order already, after the tables and before
+-- the views. A rule_expr is still an arbitrary SQL boolean and no FUTURE rule is
+-- obliged to use these; the thirteen that do are a hard dependency.
 --
--- Measured across the 35 registry rows the fixture ships:
+-- What each one replaced, across the 48 registry rows the fixture ships:
 --
 --   IS NULL OR trim(x) = ''          8 rules
 --   the email regex, longhand        2 rules
