@@ -315,6 +315,10 @@ def main() -> int:
                     help="Replaces `dq.fn.` in rule_expr. Must match what sql/seed.py "
                          "was run with. Omit when the registry already holds names "
                          "runnable in this catalog.")
+    ap.add_argument("--tables", default=None,
+                    help="Comma-separated target tables to check. Without it the run takes "
+                         "the selected tables from config.monitored_table when that table "
+                         "exists, and every table otherwise.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the SQL this run would execute and write nothing.")
     a = ap.parse_args()
@@ -348,6 +352,13 @@ def main() -> int:
                          else f"{a.catalog}.fn.")
     rules = normalise(rules, fn)
 
+    # WHICH TABLES. config.monitored_table is the selection and carries each table's row
+    # key; a schema without it (the dq_triage sandpit) runs everything, as before.
+    selected, row_keys = select_tables(spark, t("config", "monitored_table"), a.tables)
+    if selected is not None:
+        rules = [r for r in rules if r.target_table in selected]
+        print(f"checking {len(selected)} selected tables: {', '.join(sorted(selected))}")
+
     # In a real deployment the registry already holds production table names and this
     # map is empty. It exists for the sandpit, where sql/seed.py rewrote
     # prod.customer.* to the mock tables, and for any environment whose registry was
@@ -372,14 +383,26 @@ def main() -> int:
             print(f"\n-- {shape(r)}: {r.rule_id}\n{sql}")
         return 0
 
+    # One table failing must not stop the others: a query that raises becomes an
+    # `error` verdict for exactly the rules it carried, with the reason in `message`.
     measured: dict[str, tuple[int, int]] = {}
+    failed: dict[str, str] = {}
     for table, rs in p["batched"].items():
-        row = spark.sql(batch_row_level(table, rs)).collect()[0].asDict()
+        try:
+            row = spark.sql(batch_row_level(table, rs)).collect()[0].asDict()
+        except Exception as exc:                    # noqa: BLE001 -- recorded, not hidden
+            for r in rs:
+                failed[r.rule_id] = f"not executed: {table} scan failed: {_first_line(exc)}"
+            continue
         for r in rs:
             measured[r.rule_id] = (int(row[_alias("s", r.rule_id)] or 0),
                                    int(row[_alias("v", r.rule_id)] or 0))
     for r, sql in p["singles"]:
-        row = spark.sql(sql).collect()[0].asDict()
+        try:
+            row = spark.sql(sql).collect()[0].asDict()
+        except Exception as exc:                    # noqa: BLE001
+            failed[r.rule_id] = f"not executed: query failed: {_first_line(exc)}"
+            continue
         measured[r.rule_id] = (int(row["rows_scanned"] or 0),
                                int(row["violation_count"] or 0))
 
@@ -395,8 +418,8 @@ def main() -> int:
                 threshold_pct=float(r.fail_threshold_pct), status="error",
                 severity=r.severity, business_domain=r.business_domain,
                 owner_group=r.owner_group, scope_fingerprint=None,
-                message="not executed: cross-table rule with no join_sql in the "
-                        "registry",
+                message=failed.get(r.rule_id, "not executed: cross-table rule with no "
+                                              "join_sql in the registry"),
                 duration_sec=None, dbu_estimate=None))
             continue
         scanned, viol = measured[r.rule_id]
@@ -423,14 +446,16 @@ def main() -> int:
                 samples.append(dict(
                     sample_id=str(uuid.uuid4()), result_id=result_id, run_id=run_id,
                     rule_id=r.rule_id, target_table=r.target_table,
-                    row_key=str(d.get("SUBS_KEY") or d.get("CTCT_KEY") or ""),
+                    row_key=row_key(d, row_keys.get(r.target_table)),
                     sample_row=json.dumps(d), captured_ts=run_ts))
 
-    spark.createDataFrame(verdicts).write.mode("append").saveAsTable(
-        t("results", "check_run"))
+    # Written against the target table's own schema. Inferring it fails outright:
+    # scope_fingerprint, duration_sec and dbu_estimate are None on every row, and Spark
+    # cannot infer a type for a column with no values (CANNOT_DETERMINE_TYPE -- the same
+    # failure notebook 03 hit on its first job run).
+    append(spark, verdicts, t("results", "check_run"))
     if samples:
-        spark.createDataFrame(samples).write.mode("append").saveAsTable(
-            t("results", "violation_sample"))
+        append(spark, samples, t("results", "violation_sample"))
 
     by = {}
     for v in verdicts:
@@ -440,5 +465,51 @@ def main() -> int:
     return 0
 
 
+def select_tables(spark, monitored: str, cli: str | None):
+    """(selected tables or None for all, {table: row key columns}).
+
+    --tables wins; otherwise the current version of each config.monitored_table row
+    with status 'selected'. A missing monitored_table means no selection exists, which
+    is the sandpit's state, and every table runs."""
+    keys: dict[str, list[str]] = {}
+    try:
+        rows = spark.sql(f"""
+            SELECT target_table, row_key, status FROM (
+              SELECT *, ROW_NUMBER() OVER (PARTITION BY target_table
+                                           ORDER BY table_version DESC) AS rn
+              FROM {monitored}) WHERE rn = 1""").collect()
+    except Exception:                               # noqa: BLE001 -- table absent
+        rows = []
+    for r in rows:
+        keys[r["target_table"]] = list(r["row_key"] or [])
+    if cli:
+        return {x.strip() for x in cli.split(",") if x.strip()}, keys
+    if rows:
+        return {r["target_table"] for r in rows if r["status"] == "selected"}, keys
+    return None, keys
+
+
+def row_key(sample: dict, keys: list[str] | None) -> str:
+    """The sampled row's identity, from the table's declared key columns. The fallback is
+    the two sandpit keys this job used to hardcode, for a schema with no selection."""
+    if keys:
+        return "|".join(str(sample.get(k) or "") for k in keys)
+    return str(sample.get("SUBS_KEY") or sample.get("CTCT_KEY") or "")
+
+
+def append(spark, rows: list[dict], table: str) -> None:
+    schema = spark.table(table).schema
+    data = [tuple(row.get(f.name) for f in schema.fields) for row in rows]
+    spark.createDataFrame(data, schema).write.mode("append").saveAsTable(table)
+
+
+def _first_line(exc: Exception) -> str:
+    return next((ln for ln in str(exc).splitlines() if ln.strip()), type(exc).__name__)[:300]
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Exit only on failure: a serverless Python task runs under IPython, which reports
+    # SystemExit(0) as a failed task even though the run wrote everything it should.
+    rc = main()
+    if rc:
+        raise SystemExit(rc)
