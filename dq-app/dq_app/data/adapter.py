@@ -16,9 +16,15 @@ anywhere — the register and the registry are both append-only. They are folded
 of the events here, by `domain.lifecycle`, which is a labelled copy of
 `sql/ddl/08_views.sql` pinned to it by a conformance test.
 
-**Writes.** Exactly two of them exist in the whole app: appending a register event,
-and promoting a shadow rule. Both are `INSERT`. There is no third, and adding one
-that touched a `prod.*` table would contradict the grants the app runs under.
+**Writes.** Three tables, all `INSERT`: a register event, a new rule version (a
+promotion or an adopted threshold) and a threshold review. Adding one that touched a
+`prod.*` table would contradict the grants the app runs under.
+
+Every write is guarded. The sequence or version it stamps is computed from a cached
+read, so each source appends only if nothing has landed on that cohort, rule or
+proposal since — and returns False otherwise, which this module turns into a
+rejection the page shows. Appending blind would let two stewards put two events at
+one `event_seq`, and an append-only table cannot take either back.
 
 The CDE register is read-only here for the same reason. Registering an element is an
 append to `config.cde_registry` and would be that third write, which is a decision
@@ -282,7 +288,12 @@ def append_disposition(
         "event_payload": json.dumps({"recorded_by": "app", "source": _SOURCE}),
         "app_version": APP_VERSION,
     }
-    _impl.write_disposition(row)
+    if not _impl.write_disposition(row):
+        clear_cache()
+        raise WriteRejected(
+            "Someone else recorded a decision on this problem after you opened it, so "
+            "yours was not written. The page has been refreshed; read what they recorded "
+            "and decide again.")
     clear_cache()
     _notify(row, title)
     return row
@@ -362,7 +373,11 @@ def promote_rule(rule_id: str, note: str) -> dict:
             "note": note,
         }
     )
-    _impl.append_rule_version(row)
+    if not _impl.append_rule_version(row):
+        clear_cache()
+        raise WriteRejected(
+            f"{rule_id} gained a new version after you opened it, so the promotion was "
+            "not written. The page has been refreshed; check its current state.")
     clear_cache()
     return row
 
@@ -401,6 +416,8 @@ def review_threshold(
         decision, reason=reason, review_by_date=review_by_date,
         state=str(p["review_state"]))
 
+    reviews = get_threshold_reviews()
+    reviews_seen = int((reviews["proposal_id"] == proposal_id).sum())
     now = datetime.now()
     adopted_version = None
     if decision == "adopted":
@@ -421,7 +438,11 @@ def review_threshold(
                      f"proposal {proposal_id[:8]} ({p['basis']}). "
                      + (reason or "").strip()).strip(),
         })
-        _impl.append_rule_version(row)
+        if not _impl.append_rule_version(row):
+            clear_cache()
+            raise ReviewRejected(
+                f"{p['rule_id']} gained a new version after you opened this proposal, so "
+                "nothing was written. The page has been refreshed; review it again.")
 
     review = {
         "review_id": str(uuid.uuid4()),
@@ -437,6 +458,19 @@ def review_threshold(
         "adopted_rule_version": adopted_version,
         "app_version": APP_VERSION,
     }
-    _impl.write_threshold_review(review)
+    if not _impl.write_threshold_review(review, reviews_seen=reviews_seen):
+        clear_cache()
+        if adopted_version is not None:
+            # The limit landed and the record of deciding it did not: someone reviewed
+            # the same proposal in between. The registry row names the proposal in its
+            # note, so the adoption is traceable, but the reviewer has to be told.
+            raise ReviewRejected(
+                f"The new limit was written as {p['rule_id']} v{adopted_version}, but "
+                "someone else reviewed this proposal at the same moment, so your review "
+                "row was not. Their decision is now the one on record; reconcile the two "
+                "before acting further.")
+        raise ReviewRejected(
+            "Someone else reviewed this proposal after you opened it, so your decision "
+            "was not written. The page has been refreshed; read theirs.")
     clear_cache()
     return review

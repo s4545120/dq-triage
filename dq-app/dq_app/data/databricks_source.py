@@ -107,9 +107,9 @@ def _cursor():
             yield cur
 
 
-def _q(sql: str) -> pd.DataFrame:
+def _q(sql: str, params: dict | None = None) -> pd.DataFrame:
     with _cursor() as cur:
-        cur.execute(sql)
+        cur.execute(sql, params)
         return _naive_timestamps(cur.fetchall_arrow().to_pandas())
 
 
@@ -131,32 +131,6 @@ def _naive_timestamps(df: pd.DataFrame) -> pd.DataFrame:
         if isinstance(df[col].dtype, pd.DatetimeTZDtype):
             df[col] = df[col].dt.tz_convert("UTC").dt.tz_localize(None)
     return df
-
-
-def _exec(sql: str) -> None:
-    """A statement with no result set. The two INSERTs at the foot of this file are
-    the only callers, and the grant rather than this docstring is what keeps that
-    true — see the module docstring."""
-    with _cursor() as cur:
-        cur.execute(sql)
-
-
-def _lit(value) -> str:
-    """SQL literal. Only ever used for values the app itself constructs — never
-    for a user string, which goes through a parameter marker below."""
-    # Every pandas missing marker, not only None and float NaN: the register row sets
-    # `executed_ts = pd.NaT` on every non-execution event, and str(pd.NaT) is 'NaT',
-    # which the warehouse refuses to cast to TIMESTAMP. A row off `to_dict()` (as in
-    # promote_rule) can carry pd.NA or numpy scalars for the same reason.
-    if value is None or (pd.api.types.is_scalar(value) and pd.isna(value)):
-        return "NULL"
-    if isinstance(value, np.generic):
-        value = value.item()
-    if isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    if isinstance(value, (int, float)):
-        return str(value)
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 # --- Reads ------------------------------------------------------------------
@@ -228,18 +202,71 @@ _DISPOSITION_COLUMNS = [
 ]
 
 
-def write_disposition(row: dict) -> None:
-    """Append one register event.
+def _param(value):
+    """One bound parameter value. Every pandas missing marker becomes None, and numpy
+    scalars and pandas timestamps become the plain Python types the connector binds."""
+    if value is None or (pd.api.types.is_scalar(value) and pd.isna(value)):
+        return None
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime()
+    return value
+
+
+def _guarded_insert(table: str, row: dict, columns: list[str], guard: str,
+                    guard_params: dict, readback: dict) -> bool:
+    """Append `row` only if `guard` holds, then read it back. True if it landed.
+
+    The write is decided against the table as it stands, not against the cached read
+    the caller validated on. `adapter` computes `event_seq` / `rule_version` from a
+    read that can be up to five minutes old, and a second steward may have acted
+    since: appending blind would put two events at one `event_seq`, or two rows at
+    one `rule_version`, and the append-only table could never take either back. So
+    the INSERT selects its own values `WHERE <guard>` — the guard says "nothing has
+    been appended here since I looked" — and a refused write appends nothing.
+
+    Every value is a bound parameter. This is the path free text reaches (a review's
+    `reason`, a promotion's `note`), and quote-doubling is not escaping on Databricks:
+    its string literals honour backslash escapes, so a reason ending `\\` turned the
+    doubled quote that followed it back into a string terminator.
+
+    What is left is a window of one statement, not five minutes. Under Delta's default
+    WriteSerializable isolation, two appends whose guards were both evaluated before
+    either committed can both land. `delta.isolationLevel = 'Serializable'` on the
+    three written tables should make the second fail instead, since this INSERT reads
+    its own table; that is not set, and not yet tested on a warehouse.
+    """
+    params = {f"v{i}": _param(row.get(c)) for i, c in enumerate(columns)}
+    params.update({f"g_{k}": _param(v) for k, v in guard_params.items()})
+    select = ", ".join(f":v{i}" for i in range(len(columns)))
+    with _cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {table} ({', '.join(columns)}) "
+            f"SELECT {select} WHERE {guard}",
+            params,
+        )
+        where = " AND ".join(f"{k} = :r_{k}" for k in readback)
+        cur.execute(f"SELECT 1 AS ok FROM {table} WHERE {where} LIMIT 1",
+                    {f"r_{k}": _param(v) for k, v in readback.items()})
+        return bool(cur.fetchall())
+
+
+def write_disposition(row: dict) -> bool:
+    """Append one register event, unless the cohort has moved on since the caller read it.
 
     `INSERT` only, by construction and by grant. `event_seq` is computed by the
-    caller from the events it just read, which races if two stewards act on the
-    same cohort in the same second — the table tolerates that (gaps are acceptable,
-    reuse is not, and a duplicate seq is caught by the integrity view rather than
-    silently overwriting, because nothing here can overwrite).
+    caller from the events it read; the guard refuses the row if any event on the
+    cohort already sits at or above that sequence. False means nothing was written.
     """
-    cols = ", ".join(_DISPOSITION_COLUMNS)
-    vals = ", ".join(_lit(row.get(c)) for c in _DISPOSITION_COLUMNS)
-    _exec(f"INSERT INTO {_t('results', 'disposition')} ({cols}) VALUES ({vals})")
+    table = _t("results", "disposition")
+    return _guarded_insert(
+        table, row, _DISPOSITION_COLUMNS,
+        guard=(f"NOT EXISTS (SELECT 1 FROM {table} "
+               "WHERE cohort_id = :g_cohort_id AND event_seq >= :g_event_seq)"),
+        guard_params={"cohort_id": row["cohort_id"], "event_seq": row["event_seq"]},
+        readback={"disposition_id": row["disposition_id"]},
+    )
 
 
 def confirm_disposition(disposition_id: str) -> bool:
@@ -257,27 +284,35 @@ def confirm_disposition(disposition_id: str) -> bool:
     try:
         found = _q(
             f"SELECT 1 AS ok FROM {_t('results', 'disposition')} "
-            f"WHERE disposition_id = {_lit(disposition_id)} LIMIT 1"
+            "WHERE disposition_id = :disposition_id LIMIT 1",
+            {"disposition_id": disposition_id},
         )
     except Exception:  # noqa: BLE001 — the write already succeeded; see notify.py.
         return False
     return not found.empty
 
 
-def append_rule_version(row: dict) -> None:
+def append_rule_version(row: dict) -> bool:
     """A new version of a rule — a promotion, or an adopted threshold.
 
     Not an `UPDATE` of the existing row: `config.rule_registry` is append-only and
     stores no `effective_to`, so history stays intact and the current version is
-    derived at read time by `v_rule_registry_current`.
+    derived at read time by `v_rule_registry_current`. Refused (False) if the rule
+    already has a version at or above this one — someone else changed it since.
     """
-    cols = ", ".join(row.keys())
-    vals = ", ".join(_lit(v) for v in row.values())
-    _exec(f"INSERT INTO {_t('config', 'rule_registry')} ({cols}) VALUES ({vals})")
+    table = _t("config", "rule_registry")
+    return _guarded_insert(
+        table, row, list(row.keys()),
+        guard=(f"NOT EXISTS (SELECT 1 FROM {table} "
+               "WHERE rule_id = :g_rule_id AND rule_version >= :g_rule_version)"),
+        guard_params={"rule_id": row["rule_id"], "rule_version": row["rule_version"]},
+        readback={"rule_id": row["rule_id"], "rule_version": row["rule_version"],
+                  "created_by": row["created_by"]},
+    )
 
 
-def promote_rule(row: dict) -> None:
-    append_rule_version(row)
+def promote_rule(row: dict) -> bool:
+    return append_rule_version(row)
 
 
 def threshold_proposals() -> pd.DataFrame:
@@ -295,12 +330,18 @@ _THRESHOLD_REVIEW_COLUMNS = [
 ]
 
 
-def write_threshold_review(row: dict) -> None:
+def write_threshold_review(row: dict, *, reviews_seen: int) -> bool:
     """Append one reviewer decision. The app's third write; `INSERT` only, by
-    construction and by grant (07_grants.sql)."""
-    cols = ", ".join(_THRESHOLD_REVIEW_COLUMNS)
-    vals = ", ".join(_lit(row.get(c)) for c in _THRESHOLD_REVIEW_COLUMNS)
-    _exec(f"INSERT INTO {_t('results', 'threshold_review')} ({cols}) VALUES ({vals})")
+    construction and by grant (07_grants.sql). Refused (False) if the proposal has
+    gained a review since the caller counted `reviews_seen` of them."""
+    table = _t("results", "threshold_review")
+    return _guarded_insert(
+        table, row, _THRESHOLD_REVIEW_COLUMNS,
+        guard=(f"(SELECT count(*) FROM {table} "
+               "WHERE proposal_id = :g_proposal_id) = :g_reviews_seen"),
+        guard_params={"proposal_id": row["proposal_id"], "reviews_seen": reviews_seen},
+        readback={"review_id": row["review_id"]},
+    )
 
 
 def durable() -> bool:

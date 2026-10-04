@@ -109,22 +109,45 @@ def threshold_reviews() -> pd.DataFrame:
 # --- Writes -----------------------------------------------------------------
 
 
-def write_disposition(row: dict) -> None:
+def write_disposition(row: dict) -> bool:
+    """Append, unless the cohort already has an event at or above this `event_seq`.
+    The same guard `databricks_source` puts in its INSERT, so a test can drive the
+    refusal without a warehouse. False means nothing was appended."""
+    seqs = [e["event_seq"] for e in pending_events() if e["cohort_id"] == row["cohort_id"]]
+    base = dispositions()
+    seqs += base.loc[base["cohort_id"] == row["cohort_id"], "event_seq"].tolist()
+    if any(s >= row["event_seq"] for s in seqs):
+        return False
     st.session_state.setdefault(_PENDING_KEY, []).append(row)
+    return True
 
 
-def append_rule_version(row: dict) -> None:
+def append_rule_version(row: dict) -> bool:
     """A new version of a rule: a promotion, or an adopted threshold. The same
-    append either way, which is the point of the registry being append-only."""
+    append either way, which is the point of the registry being append-only.
+    Refused if the rule already has a version at or above this one."""
+    versions = [r["rule_version"] for r in pending_rules() if r["rule_id"] == row["rule_id"]]
+    base = rule_registry()
+    versions += base.loc[base["rule_id"] == row["rule_id"], "rule_version"].tolist()
+    if any(v >= row["rule_version"] for v in versions):
+        return False
     st.session_state.setdefault(_PENDING_RULES_KEY, []).append(row)
+    return True
 
 
-def promote_rule(row: dict) -> None:
-    append_rule_version(row)
+def promote_rule(row: dict) -> bool:
+    return append_rule_version(row)
 
 
-def write_threshold_review(row: dict) -> None:
+def write_threshold_review(row: dict, *, reviews_seen: int) -> bool:
+    """Refused if the proposal has gained a review since the caller counted them."""
+    base = threshold_reviews()
+    count = int((base["proposal_id"] == row["proposal_id"]).sum()) + sum(
+        1 for r in pending_threshold_reviews() if r["proposal_id"] == row["proposal_id"])
+    if count != reviews_seen:
+        return False
     st.session_state.setdefault(_PENDING_REVIEWS_KEY, []).append(row)
+    return True
 
 
 def pending_events() -> list[dict]:
