@@ -343,7 +343,11 @@ tolerance on every element since 2026-09-28, so the page can now say it.
 
 * **Overall quality** — the row-weighted score, the change since the previous run,
   its target and how far off it is, a 30-day line with the target dashed across it
-  (`theme.target_chart`), and one sentence reading the chart aloud.
+  (`theme.target_chart`), and one sentence reading the chart aloud. Each run on the
+  line can be hovered for its date, score and distance from target — an HTML layer
+  of one column per run over the SVG, shown by CSS `:hover` like the row tips; the
+  same on the element pane's trend, where a chart drawn without a target gets a
+  bubble without a verdict.
 * **Monitoring coverage** — elements by their worst finding (6 covered · 7 not
   validated · 6 out of scope on the fixture) as one bar in three shares. Its floor
   is a button: the open-problems count opens the Triage queue (`dq_covcard`,

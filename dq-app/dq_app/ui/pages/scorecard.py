@@ -588,8 +588,8 @@ history = _in_window(run_index)
 
 def _period_sentence(points: list, target) -> str:
     """The chart, said once in words: where the line sat against the target, and
-    which way it went. Written out because a trend nobody can hover has to state its
-    own reading."""
+    which way it went. Written out because the chart's hover reading gives one run at
+    a time and a touch screen gives none; the reading of the whole period is here."""
     if len(points) < 2:
         return ""
     vals = [v for _, v in points]

@@ -495,6 +495,32 @@ def test_an_element_shows_its_score_against_its_target():
         "the Overview tab has no trend"
 
 
+def test_every_run_on_a_trend_can_be_hovered_for_its_reading():
+    """Both trend charts carry one hover column per run drawn, each with the run's
+    date, its score and where that stood against the target. Customer email address
+    sat at 100% until its checks began failing and ends 5.3 points under a 99.5%
+    target, so the one chart exercises both wordings — and the latest run's reading
+    has to be the figure in the header above it."""
+    import re
+
+    at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
+    over = [str(m.value) for m in at.markdown if 'class="dq-elover"' in str(m.value)][0]
+    tips = re.findall(r'<span class="tip"[^>]*><b>([^<]+)</b><span>([^<]+)</span>', over)
+    drawn = over.split("<polyline points=\"")[1].split('"')[0].split()
+    assert tips and len(tips) == len(drawn), (len(tips), len(drawn))
+    assert tips[0][1] == "100% · meets target", tips[0]
+    assert tips[-1][1] == "94.2% · 5.3 pts below target", tips[-1]
+
+    hero = [str(m.value) for m in at.markdown if 'class="dq-card dq-hero"' in str(m.value)][0]
+    assert hero.count('<span class="pt"') == len(
+        hero.split("<polyline points=\"")[1].split('"')[0].split())
+
+    # No target drawn means no verdict in the bubble either — same rule as the line.
+    at = _run(SCORECARD, _elem_scope="CDE_BILLING_ACCOUNT", _elist_show="all")
+    over = [str(m.value) for m in at.markdown if 'class="dq-elover"' in str(m.value)][0]
+    assert 'class="tip"' in over and "target" not in over.split('class="pts"')[1]
+
+
 def test_the_element_card_is_four_tabs_labelled_with_what_is_behind_them():
     """The card is one height whatever the element holds, because everything that
     varies in length is behind a tab that scrolls inside. Stacked, nine checks ran

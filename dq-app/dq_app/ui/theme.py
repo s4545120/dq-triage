@@ -609,11 +609,23 @@ def target_chart(points: list[tuple], target: float | None = None,
     large, and the gap is the thing being reported.
 
     Three dates along the foot rather than one per point — the shape is the message —
-    and the value axis is labelled because nothing in a Streamlit markdown block can
-    be hovered for a reading.
+    and the value axis stays labelled: the hover reading below is the second way to
+    a figure, not the only one, because a touch screen has no hover.
 
-    The end dot is red when the latest value is under the target. That is the one
-    place colour carries anything here, and the words beside the figure say it too.
+    **Each run can be hovered for its reading.** The drawing is SVG and the readout
+    is not: one transparent column per run is laid over it as HTML, positioned in
+    percentages of the same viewBox, and its guide line, dot and bubble are shown by
+    the column's own CSS `:hover` — the same drawn-tooltip pattern as `hint()` and
+    the row tips, for the same reason (nothing here can run script, and `<title>` is
+    slow, unstyled and unreliable inside an inline SVG). A column is as wide as the
+    gap between runs, so the pointer only has to be nearest a point, never on it.
+    The bubble opens toward the middle of the chart from either half and is clamped
+    to the drawing's height, so it cannot leave the card or be cropped by the
+    fixed-height tab body the element pane draws this in.
+
+    The end dot is red when the latest value is under the target, and a hovered dot
+    is red on the same rule. That is the one place colour carries anything here, and
+    the words beside the figure — and in the bubble — say it too.
 
     `width` is the viewBox width and should be near the width the chart is drawn at:
     the labels are sized in viewBox units, so a 560-wide drawing squeezed into a
@@ -666,7 +678,41 @@ def target_chart(points: list[tuple], target: float | None = None,
             f"{points[-1][0]} {pct_text(vals[-1], 1)}%"
             + (f", target {target:.1f}%" if target is not None else ""))
 
+    def reading(i: int) -> str:
+        """The hover column for run `i`: guide line, dot and bubble, all hidden until
+        the column is hovered. Everything is placed in percentages of the viewBox, so
+        it tracks the drawing at whatever width the card gives it."""
+        (x, y), (lab, v) = coords[i], points[i]
+        lo, hi = max(0.0, x - step / 2), min(w, x + step / 2)
+        at = (x - lo) / (hi - lo) * 100
+        top = y / h * 100
+        below = target is not None and v < target - 1e-9
+        words = ""
+        if target is not None:
+            gap = pct_text(target - v, 1)
+            words = (f"{gap} {'pt' if gap == '1.0' else 'pts'} below target" if below
+                     else "meets target")
+        # A whole number printed as one, as every score beside the chart is.
+        shown = pct_text(v, 1).removesuffix(".0")
+        # Toward the middle from either half, so the bubble never leaves the chart.
+        side = (f"right:calc({100 - at:.2f}% + 10px)" if x > pad_l + plot_w / 2
+                else f"left:calc({at:.2f}% + 10px)")
+        return (
+            f'<span class="pt" style="left:{lo / w * 100:.3f}%;'
+            f'width:{(hi - lo) / w * 100:.3f}%">'
+            f'<i class="gl" style="left:{at:.2f}%;top:{pad_t / h * 100:.2f}%;'
+            f'height:{plot_h / h * 100:.2f}%"></i>'
+            f'<i class="dt" style="left:{at:.2f}%;top:{top:.2f}%;'
+            f'background:{TONE["critical"]["fg"] if below else ACCENT}"></i>'
+            f'<span class="tip" style="{side};'
+            f'top:clamp(1.5rem, {top:.2f}%, calc(100% - 1.5rem))">'
+            f"<b>{html.escape(str(lab))}</b>"
+            f'<span>{shown}%{" · " + words if words else ""}</span>'
+            "</span></span>"
+        )
+
     return (
+        '<div class="dq-trendw">'
         f'<svg viewBox="0 0 {w:.0f} {h:.0f}" class="dq-trend" role="img" '
         f'aria-label="{html.escape(said)}">'
         + grid
@@ -677,6 +723,11 @@ def target_chart(points: list[tuple], target: float | None = None,
         f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="3.4" fill="{end}"/>'
         + dates
         + "</svg>"
+        # The label above already reads the series aloud; a bubble per run would
+        # only repeat it thirty times to a screen reader.
+        + '<div class="pts" aria-hidden="true">'
+        + "".join(reading(i) for i in range(len(points)))
+        + "</div></div>"
     )
 
 
@@ -1308,10 +1359,34 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-lg i.dash {{ border-top: 2px dashed {NEUTRAL["text_2"]}; margin-left: .55rem; }}
 .dq-below {{ color: {TONE["critical"]["fg"]}; }}
 /* The chart sits on the card floor whatever the lines above it wrapped to. */
-.dq-trend {{ width: 100%; height: auto; display: block; padding-top: .6rem;
-  overflow: visible; }}
+.dq-trendw {{ position: relative; --dq-trend-gap: .6rem; padding-top: var(--dq-trend-gap); }}
+.dq-trend {{ width: 100%; height: auto; display: block; overflow: visible; }}
 .dq-trend .ax {{ font-size: 11px; fill: {NEUTRAL["text_3"]};
   font-family: inherit; font-variant-numeric: tabular-nums; }}
+/* The hover readout — see theme.target_chart(). An HTML layer exactly over the SVG
+   (inset by the wrapper's own top gap, which is why that gap is a variable and not
+   padding on the SVG: percentages here must mean percentages of the drawing). One
+   column per run; hovering a column shows its guide line, dot and bubble. No delay,
+   unlike the row tips: running the cursor along a line is scrubbing, and a bubble
+   that lags the pointer reads the wrong run. */
+.dq-trendw .pts {{ position: absolute; inset: var(--dq-trend-gap) 0 0 0; }}
+.dq-trendw .pt {{ position: absolute; top: 0; bottom: 0; }}
+.dq-trendw .pt > * {{ position: absolute; visibility: hidden; pointer-events: none; }}
+.dq-trendw .pt:hover > * {{ visibility: visible; }}
+.dq-trendw .gl {{ width: 0; border-left: 1px solid {NEUTRAL["border_strong"]};
+  transform: translateX(-.5px); }}
+.dq-trendw .dt {{ width: 9px; height: 9px; border-radius: 50%;
+  transform: translate(-50%, -50%); box-shadow: 0 0 0 2px {NEUTRAL["surface"]}; }}
+.dq-trendw .tip {{
+  z-index: 60; transform: translateY(-50%); width: max-content;
+  display: flex; flex-direction: column; gap: .05rem;
+  background: {NEUTRAL["text"]}; color: #fff;
+  font-size: .74rem; font-weight: 450; line-height: 1.45; letter-spacing: 0;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+  padding: .4rem .6rem; border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(16, 24, 40, .22);
+}}
+.dq-trendw .tip b {{ font-weight: 600; }}
 
 /* --- Monitoring coverage: how much of the register something validates. ------
    One bar in three shares, then the same three as a legend with their counts — the
@@ -1663,7 +1738,7 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .st-key-dq_eltab_notriage {{ padding: .8rem 1rem .6rem; gap: .55rem; }}
 .dq-elover .d {{ font-size: clamp(.74rem, .88vw, .82rem); color: var(--dq-text-2);
   margin-bottom: .2rem; }}
-.dq-elover .dq-trend {{ padding-top: .35rem; }}
+.dq-elover .dq-trendw {{ --dq-trend-gap: .35rem; }}
 .dq-elnote {{ background: {NEUTRAL["canvas"]}; border-radius: 8px; padding: .65rem .8rem;
   margin-top: .7rem; font-size: clamp(.78rem, .92vw, .86rem); line-height: 1.55;
   color: var(--dq-text-2); }}
