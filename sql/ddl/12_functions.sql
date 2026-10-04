@@ -16,6 +16,14 @@
 --   ^04[0-9]{8}$                     2 rules  (same concept, two tables, two columns)
 --   the sentinel value list          1 rule   (and it will grow)
 --
+-- And since 2026-10-05, three more for the rules extracted from "DQ Queries":
+--
+--   the AU phone-normalising CASE    7 rules  (au_phone_digits_v1)
+--   the phone placeholder list       2 rules  (is_phone_placeholder_v1)
+--   the name placeholder list        3 rules  (is_name_placeholder_v1)
+--
+-- Seven helpers, 23 rules. All 10 of the new callers are in shadow.
+--
 -- That is the whole case. It is not large. The email regex is the one that matters
 -- most — it is long enough that nobody will spot the day the two copies diverge.
 --
@@ -161,6 +169,94 @@ RETURNS BOOLEAN
 COMMENT 'TRUE when x is a placeholder standing in for a real value. NULL in, NULL out. Adding a value here is a _v2, not an edit.'
 RETURN lower(trim(x)) IN (
   'service-number-unknown', 'unknown', 'n/a', 'na', 'none', 'null', ''
+);
+
+
+-- ---------------------------------------------------------------
+-- au_phone_digits_v1 — an Australian phone number in local 0xxxxxxxxx form
+-- ---------------------------------------------------------------
+-- Added 2026-10-05 with the rules extracted from the workspace folder "DQ Queries".
+-- Replaces the normalising CASE that seven of those rules each carried, three times
+-- over in some: strip everything but digits, then 61xxxxxxxxx -> 0xxxxxxxxx and a
+-- nine-digit number missing its leading zero -> 0 + it. Anything else comes back as
+-- its bare digits, unjudged.
+--
+-- The only helper here that returns a VALUE rather than a boolean. The rules judge
+-- its output -- is_au_mobile_v1(au_phone_digits_v1(x)), a landline pattern, the
+-- PARTITION BY of the shared-mobile rule -- so the normalisation is stated once
+-- and the judgements stay in the rules where a steward can read them.
+--
+-- NULL in, NULL out, as the CASE it replaces.
+
+CREATE OR REPLACE FUNCTION {catalog}.fn.au_phone_digits_v1(x STRING)
+RETURNS STRING
+COMMENT 'x reduced to digits, with 61xxxxxxxxx and a nine-digit number missing its leading 0 rewritten to local 0xxxxxxxxx form. NULL in, NULL out. Normalises; does not judge.'
+RETURN CASE
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^61[0-9]{9}$'
+    THEN concat('0', substr(regexp_replace(x, '[^0-9]', ''), 3))
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^[23478][0-9]{8}$'
+    THEN concat('0', regexp_replace(x, '[^0-9]', ''))
+  ELSE regexp_replace(x, '[^0-9]', '')
+END;
+
+
+-- ---------------------------------------------------------------
+-- is_phone_placeholder_v1 — a known placeholder, test or prohibited number
+-- ---------------------------------------------------------------
+-- Added 2026-10-05. Replaces the list carried by CTCT_PHN_PLACEHOLDER and
+-- CTCT_MOBL_PLACEHOLDER. The source query's two versions had already drifted apart
+-- (42 numbers and 14); this is their union, 48 numbers, plus seven or more
+-- zeros in a row anywhere in the digits.
+--
+-- SELF-CONTAINED ON PURPOSE: it repeats au_phone_digits_v1's CASE rather than
+-- calling it. A helper that calls a helper couples their versions -- a _v2 of one
+-- would silently change the other -- and the whole point of _v1 is that nothing
+-- changes silently.
+--
+-- Adding a number is a _v2 and a new rule_version on both rules, as for
+-- is_sentinel_v1. NULL in, NULL out.
+
+CREATE OR REPLACE FUNCTION {catalog}.fn.is_phone_placeholder_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x, normalised to local AU form, is a known placeholder, test or prohibited number, or holds seven zeros in a row. NULL in, NULL out. Adding a number is a _v2, not an edit.'
+RETURN CASE
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^61[0-9]{9}$'
+    THEN concat('0', substr(regexp_replace(x, '[^0-9]', ''), 3))
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^[23478][0-9]{8}$'
+    THEN concat('0', regexp_replace(x, '[^0-9]', ''))
+  ELSE regexp_replace(x, '[^0-9]', '')
+END IN (
+  '0400000000', '0400000001', '0400000002', '0404040404', '0400000123', '0400000321',
+  '0400009999', '0410000000', '0411000321', '0411111110', '0411111111', '0412000123',
+  '0412345678', '0413234234', '0420000000', '0421212111', '0422222222', '0432100000',
+  '0433333333', '0444444444', '0452397392', '0455555555', '0477777777', '0488888888',
+  '0491570006', '0499999999', '0200000000', '0200000001', '0222222222', '0250000000',
+  '0280000000', '0280808080', '0288888888', '0290000000', '0299999999', '0300000000',
+  '0390000000', '0700000000', '0800000000', '1300000000', '1300300937', '133937',
+  '1300133937', '0400011132', '0411111112', '0411111113', '0411111116', '0422226838'
+) OR regexp_replace(x, '[^0-9]', '') RLIKE '0{7,}';
+
+
+-- ---------------------------------------------------------------
+-- is_name_placeholder_v1 — a name field holding a stand-in
+-- ---------------------------------------------------------------
+-- Added 2026-10-05. Replaces the list in CTCT_FRST_NM_PLACEHOLDER,
+-- CTCT_LAST_NM_PLACEHOLDER and CTCT_MID_NM_PLACEHOLDER.
+--
+-- Not is_sentinel_v1, and not a _v2 of it: that list is for service numbers
+-- ('service-number-unknown', 'na', '') and this one is for people ('TBC', 'TEST',
+-- 'NOT PROVIDED'). 'NA' and 'NIL' are commented out of the source query -- both are
+-- real names -- and are left out here for the same reason.
+--
+-- NULL in, NULL out: an absent name is a presence violation, not a placeholder.
+
+CREATE OR REPLACE FUNCTION {catalog}.fn.is_name_placeholder_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x, trimmed and upper-cased, is a placeholder standing in for a name. NULL in, NULL out. Adding a value is a _v2, not an edit.'
+RETURN upper(trim(x)) IN (
+  'N/A', 'NONE', 'NULL', 'UNKNOWN', 'NOT APPLICABLE',
+  'NOT PROVIDED', 'TBC', 'TBD', 'TEST', 'DUMMY',
+  'SAMPLE', 'UNDEFINED', 'NOT AVAILABLE'
 );
 
 

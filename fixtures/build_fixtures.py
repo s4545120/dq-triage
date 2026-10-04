@@ -112,6 +112,15 @@ FIXED_ON = {
 # so the fixture has to contain one or the number is untestable.
 RECURRED = {"CTCT_PHN_FMT": (-21, -8, 24)}  # (fixed_day, recurred_day, count now)
 
+# The rules extracted from the "DQ Queries" workspace folder on 2026-10-05. Their
+# history is flat at the snapshot count and draws nothing from the shared rng: a
+# draw here would shift every later rule's jitter, and with it figures the app's
+# tests pin. Flat is also the honest shape for a rule nobody has watched move.
+STEADY = {r.rule_id for r in rules.DQ_QUERIES_RULES}
+
+# The age rules are evaluated as of the final run; see rules.AS_OF.
+assert rules.AS_OF == pd.Timestamp(SNAPSHOT.date()), (rules.AS_OF, SNAPSHOT)
+
 
 def history_count(rule_id: str, snapshot_violations: int, day: int, rng: random.Random,
                   rule_type: str = "", rows_scanned: int | None = None) -> int:
@@ -135,6 +144,9 @@ def _history_count(rule_id: str, snapshot_violations: int, day: int, rng: random
         if day < recur_day:
             return 0
         return now
+
+    if rule_id in STEADY:
+        return snapshot_violations
 
     if rule_id in FIXED_ON:
         fixed_day, before = FIXED_ON[rule_id]
@@ -234,12 +246,14 @@ def build_rule_registry() -> pd.DataFrame:
                 business_domain=r.business_domain,
                 owner_group=r.owner_group,
                 source_layer=r.source_layer,
-                status="active",
+                # Active unless the entry says otherwise. A rule that has only ever
+                # been in shadow has no promotion to record at any version.
+                status=prior.get("status", "active"),
                 effective_from=base_authored,
                 created_by=STEWARD_A[0],
                 created_at=base_authored,
-                promoted_by=STEWARD_A[0],
-                promoted_at=base_authored,
+                promoted_by=None if prior.get("status") == "shadow" else STEWARD_A[0],
+                promoted_at=None if prior.get("status") == "shadow" else base_authored,
                 note=prior.get("note", ""),
             ))
         eff = base_authored if not r.superseded else SNAPSHOT - timedelta(days=45)
@@ -281,6 +295,9 @@ def build_rule_registry() -> pd.DataFrame:
 
 def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     rng = random.Random(20260902)
+    # The rules added since get their own stream, so adding one moves no figure the
+    # original 35 produce -- see STEADY.
+    added_rng = random.Random(20261005)
     runs, samples = [], []
     index: dict[tuple[int, str], str] = {}   # (day, rule_id) -> result_id
     run_ids: dict[int, str] = {}
@@ -329,8 +346,8 @@ def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, 
                 owner_group=r.owner_group,
                 scope_fingerprint=None,   # open question, see 03_results_check_run.sql
                 message=msg,
-                duration_sec=round(rng.uniform(0.4, 9.0), 2),
-                dbu_estimate=round(rng.uniform(0.001, 0.03), 5),
+                duration_sec=round((added_rng if r.rule_id in STEADY else rng).uniform(0.4, 9.0), 2),
+                dbu_estimate=round((added_rng if r.rule_id in STEADY else rng).uniform(0.001, 0.03), 5),
             ))
 
             # Samples only where they are real: the final run, from actual bad rows.

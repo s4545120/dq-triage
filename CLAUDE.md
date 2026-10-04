@@ -768,6 +768,11 @@ referenced one. Thirteen do:
 | `is_valid_email_v1` | the email regex, longhand | 2 |
 | `is_au_mobile_v1` | `^04[0-9]{8}$` | 2 |
 | `is_sentinel_v1` | the placeholder value list | 1 |
+| `au_phone_digits_v1` | the AU phone-normalising CASE | 7 (since 2026-10-05) |
+| `is_phone_placeholder_v1` | the 48-number phone placeholder list | 2 (since 2026-10-05) |
+| `is_name_placeholder_v1` | the 13-value name placeholder list | 3 (since 2026-10-05) |
+
+The last three serve the ten "DQ Queries" rules that sit at v2 — see that section.
 
 **Proven equivalent, not assumed.** `sql/out/checkrun.sql` was re-run against
 `workspace.dq_triage` after the conversion: **33 PASS, 1 FAIL**, the same result as
@@ -1019,6 +1024,110 @@ explain_notebook.py` plans it cleanly except for the four statements that touch 
 column or table `migrate_cde_scope.sql` has not yet created. Item 6 in
 `notebooks/README.md` is what to check on the first real run.
 
+## Rules extracted from the "DQ Queries" folder — 2026-10-05
+
+The workspace folder `/Users/lijinrui46@gmail.com/DQ Queries` holds seven saved SQL Editor
+queries (First Name, Middle Name, Last Name, Birth Date, Phone, Identifier, Email) written
+against the **real** source, `prod.udp_brnz_nrt_tech_view.table_contact_hist`, scoped to
+`sf_mig_attribs_analytics.migration_scope_flag = 1`. This workspace has no `prod` catalog, so
+none of them can run here. Their bodies are `.dbquery.ipynb` workspace files — the
+queries API returns `query_text = ''` for every one, and `workspace list` shows the folder
+empty; `databricks workspace export ".../DQ Queries/<name>.dbquery.ipynb"` is what reads them.
+
+**34 rules came out, all in shadow, in `fixtures/rules.py` as `DQ_QUERIES_RULES`.**
+Re-expressed on the mock `ctct_c` column for each attribute (`FIRST_NAME`→`FRST_NM`,
+`MIDDLE_NAME`→`MID_NM`, `LAST_NAME`→`LAST_NM`, `PHONE`→`PHN_NO`/`MOBL_NO`,
+`BIRTH_DATE`→`BRTH_TS`, `CONTACT_ID`→`CTCT_ID`), consolidated per column rather than 1:1:
+
+| Family | Rules | Candidate to replace |
+|---|---|---|
+| Names | 17 — presence (first, last), placeholder, formatting, contamination, length, structure | nothing; fills `CDE_CUST_NAME`'s gap |
+| Phone | 7 — AU format once washed, washable formatting, placeholder, mobile shared by >10 | `CTCT_PHN_FMT`, `CTCT_MOBL_FMT` |
+| Birth date | 6 — present, future, under 14, 14–17 review, over 110, placeholder date | `CTCT_BRTH_PLAUSIBLE` |
+| Contact ID | 4 — present, numeric, formatting, unique | nothing |
+
+**The old rules are still active.** Shadow first: retiring `CTCT_PHN_FMT`, `CTCT_MOBL_FMT`
+and `CTCT_BRTH_PLAUSIBLE` is a new `rule_version` each, done when a steward promotes the
+replacements — and `CTCT_BRTH_PLAUSIBLE` is a COH-E member, so retiring it is a fixture
+decision, not a registry one. `CTCT_BRTH_MINOR_REVIEW` finds 37 where it finds 27: the
+`year > 2008` cut misses ten 17-year-olds born after 2 September 2008.
+
+**Bugs in the source queries, verified on the warehouse, fixed on the way in.** Spark
+`RLIKE` is Java regex, so the queries' POSIX classes are character SETS: `[[:space:]]`
+matches the letters `: s p a c e` and `[[:cntrl:]]` the letters `c n t r l`. On the
+warehouse: `'Ms Jane'` fails the title check while `'Mrs'`, `'Msc'` and `'Mrsa'` pass it,
+`'12 Smith Street'` and `'Unit 4'` pass the address check, `'John'` has a control
+character and a real one does not, and `' 0412'` has no leading space. And `'\.'` in a
+Spark literal is `'.'`, so the title check took any character after `MR`. **Every count in
+those queries that rests on one of these patterns is wrong** — first-name
+`STARTS_WITH_TITLE` (145) and `UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS` (67) among them. The
+two Phone placeholder lists had drifted (42 and 14 numbers); the rules use the union.
+
+**SQL and Python agree 34 of 34 on adversarial values** — names with titles, companies,
+addresses, control characters and edge punctuation; phones in every washable shape;
+birthdays on each band's boundary — with the age rules' `current_date()` pinned to the
+fixture's final run. Unpinned they disagree on the boundaries, by design: the queries
+measure age from today, the runner has no run-date placeholder, so the evaluator uses
+`rules.AS_OF` (asserted equal to `SNAPSHOT` in `build_fixtures.py`) and **a warehouse
+count of the three age rules matches the fixture only on that date.** A `{run_date}` token
+in the runner is the fix and is not built.
+
+Two bindings were added so every rule names an element: `MID_NM` on `CDE_CUST_NAME` and
+`CTCT_ID` on `CDE_CUST_KEY`. 27 bound columns; coverage reads 8 covered (`CTCT_ID`, by the
+orphan check tagged on its element) · 13 unvalidated (`MID_NM`, by name agreement) ·
+4 `no_rule` · 2 `scope_mismatch`. Shadow rules do not count, so `CDE_CUST_NAME` is still a
+gap until the name rules are promoted. Their history is flat (`build_fixtures.STEADY`)
+and their run rows draw duration and DBU from their own rng (`added_rng`): a draw from the
+shared one shifted every later rule's figures, cohort totals and threshold statistics
+included. Every value the original 35 rules produce is identical to before; add a rule
+the same way.
+
+**Not taken:** the Email query is a reconciliation of flags another system computed
+(`dq_email_invalid_*_flag` against CDQ), not rule logic; `CUSTOMER_ID` and `ORG_ID` have no
+mock table; middle-name presence is informational in the source; the 2+ shared-phone
+variant left the query's own roll-up; the two `ESTATE OF THE LATE` / `STATUS = '5'`
+queries are exploration with no rule name.
+
+**The workspace migration is APPLIED (2026-10-05)** — `sql/out/migrate_dq_queries.sql`,
+from `sql/migrate_dq_queries.py`. Two element versions (the bindings, written from the
+fixture) then 34 rule INSERTs at `rule_version` 1, `status = 'shadow'`, then read-only
+checks. Every INSERT is guarded (`NOT EXISTS` on the rule_id, `NOT array_contains` on the
+binding), so re-running it is a no-op — appendOnly means a duplicate could never be removed.
+Validated without writing on 2026-10-05: all 42 statements `EXPLAIN` to a clean plan
+(`AppendDataExecV1` for every INSERT), read from the plan text — a deliberately broken
+INSERT comes back `SUCCEEDED` with the error in the plan, and the check catches it. And the
+SELECT half of each INSERT, run on its own, returns the exact row it would store; those
+stored predicates, run against `dq_mock_ctct_c` with `current_date()` pinned to the fixture's
+final run, reproduce all 34 fixture counts and rows-scanned exactly.
+
+Applied statement by statement: each of the 36 INSERTs appended one row (registry 86 → 120
+rule rows; `CDE_CUST_NAME` v3, `CDE_CUST_KEY` v2). Checks: 34 shadow, zero rules without a
+binding, zero canonical names. Coverage reads 8 covered · 12 unvalidated · 4 `no_rule` ·
+2 `scope_mismatch` against the fixture's 13 unvalidated — the gap is `EML_STTS_CD`, i.e.
+`fix_cde_email_binding.sql`, still unapplied. Re-running every INSERT afterwards inserted
+0 rows. Nothing writes `check_run` for these rules: there is no scheduled runner.
+
+**Ten of them moved onto three new helpers the same day — APPLIED.**
+`au_phone_digits_v1` (the only helper returning a value, not a boolean),
+`is_phone_placeholder_v1` and `is_name_placeholder_v1`, in `sql/ddl/12_functions.sql` and
+created in the workspace by `sql/out/migrate_dq_fn.sql` (from `sql/migrate_dq_fn.py`). It
+creates with `CREATE FUNCTION IF NOT EXISTS`, never `OR REPLACE`, and never re-issues the
+four existing helpers. `is_phone_placeholder_v1` repeats the normalising CASE rather than
+calling `au_phone_digits_v1`: a helper calling a helper couples their versions. The ten
+rules are at v2 in the fixture and the workspace (130 rule rows), still shadow, v1 kept as
+history; `build_fixtures.py` now lets a superseded entry say `status="shadow"`, so v1 is not
+recorded as having been active and promoted. Proven before the INSERTs: v1 and v2 counted
+side by side on `dq_mock_ctct_c` give identical counts and identical scopes for all ten; the
+adversarial set still agrees 34/34 through the helpers; one number written eleven ways is
+caught by v1, v2 and Python alike. Re-running the file inserted nothing.
+
+`sql/migrate_dq_queries.py` now reads version 1 from the fixture: regenerated, it differs
+from the file that was applied only in the wording of the two phone-placeholder notes.
+
+**Scope filters are longhand on purpose.** `sql/seed.py`, `sql/checkrun.py` and the runner
+rewrite `dq.fn.` in `rule_expr` only; a helper in a `scope_filter` would be seeded as an
+unresolvable name. The generator asserts none is there.
+
 ## Invariants — things that look like bugs and are not
 
 **Execution is the defining non-goal.** No `UPDATE`/`MERGE`/`DELETE` on business data, no
@@ -1085,7 +1194,8 @@ may have a row count below five. `violation_sample` is the one accepted PII surf
 in this design; the profile does not open a second.
 
 **Nine rules pass and two are in shadow, on purpose.** A fixture where everything breaches
-cannot exercise the pass path and leaves closure rate with no denominator.
+cannot exercise the pass path and leaves closure rate with no denominator. (Thirty-six in
+shadow since 2026-10-05 — the 34 below are additions, not a change to this design.)
 
 **Unity Catalog has no `INSERT` privilege.** The spec's wording ("granted `INSERT` on
 `dq.results`") is not expressible — `MODIFY` is the finest-grained write privilege and it

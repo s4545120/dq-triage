@@ -233,8 +233,8 @@ CDES: list[CDE] = [
         data_class="person_name",
         definition=(
             "The name of the person the account is held by, as given on identity evidence. "
-            "Three columns realise it: the full legal name and its parsed given and family "
-            "components."),
+            "Four columns realise it: the full legal name and its parsed given, middle and "
+            "family components."),
         expected_signature=None,   # a name has no shape; asserting one is how you reject people
         criticality="high",
         pii=True,
@@ -243,15 +243,21 @@ CDES: list[CDE] = [
             Binding(CTCT_TABLE, "LEGL_NM"),
             Binding(CTCT_TABLE, "FRST_NM"),
             Binding(CTCT_TABLE, "LAST_NM"),
+            # Bound 2026-10-05 so the name rules from the "DQ Queries" folder could name
+            # an element. Optional by nature: the source query reports its blanks as
+            # informational only, so it carries no presence rule.
+            Binding(CTCT_TABLE, "MID_NM", populated_when="the person has a middle name"),
         ],
         explicit_rule_ids=["XREF_NAME_AGREEMENT"],
         note=(
             "High criticality, and the only rule that touches it is a cross-table agreement "
             "check with no target_column — so a coverage view joining on columns alone would "
             "report zero rules on a KYC element and be wrong about why. That is what "
-            "rule_registry.cde_id is for. Even counting it, all three bindings are watched by "
-            "one consistency rule and nothing else: no format rule, no presence rule, no "
-            "uniqueness. This is a real gap, left in place because reporting it is the point."),
+            "rule_registry.cde_id is for. Even counting it, the bindings are watched by one "
+            "active consistency rule and nothing else. Seventeen shadow rules extracted from "
+            "the 'DQ Queries' folder on 2026-10-05 (presence, placeholder, formatting, "
+            "contamination, length, structure) close the gap once promoted; until then it is "
+            "still a gap, because coverage counts active rules only."),
     ),
     CDE(
         cde_id="CDE_CUST_IDENT_DOC",
@@ -406,7 +412,13 @@ CDES: list[CDE] = [
         expected_signature=r"^\d{7}$",
         criticality="critical",
         pii=False,
-        bindings=[Binding(CTCT_TABLE, "CTCT_KEY")],
+        bindings=[
+            Binding(CTCT_TABLE, "CTCT_KEY"),
+            # The source system's contact identifier, which the migration joins on.
+            # Bound 2026-10-05 for the "DQ Queries" identifier rules; same judgement,
+            # same person, as the rest of the register.
+            Binding(CTCT_TABLE, "CTCT_ID"),
+        ],
         explicit_rule_ids=["XREF_SUBS_CTCT_ORPHAN"],
         note=(
             "Uniqueness by column match; the orphan check is cross-table, carries no "

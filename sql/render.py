@@ -27,7 +27,7 @@ WHAT THIS DROPS
   00_schemas.sql   the schema already exists and you cannot create a catalog
   07_grants.sql    you cannot grant. THIS IS THE CONTROL — see sql/VERIFY.md on what
                    a green sandpit run does and does not prove
-  12, partially    its CREATE SCHEMA and its grants block; the four functions remain
+  12, partially    its CREATE SCHEMA and its grants block; the functions remain
 
 Nothing else is altered. Every column, constraint, comment and view body is
 byte-identical to `sql/ddl/` apart from the object names.
@@ -70,7 +70,7 @@ def render(text: str, cat: str, sch: str, pre: str) -> str:
 
 
 def strip_12(text: str) -> str:
-    """Remove the fn-schema creation and the grants block; keep the four functions."""
+    """Remove the fn-schema creation and the grants block; keep the functions."""
     text = re.sub(
         r"CREATE SCHEMA IF NOT EXISTS \{catalog\}\.fn\b.*?;\n",
         "-- (CREATE SCHEMA dropped by render.py — the sandpit schema already exists)\n",

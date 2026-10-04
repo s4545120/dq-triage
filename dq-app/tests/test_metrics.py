@@ -142,7 +142,9 @@ def test_shadow_rules_are_excluded_from_the_pass_rate(check_runs):
     """A shadow rule runs and records a count but does not raise. Counting it as a
     failure would make promoting a rule look like a regression."""
     d = metrics.detection_summary(check_runs)
-    assert d["rules_skipped"] == 2, "fixture no longer carries its two shadow rules"
+    # The original two plus the 34 extracted from the "DQ Queries" folder, which all
+    # land in shadow until a steward promotes them.
+    assert d["rules_skipped"] == 36, "fixture no longer carries its 36 shadow rules"
     assert d["rules_raised"] == d["rules_run"] - d["rules_skipped"]
     assert d["rules_passing"] + d["rules_breaching"] == d["rules_raised"]
     assert d["pass_rate"] == pytest.approx(100 * d["rules_passing"] / d["rules_raised"])
