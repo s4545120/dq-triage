@@ -1,13 +1,17 @@
 # Onboarding test
 
-Onboards one mock source table end to end in a disposable schema,
-`workspace.dq_onboard`, to try the scale-out design before any of it reaches
-`sql/ddl/`. Nothing here writes to `dq_triage`. `DROP SCHEMA workspace.dq_onboard
-CASCADE` resets it.
+Onboards source tables end to end in a disposable schema, `workspace.dq_onboard`.
+Nothing here writes to `dq_triage`. `DROP SCHEMA workspace.dq_onboard CASCADE` resets it.
+
+The tables are the repo's DDL since 2026-10-06 — `sql/ddl/15_config_onboarding.sql`,
+`16_views_onboarding.sql` and the template columns in `01` — and `onboard.py setup`
+renders and runs them (it needs `sql/` beside this folder, so it runs from a laptop,
+not from the jobs' copy). `fixtures/verify.py` diffs every column list this folder and
+the app write against that DDL.
 
 | Step | Who | Command |
 |---|---|---|
-| Set up schema, clones, new tables, mock table, UC tags | job | `onboard.py setup` |
+| Set up schema, clones, the onboarding DDL, mock table, UC tags | job | `onboard.py setup` (idempotent) |
 | Propose bindings from UC tags and value patterns | job | `onboard.py discover` |
 | **Approve or reject the proposals** | **person** | `review.sql` step 1 |
 | Write approved bindings into the element register | job | `onboard.py apply` |
@@ -19,7 +23,7 @@ CASCADE` resets it.
 
 Run from this folder with `../.venv/bin/python`.
 
-## What it prototypes
+## What it adds
 
 - `config.monitored_table`: which tables are selected, with row key and owner. Stage is
   derived by `v_onboarding_status`, never stored.

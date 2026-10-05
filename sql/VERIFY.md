@@ -13,11 +13,11 @@ until the shape is proven.
 | | Expected |
 |---|---|
 | Schemas | 3 — `config`, `results`, `fn` |
-| Tables | 8 |
-| Views | 5 |
-| Functions | 4 |
-| CHECK constraints | 23 |
-| `delta.appendOnly` tables | 3 |
+| Tables | 14 |
+| Views | 10 |
+| Functions | 7 |
+| CHECK constraints | 55 |
+| `delta.appendOnly` tables | 9 |
 | Negative tests | all rejected |
 | Grant proof queries | as stated in `ddl/07_grants.sql` |
 
@@ -26,7 +26,7 @@ until the shape is proven.
 ## Before you start — two things that will bite
 
 **`ADD CONSTRAINT` is not idempotent.** The tables are `CREATE TABLE IF NOT EXISTS`,
-so re-running *looks* safe. It is not: the 23 `ALTER TABLE ... ADD CONSTRAINT`
+so re-running *looks* safe. It is not: the 55 `ALTER TABLE ... ADD CONSTRAINT`
 statements fail on a second pass with "constraint already exists". Run once cleanly,
 or drop the catalog and start again. Do not discover this halfway through.
 
@@ -228,10 +228,10 @@ the header of `ddl/12_functions.sql` for why the NULL asymmetry is deliberate.
 
 | Query | Expected |
 |---|---|
-| 3a | exactly three rows — app SP writes `disposition`, `rule_registry` and `threshold_review` |
+| 3a | exactly six rows — app SP writes `disposition`, `rule_registry`, `threshold_review`, and onboarding's `monitored_table`, `binding_proposal`, `binding_review`. Three if onboarding was not granted |
 | 3b | zero rows — nothing outside the catalog. The headline claim |
 | 3c | zero rows — no schema-level MODIFY |
-| 3d | `appendOnly` true on both app-written tables |
+| 3d | `appendOnly` true on all six app-written tables |
 | 3e | no UPDATE / DELETE / MERGE in either table's history |
 
 Plus the query at the foot of `ddl/12_functions.sql`: no principal other than the

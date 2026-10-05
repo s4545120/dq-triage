@@ -1,4 +1,4 @@
--- DEPLOY STEP 06 of 14 — copied from sql/ddl/06_results_disposition.sql
+-- DEPLOY STEP 06 of 16 — copied from sql/ddl/06_results_disposition.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- disposition — THE AUDIT REGISTER

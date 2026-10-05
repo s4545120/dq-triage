@@ -255,6 +255,8 @@ def build_rule_registry() -> pd.DataFrame:
                 promoted_by=None if prior.get("status") == "shadow" else STEWARD_A[0],
                 promoted_at=None if prior.get("status") == "shadow" else base_authored,
                 note=prior.get("note", ""),
+                template_id=None,
+                template_version=None,
             ))
         eff = base_authored if not r.superseded else SNAPSHOT - timedelta(days=45)
         if r.status == "retired":
@@ -285,6 +287,11 @@ def build_rule_registry() -> pd.DataFrame:
             promoted_at=(None if r.status == "shadow"
                          else base_authored if r.status == "retired" else eff),
             note=r.note,
+            # Every fixture rule is hand-written. Only the onboarding generator sets
+            # these (sql/ddl/01, onboarding/onboard.py generate); they are written
+            # here so the column diff in verify.py holds the DDL to them.
+            template_id=None,
+            template_version=None,
         ))
     return pd.DataFrame(rows)
 

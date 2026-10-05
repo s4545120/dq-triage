@@ -1,4 +1,4 @@
--- DEPLOY STEP 07 of 14 — copied from sql/ddl/09_config_cde_registry.sql
+-- DEPLOY STEP 07 of 16 — copied from sql/ddl/09_config_cde_registry.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- cde_registry — the critical data elements, registered before anything profiles them

@@ -1,4 +1,4 @@
--- DEPLOY STEP 03 of 14 — copied from sql/ddl/03_results_check_run.sql
+-- DEPLOY STEP 03 of 16 — copied from sql/ddl/03_results_check_run.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- check_run — every verdict, one row per rule per run

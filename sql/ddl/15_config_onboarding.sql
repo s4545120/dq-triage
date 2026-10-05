@@ -1,0 +1,155 @@
+-- Onboarding — which tables are checked, the checks written once per kind of data, and
+-- which columns hold which registered element
+--
+-- Substitute {catalog} before execution. Runs after 01 and 09, whose rows these refer
+-- to by id, and before 16_views_onboarding.sql.
+--
+-- WHAT THIS IS. A table is SELECTED for checking by a row in monitored_table. A job
+-- PROPOSES which of its columns hold which registered element (binding_proposal); a
+-- person DECIDES each proposal (binding_review); the job then writes the approved
+-- bindings onto config.cde_registry and generates the column's checks from
+-- check_template as SHADOW rule rows on config.rule_registry. A person promotes them.
+-- How far a table has got is derived (16_views_onboarding.sql), never stored.
+--
+-- THREE OF THESE ARE APP WRITES, AND 07_grants.sql NAMES THEM. Selecting a table
+-- (monitored_table), a person's binding suggestion (binding_proposal, method
+-- 'suggested') and a binding decision (binding_review). Each is an append signed with
+-- the platform identity. check_template is written by a seed from the repo and
+-- cde_registry only by the onboarding job: no app writes the element register.
+--
+-- APPEND-ONLY, ALL FOUR, LIKE THE REGISTER. Pausing or decommissioning a table is a new
+-- monitored_table version; changing a template is a new template_version; a changed
+-- mind about a binding is not representable as an edit, so a decision is final and the
+-- next proposal for that column is a new row.
+--
+-- THE CHECKS BELOW ARE WHERE THE RULES LIVE LAST. The app and the job each refuse what
+-- these refuse, earlier and with a better message; a third writer that skipped both
+-- would still meet these. The one rule they cannot express -- that whoever suggested a
+-- binding cannot approve it -- spans two tables and is enforced by the app and again by
+-- the onboarding job's apply step.
+
+CREATE TABLE IF NOT EXISTS {catalog}.config.monitored_table (
+  target_table    STRING        NOT NULL COMMENT 'catalog.schema.table selected for checking',
+  table_version   INT           NOT NULL COMMENT 'incremented on every change; (target_table, table_version) is the logical key and the latest version is current',
+  table_code      STRING        NOT NULL COMMENT 'short upper-case code prefixed to the rule ids generated for this table. Never reused, retired tables included, so a new table cannot take a decommissioned one''s rule ids',
+  row_key         ARRAY<STRING> NOT NULL COMMENT 'the column(s) identifying a row; the check runner stamps them on every violation sample it captures',
+  owner_group     STRING                 COMMENT 'group accountable for the table',
+  business_domain STRING                 COMMENT 'copied onto every generated check. A check with no domain vanished from every domain filter in the app, so the generator falls back to the element''s',
+  schedule_group  STRING                 COMMENT 'which scheduled check run picks the table up, e.g. daily_0300',
+  scan_mode       STRING        NOT NULL COMMENT 'full | partition. partition waits on the scope_fingerprint decision: a partial scan changes what violation_pct means',
+  status          STRING        NOT NULL COMMENT 'selected | paused | retired. The check runner checks only selected tables. retired is permanent: re-onboarding is a new selection. How far a selected table has got is DERIVED, see v_onboarding_status',
+  effective_from  TIMESTAMP     NOT NULL COMMENT 'when this version took effect',
+  selected_by     STRING                 COMMENT 'who authored THIS version: the selector, or whoever paused, resumed or decommissioned it -- platform identity when the app wrote it',
+  note            STRING                 COMMENT 'why. Required when a table is paused or retired'
+)
+USING DELTA
+CLUSTER BY (target_table)
+COMMENT 'Which tables are checked. Selection and config only; how far a table has got is a view. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+CREATE TABLE IF NOT EXISTS {catalog}.config.check_template (
+  template_id      STRING    NOT NULL COMMENT 'stable identifier, e.g. TPL_EMAIL_FMT',
+  template_version INT       NOT NULL COMMENT 'incremented on every change. A changed template is a new version and a regeneration pass, never an edit: a past verdict must keep meaning what ran',
+  data_class       STRING    NOT NULL COMMENT 'matches config.cde_registry.data_class: a template applies to a column bound to an element of this class',
+  check_code       STRING    NOT NULL COMMENT 'suffix on a generated rule_id, e.g. FMT',
+  title            STRING    NOT NULL COMMENT 'the generated rule_name, with the element name filled in',
+  input_type       STRING    NOT NULL COMMENT 'the column type the expression expects; a column of another type is skipped, and the generator says so',
+  rule_type        STRING    NOT NULL COMMENT 'as config.rule_registry.rule_type',
+  rule_expr        STRING    NOT NULL COMMENT 'the predicate, with a placeholder where the bound column goes. Lifted from a registered rule: onboarding/templates.py proves each reproduces its source rule',
+  scope_filter     STRING             COMMENT 'as config.rule_registry.scope_filter, with the same placeholder; the binding''s expected_scope_filter is ANDed on at generation',
+  severity         STRING    NOT NULL COMMENT 'P1_block | P2_alert | P3_monitor, copied onto the generated rule',
+  source_rule      STRING             COMMENT 'the registered rule this was lifted from',
+  created_by       STRING             COMMENT 'who seeded this version',
+  created_at       TIMESTAMP          COMMENT 'when'
+)
+USING DELTA
+CLUSTER BY (data_class, template_id)
+COMMENT 'Checks written once per kind of data. The generator writes concrete rule rows from these; the check runner never reads them. Seeded from the repo, append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+CREATE TABLE IF NOT EXISTS {catalog}.config.binding_proposal (
+  proposal_id   STRING    NOT NULL COMMENT 'uuid',
+  proposed_at   TIMESTAMP NOT NULL COMMENT 'when',
+  target_table  STRING    NOT NULL COMMENT 'the table',
+  target_column STRING    NOT NULL COMMENT 'the column said to hold the element',
+  cde_id        STRING    NOT NULL COMMENT 'the registered element it is said to hold',
+  method        STRING    NOT NULL COMMENT 'uc_tag | value_signature | name_match (the discovery job) | suggested (a person)',
+  confidence    DOUBLE    NOT NULL COMMENT '0 to 1. A tag or a suggestion is 1; a value pattern its match rate; a column name 0.6',
+  evidence      STRING             COMMENT 'why, in words a reviewer can check -- the shape of the values, never the values. A suggestion''s reason',
+  proposed_by   STRING             COMMENT 'job:<name> for the discovery job, else the person''s platform identity'
+)
+USING DELTA
+CLUSTER BY (target_table, target_column)
+COMMENT 'A job or a person saying "this column holds this element". Nothing reads a proposal as a binding until a person approves it. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+CREATE TABLE IF NOT EXISTS {catalog}.config.binding_review (
+  proposal_id STRING    NOT NULL COMMENT 'the proposal decided',
+  decision    STRING    NOT NULL COMMENT 'approved | rejected. One decision per proposal; a rejected column is not proposed again unless it is tagged since',
+  reviewed_by STRING    NOT NULL COMMENT 'the deciding person''s platform identity',
+  reviewed_at TIMESTAMP NOT NULL COMMENT 'when',
+  reason      STRING             COMMENT 'required for a rejection. A self-approval made where the second-approver rule is waived starts "[second approver waived]"'
+)
+USING DELTA
+CLUSTER BY (proposal_id)
+COMMENT 'A person deciding a binding proposal. Approved bindings reach config.cde_registry through the onboarding job, never from the app. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE {catalog}.config.monitored_table
+  ADD CONSTRAINT monitored_table_status_enum
+  CHECK (status IN ('selected', 'paused', 'retired'));
+
+ALTER TABLE {catalog}.config.monitored_table
+  ADD CONSTRAINT monitored_table_scan_mode_enum
+  CHECK (scan_mode IN ('full', 'partition'));
+
+ALTER TABLE {catalog}.config.monitored_table
+  ADD CONSTRAINT monitored_table_version_positive
+  CHECK (table_version >= 1);
+
+ALTER TABLE {catalog}.config.monitored_table
+  ADD CONSTRAINT monitored_table_has_row_key
+  CHECK (size(row_key) >= 1);
+
+ALTER TABLE {catalog}.config.monitored_table
+  ADD CONSTRAINT monitored_table_stop_has_reason
+  CHECK (status = 'selected' OR (note IS NOT NULL AND trim(note) <> ''));
+
+ALTER TABLE {catalog}.config.check_template
+  ADD CONSTRAINT check_template_version_positive
+  CHECK (template_version >= 1);
+
+ALTER TABLE {catalog}.config.check_template
+  ADD CONSTRAINT check_template_severity_enum
+  CHECK (severity IN ('P1_block', 'P2_alert', 'P3_monitor'));
+
+-- The placeholder is spelled through concat() so this file never carries it literally:
+-- sql/render.py treats any brace-wrapped word in a statement as a substitution it missed.
+ALTER TABLE {catalog}.config.check_template
+  ADD CONSTRAINT check_template_names_its_column
+  CHECK (instr(rule_expr, concat('{', 'col', '}')) > 0);
+
+ALTER TABLE {catalog}.config.binding_proposal
+  ADD CONSTRAINT binding_proposal_method_enum
+  CHECK (method IN ('uc_tag', 'value_signature', 'name_match', 'suggested'));
+
+ALTER TABLE {catalog}.config.binding_proposal
+  ADD CONSTRAINT binding_proposal_confidence_range
+  CHECK (confidence >= 0 AND confidence <= 1);
+
+-- A job signs job:<name>, a person signs with their identity, and the method says which.
+ALTER TABLE {catalog}.config.binding_proposal
+  ADD CONSTRAINT binding_proposal_author_matches_method
+  CHECK ((method = 'suggested') = (coalesce(proposed_by, '') NOT LIKE 'job:%'));
+
+ALTER TABLE {catalog}.config.binding_proposal
+  ADD CONSTRAINT binding_proposal_suggestion_has_reason
+  CHECK (method <> 'suggested' OR (evidence IS NOT NULL AND trim(evidence) <> ''));
+
+ALTER TABLE {catalog}.config.binding_review
+  ADD CONSTRAINT binding_review_decision_enum
+  CHECK (decision IN ('approved', 'rejected'));
+
+ALTER TABLE {catalog}.config.binding_review
+  ADD CONSTRAINT binding_review_rejection_has_reason
+  CHECK (decision = 'approved' OR (reason IS NOT NULL AND trim(reason) <> ''));

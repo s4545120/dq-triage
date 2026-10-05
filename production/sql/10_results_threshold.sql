@@ -1,4 +1,4 @@
--- DEPLOY STEP 10 of 14 — copied from sql/ddl/13_results_threshold.sql
+-- DEPLOY STEP 10 of 16 — copied from sql/ddl/13_results_threshold.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- threshold_proposal and threshold_review — the detection limit, advised and decided

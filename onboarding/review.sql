@@ -18,12 +18,14 @@ ORDER  BY target_column;
 
 -- 1b. Approve all of them, or add  AND target_column IN (...)  to choose.
 INSERT INTO workspace.dq_onboard.dq_config_binding_review
+  (proposal_id, decision, reviewed_by, reviewed_at, reason)
 SELECT proposal_id, 'approved', current_user(), current_timestamp(), 'onboarding test review'
 FROM   workspace.dq_onboard.dq_config_v_binding_proposal_open;
 
 -- 1c. Reject one instead (put its column in the WHERE). A rejected column is
 --     never proposed again until someone tags it.
 -- INSERT INTO workspace.dq_onboard.dq_config_binding_review
+--   (proposal_id, decision, reviewed_by, reviewed_at, reason)
 -- SELECT proposal_id, 'rejected', current_user(), current_timestamp(), '<why>'
 -- FROM   workspace.dq_onboard.dq_config_v_binding_proposal_open
 -- WHERE  target_column = '<COLUMN>';

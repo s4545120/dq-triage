@@ -59,6 +59,11 @@ Run `00`–`06` and `09`–`10` as the catalog owner, `07` as a metastore admin,
 | `09_config_cde_registry.sql` | `config.cde_registry` | stewards (seeded; the app only reads it) |
 | `10_results_cde_profile.sql` | `results.cde_profile` | profile job |
 | `11_views_cde.sql` | `v_cde_registry_current`, `v_cde_coverage` | — |
+| `12_functions.sql` | shared predicate helpers in `{catalog}.fn` | platform team |
+| `13_results_threshold.sql` | `results.threshold_proposal`, `results.threshold_review` | threshold job; **the app** (the review, append-only) |
+| `14_views_threshold.sql` | `v_threshold_proposal_current` | — |
+| `15_config_onboarding.sql` | `config.monitored_table`, `check_template`, `binding_proposal`, `binding_review` | **the app** (selection, suggestions, decisions — append-only, a decision to grant); the onboarding job (job proposals); a repo seed (templates) |
+| `16_views_onboarding.sql` | `v_monitored_table_current`, `v_binding_current`, `v_binding_proposal_open`, `v_onboarding_status` | — |
 
 ## Three decisions worth knowing before you review this
 
@@ -70,11 +75,14 @@ privilege is `MODIFY`, and `MODIFY` permits `UPDATE`, `DELETE` and `MERGE` as we
 
 The intent is achievable, but with two mechanisms rather than one:
 
-- `MODIFY` on exactly three tables, **named individually** — never on the schema, because
+- `MODIFY` on exactly six tables, **named individually** — never on the schema, because
   a schema-level grant silently extends to every table added later. Two until
   2026-09-28; the third is `results.threshold_review`, the reviewer's decision on a
-  threshold proposal, and `07_grants.sql` says why it could not live anywhere else;
-- `delta.appendOnly = true` on all three of those tables, which makes `UPDATE` and
+  threshold proposal, and `07_grants.sql` says why it could not live anywhere else. The
+  other three (since 2026-10-05) are onboarding's — `monitored_table`,
+  `binding_proposal`, `binding_review` — granted so far only in the `dq_onboard` test
+  schema; running `07` as written takes that decision, and it says so;
+- `delta.appendOnly = true` on all six of those tables, which makes `UPDATE` and
   `DELETE` fail for every principal, owner included.
 
 **The headline claim is unaffected.** "The app cannot modify business data" rests on the

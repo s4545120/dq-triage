@@ -44,6 +44,8 @@ person's binding suggestion (`config.binding_proposal`) and a binding decision
 element register itself is still written by no app: approved bindings reach it through
 the onboarding job. Granting these three in `dq_triage` is the step that makes
 onboarding real there, and it is a decision, not a deploy — see *Onboarding* below.
+Since 2026-10-06 they are in `07_grants.sql` as six writes, the onboarding three
+labelled as that decision: running the file as written takes it.
 
 ## Current state — read before editing anything
 
@@ -52,6 +54,7 @@ onboarding real there, and it is a decision, not a deploy — see *Onboarding* b
 | `sql/ddl/` | Current. Spec v1.0 + Addendum A. **Executed** — as `sql/out/`, rendered for `workspace.dq_triage`. See `RUNBOOK-personal-workspace.md`. |
 | `fixtures/` | Current. Local Parquet dataset generated from the pilot CSVs. Verified. |
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16; scorecard redrawn around targets 2026-10-01. Runs on the fixture **and** against Unity Catalog; deployed as the Databricks App `dq-triage`. |
+| `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard` only** (by `onboard.py setup`); rendered into `sql/out/13_`–`14_` for `dq_triage` and **not run there** — nor are `01`'s two template columns. |
 | `onboarding/` + `jobs/run_checks.py` | Current, 2026-10-05. **Running on a schedule — in `workspace.dq_onboard` only**: the `dq-checks` job (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`. The app half is deployed as a second Databricks App, `dq-onboard`. See *Onboarding*. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
 
@@ -1226,9 +1229,38 @@ takes the latest run that measured an active check, or every page would show one
   a SELECT per table, and sizes on a few reused connections; the catalog is cached an
   hour. It lists what the *app's service principal* can see, not the user.
 
-**Open, and decisions rather than code:** the three grants in `dq_triage`, with DDL for
-the four onboarding tables (today only in `onboard.py setup`) and the two template
-columns; who may approve a binding (the element's `owner_group` is shown, not enforced —
+**The onboarding schema is DDL since 2026-10-06.** `sql/ddl/15_config_onboarding.sql`
+declares the four tables with 14 CHECK constraints and `appendOnly`;
+`16_views_onboarding.sql` the four views, lifted unchanged from `onboard.py`; `01` gains
+`template_id` / `template_version` at the END of its column list (where `ADD COLUMNS`
+puts them on every table that predates them) and a constraint that both or neither are
+set. What changed around it:
+
+* **`onboard.py setup` declares no table.** It renders 15, 08, 11, 14 and 16 with
+  `sql/render.render` and runs them a statement at a time (`render.statements`),
+  tolerating "already exists" on `ADD CONSTRAINT`, so it is idempotent. It needs `sql/`
+  beside it, so it runs from a laptop; the jobs never call it.
+* **Every onboarding INSERT names its columns**, and `fixtures/verify.py` check 6 diffs
+  `onboard.py`'s `MONITORED_COLS` / `TEMPLATE_COLS` / `PROPOSAL_COLS` / `RULE_COLS` and
+  the app's `MONITORED_COLUMNS` / `PROPOSAL_COLUMNS` / `REVIEW_COLUMNS` against the DDL.
+  The fixture writes the two template columns as NULL so check 3 holds `01` to them.
+* **What the constraints refuse** that only code refused before: a pause or decommission
+  without a note, a job method signed by a person or `suggested` signed by a job, a
+  suggestion without a reason, a rejection without a reason, a template whose
+  expression has no column placeholder. The second-approver rule spans two tables and
+  stays in the app and the apply job.
+* **`render.py` appends 15 and 16 to its order** rather than slotting them in, so no
+  rendered file was renumbered; `ALL.sql`'s counts (14 tables, 10 views, 7 functions,
+  55 constraints) are now computed, not typed.
+* **Applied to `dq_onboard` on 2026-10-06**: every existing row checked against every
+  constraint first (zero violations over 327 rows), every statement `EXPLAIN`ed and the
+  plan text read, then setup run twice. The prototype's `binding_review_decision`
+  constraint was dropped as a duplicate of `binding_review_decision_enum`. The existing
+  tables keep their old column comments and no `CLUSTER BY`: `CREATE TABLE IF NOT
+  EXISTS` does not alter a table that is there.
+
+**Open, and decisions rather than code:** the three grants in `dq_triage` (now written in
+`07_grants.sql`), and running 15, 16 and `01`'s template columns there; who may approve a binding (the element's `owner_group` is shown, not enforced —
 those groups do not exist in this workspace); browsing as the signed-in user (needs the
 app's user-authorization scope); `CTCT_BRTH_PLAUSIBLE`'s `year(BRTH_TS)` fails on
 `'31-02-1988'` under ANSI (the runner now records the missing sample instead of failing);
@@ -1307,8 +1339,10 @@ shadow since 2026-10-05 — the 34 below are additions, not a change to this des
 **Unity Catalog has no `INSERT` privilege.** The spec's wording ("granted `INSERT` on
 `dq.results`") is not expressible — `MODIFY` is the finest-grained write privilege and it
 permits `UPDATE`/`DELETE` too. The enforceable equivalent is table-level `MODIFY` on
-exactly three tables plus `delta.appendOnly` — the register, the rule registry and,
-since 2026-09-28, the threshold review. See `sql/README.md`.
+exactly six tables plus `delta.appendOnly` — the register, the rule registry, since
+2026-09-28 the threshold review, and since 2026-10-05 onboarding's monitored_table,
+binding_proposal and binding_review (granted so far only in `dq_onboard`). See
+`sql/README.md`.
 
 ## Commands
 

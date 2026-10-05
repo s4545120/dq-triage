@@ -1,0 +1,119 @@
+-- DEPLOY STEP 15 of 16 — copied from sql/ddl/16_views_onboarding.sql
+-- by tools/build_production.py. Placeholders are NOT substituted.
+--
+-- Onboarding views — where a selected table has got to, derived and never stored
+--
+-- Substitute {catalog} before execution. Runs after 15, which creates the tables these
+-- read, and after 08 and 11, which create v_rule_registry_current and
+-- v_cde_registry_current.
+--
+-- Same discipline as 08_views.sql: current state is derived here. The app keeps a
+-- labelled pandas copy of the review queue and the stage (dq_app/domain/onboarding.py)
+-- because a decision recorded in a session has to move the page before any warehouse
+-- re-runs these; the onboarding job reads these views directly.
+--
+-- A TABLE'S STAGE IS NOT A COLUMN. Promoting a rule, approving a binding and running
+-- the checks each move it without anyone writing "stage", so the stage cannot disagree
+-- with the registers it summarises.
+
+-- ---------------------------------------------------------------
+-- v_monitored_table_current — the selection as it stands now
+-- ---------------------------------------------------------------
+-- Every status, paused and retired included: a retired table's code is still taken.
+
+CREATE OR REPLACE VIEW {catalog}.config.v_monitored_table_current
+COMMENT 'Latest version of every table ever selected for checking, in every status. Filter on status = ''selected'' for what the check runner runs.'
+AS
+SELECT * EXCEPT (rn)
+FROM (
+  SELECT m.*,
+         ROW_NUMBER() OVER (PARTITION BY m.target_table ORDER BY m.table_version DESC) AS rn
+  FROM   {catalog}.config.monitored_table m
+)
+WHERE rn = 1;
+
+-- ---------------------------------------------------------------
+-- v_binding_current — one row per column bound to a registered element
+-- ---------------------------------------------------------------
+
+CREATE OR REPLACE VIEW {catalog}.config.v_binding_current
+COMMENT 'Every binding on a registered element, one row per bound column. The register is the only source; an approved proposal appears here only once the onboarding job has written it there.'
+AS
+SELECT e.cde_id, e.cde_name, e.data_class, e.tolerance_pct, b.*
+FROM   {catalog}.config.v_cde_registry_current e
+LATERAL VIEW explode(e.bindings) x AS b
+WHERE  e.status = 'registered';
+
+-- ---------------------------------------------------------------
+-- v_binding_proposal_open — the review queue
+-- ---------------------------------------------------------------
+-- Proposals nobody has decided, for columns not already bound. A proposal for a column
+-- bound since by another route drops out rather than asking twice.
+
+CREATE OR REPLACE VIEW {catalog}.config.v_binding_proposal_open
+COMMENT 'Binding proposals awaiting a decision, for columns not already bound.'
+AS
+SELECT p.*
+FROM   {catalog}.config.binding_proposal p
+LEFT ANTI JOIN {catalog}.config.binding_review r
+       ON r.proposal_id = p.proposal_id
+LEFT ANTI JOIN {catalog}.config.v_binding_current b
+       ON b.target_table = p.target_table AND b.target_column = p.target_column;
+
+-- ---------------------------------------------------------------
+-- v_onboarding_status — how far each selected table has got
+-- ---------------------------------------------------------------
+-- The stage strings carry their order as a leading digit so a plain sort is the
+-- pipeline's order. dq_app/domain/onboarding.py STAGE_LABEL puts them in words.
+
+CREATE OR REPLACE VIEW {catalog}.config.v_onboarding_status
+COMMENT 'One row per selected table: open proposals, bound columns, shadow and active checks, runs, and the stage they add up to. Derived; nothing stores a stage.'
+AS
+WITH m AS (
+  SELECT * FROM {catalog}.config.v_monitored_table_current WHERE status = 'selected'
+),
+p AS (
+  SELECT target_table, count(*) AS proposals_open
+  FROM   {catalog}.config.v_binding_proposal_open
+  GROUP BY target_table
+),
+b AS (
+  SELECT target_table, count(DISTINCT target_column) AS columns_bound
+  FROM   {catalog}.config.v_binding_current
+  GROUP BY target_table
+),
+r AS (
+  SELECT target_table,
+         count_if(status = 'shadow') AS rules_shadow,
+         count_if(status = 'active') AS rules_active
+  FROM   {catalog}.config.v_rule_registry_current
+  GROUP BY target_table
+),
+c AS (
+  SELECT target_table, count(DISTINCT run_id) AS runs, max(run_ts) AS last_run_ts,
+         count_if(status = 'breach') AS breaches_ever
+  FROM   {catalog}.results.check_run
+  GROUP BY target_table
+)
+SELECT m.target_table, m.table_code, m.owner_group,
+       coalesce(p.proposals_open, 0) AS proposals_open,
+       coalesce(b.columns_bound, 0)  AS columns_bound,
+       coalesce(r.rules_shadow, 0)   AS rules_shadow,
+       coalesce(r.rules_active, 0)   AS rules_active,
+       coalesce(c.runs, 0)           AS runs,
+       c.last_run_ts,
+       CASE
+         WHEN coalesce(p.proposals_open, 0) > 0                   THEN '2 bindings awaiting review'
+         WHEN coalesce(b.columns_bound, 0) = 0                    THEN '1 awaiting discovery'
+         WHEN coalesce(r.rules_shadow, 0) + coalesce(r.rules_active, 0) = 0
+                                                                  THEN '3 awaiting rule generation'
+         WHEN coalesce(r.rules_active, 0) = 0 AND coalesce(c.runs, 0) = 0
+                                                                  THEN '4 shadow, not yet run'
+         WHEN coalesce(r.rules_active, 0) = 0                     THEN '5 shadow, awaiting promotion'
+         ELSE '6 active'
+       END AS stage
+FROM m
+LEFT JOIN p USING (target_table)
+LEFT JOIN b USING (target_table)
+LEFT JOIN r USING (target_table)
+LEFT JOIN c USING (target_table);

@@ -1,4 +1,4 @@
-"""Post-generation checks. Three things:
+"""Post-generation checks:
 
   1. Python twin of sql/ddl/08_views.sql v_disposition_integrity.
   2. Assertions that the fixture is internally consistent.
@@ -10,6 +10,9 @@
   4. The same diff against the triage notebook's write cell. The notebook is what
      actually writes results.cohort in a workspace; fixtures/ only stands in for it
      here, so a column added to one and not the other is a break nothing else sees.
+  5. The notebook's PRIOR_STATES against the states v_cohort_current can return.
+  6. The onboarding writers' column lists -- the job's and the app's -- against
+     15_config_onboarding.sql and the template columns on rule_registry.
 
     ../.venv/bin/python verify.py [out_dir]
 
@@ -145,6 +148,59 @@ if NOTEBOOK.exists():
                 findings.append(
                     f"notebook_drift: the triage notebook accepts prior_state {st!r}, "
                     "which v_cohort_current never returns")
+
+# --- 6. The onboarding writers against 15_config_onboarding.sql ---------------
+# No fixture stands in for the onboarding tables; two writers do the real thing. The
+# onboarding job (onboarding/onboard.py) and the app (dq_app/domain/onboarding.py, whose
+# lists are the columns its adapter writes). Their column lists are read from source
+# rather than imported, so this check needs neither a warehouse nor the app's packages.
+# The template columns on rule_registry are covered by check 3 and by RULE_COLS here.
+import ast as _ast
+
+ROOT = Path(__file__).parent.parent
+
+
+def _constants(path: Path) -> dict[str, list[str]]:
+    out = {}
+    for node in _ast.parse(path.read_text()).body:
+        if isinstance(node, _ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], _ast.Name):
+            try:
+                v = _ast.literal_eval(node.value)
+            except ValueError:
+                continue
+            if isinstance(v, str):
+                out[node.targets[0].id] = [c.strip() for c in v.split(",")]
+            elif isinstance(v, list) and all(isinstance(c, str) for c in v):
+                out[node.targets[0].id] = v
+    return out
+
+
+ONBOARDING_WRITERS = [
+    ("onboarding/onboard.py", "MONITORED_COLS", "config.monitored_table", "15_config_onboarding.sql"),
+    ("onboarding/onboard.py", "TEMPLATE_COLS", "config.check_template", "15_config_onboarding.sql"),
+    ("onboarding/onboard.py", "PROPOSAL_COLS", "config.binding_proposal", "15_config_onboarding.sql"),
+    ("onboarding/onboard.py", "RULE_COLS", "config.rule_registry", "01_config_rule_registry.sql"),
+    ("dq-app/dq_app/domain/onboarding.py", "MONITORED_COLUMNS", "config.monitored_table", "15_config_onboarding.sql"),
+    ("dq-app/dq_app/domain/onboarding.py", "PROPOSAL_COLUMNS", "config.binding_proposal", "15_config_onboarding.sql"),
+    ("dq-app/dq_app/domain/onboarding.py", "REVIEW_COLUMNS", "config.binding_review", "15_config_onboarding.sql"),
+]
+_consts: dict[str, dict] = {}
+for src, name, tbl, fname in ONBOARDING_WRITERS:
+    if not (ROOT / src).exists():
+        findings.append(f"onboarding_drift: {src} is missing")
+        continue
+    cols = _consts.setdefault(src, _constants(ROOT / src)).get(name)
+    if cols is None:
+        findings.append(f"onboarding_drift: {src} no longer defines {name}")
+        continue
+    declared = ddl_columns(fname, tbl)
+    for c in sorted(set(cols) - declared):
+        findings.append(f"onboarding_drift: {src} {name} writes {tbl}.{c}, which {fname} "
+                        "does not declare -- the INSERT would fail on Databricks")
+    for c in sorted(declared - set(cols)):
+        findings.append(f"onboarding_drift: {tbl}.{c} is declared in {fname} and "
+                        f"{src} {name} never writes it")
 
 # --- v_disposition_integrity, clause by clause ------------------------------
 req = coh.set_index("cohort_id").severity.map(lambda s: 2 if s == "P1_block" else 1)
@@ -351,7 +407,8 @@ print(f"cde: {int((_cur_cde.status == 'registered').sum())} elements  {bound_cou
       + ", ".join(f"{k}={v}" for k, v in cov.coverage_gap.value_counts().items()))
 print(f"tables: {len(T)}  cohorts: {len(coh)}  events: {len(disp)}  "
       f"check_runs: {len(runs)}  samples: {len(samp)}")
-print(f"schema: {len(DDL_FOR)} tables diffed against sql/ddl/")
+print(f"schema: {len(DDL_FOR)} tables diffed against sql/ddl/, "
+      f"{len(ONBOARDING_WRITERS)} onboarding column lists against their DDL")
 if findings:
     print(f"\n{len(findings)} INTEGRITY FINDING(S) -- each is a control failure:")
     for f in findings:

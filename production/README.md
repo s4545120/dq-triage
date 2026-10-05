@@ -9,9 +9,9 @@ comparison harness).
 
 | Artefact | Has it run? |
 |---|---|
-| `sql/` — 15 DDL files | **Yes**, as the rendered single-schema variant against `workspace.dq_triage` |
+| `sql/` — 17 DDL files | **Yes**, as the rendered single-schema variant: 01–14 against `workspace.dq_triage`, the onboarding pair (15, 16) against `workspace.dq_onboard` only |
 | `notebooks/03_group_and_advise.ipynb` | **Yes**, as a serverless job against `system.ai.gpt-oss-120b` |
-| `jobs/run_checks.py` | **No.** Draft. SQL generation and verdicts validated; the Spark write path never executed |
+| `jobs/run_checks.py` | **Yes, scheduled — in `workspace.dq_onboard` only** (the `dq-checks` job, daily). Nothing runs it against `dq_triage` |
 | `notebooks/04_send_notification.ipynb` | **No.** Needs a job, a secret scope and an SMTP host |
 | The Streamlit app | **Yes**, deployed — but from `dq-app/`, not from here. See below |
 
@@ -53,7 +53,7 @@ break it is the list below.
     replace all three, or remove them.
 * [ ] **Prerequisites in the target workspace:** the DDL run in the target catalog, a SQL
   warehouse attached to the App under the resource key `sql-warehouse`, and the App's
-  service principal holding the grants in `sql/14_grants.sql`.
+  service principal holding the grants in `sql/16_grants.sql`.
 * [ ] **After the first deploy**, check `system.access.outbound_network` for rows with
   `network_source_type = 'Apps'`. Any rows there are connections the App attempted and
   the egress policy denied. Denials to `login.microsoftonline.com` with source `unknown`
@@ -64,7 +64,7 @@ break it is the list below.
 | Placeholder | What it is |
 |---|---|
 | `{catalog}` | the catalog holding `config` and `results` (103 occurrences) |
-| `{app_sp}` | the app's service principal. Gets `MODIFY` on exactly three tables |
+| `{app_sp}` | the app's service principal. Gets `MODIFY` on exactly six tables — three of them onboarding's, which is a decision; comment those out to deploy without it |
 | `{check_runner_sp}` | the check runner's principal. Gets `EXECUTE` on `{catalog}.fn` and nothing else |
 | `{steward_group}` | who may author rules and record a review |
 | `{approver_group}` | who may approve. **Unresolved in the spec — see below** |
@@ -96,7 +96,7 @@ app.
 * **`join_sql` on `config.rule_registry`.** Three cross-table rules carry a join the
   registry has no column to hold, so `jobs/run_checks.py` keeps them in a hardcoded dict
   and writes `status = 'error'` for any it cannot resolve. Fix this first.
-* **`MODIFY` on `results.cohort` for the triage principal.** Not in `sql/12_grants.sql`.
+* **`MODIFY` on `results.cohort` for the triage principal.** Not in `sql/16_grants.sql`.
   Without it notebook 03 cannot open the chain it creates, and every cohort it writes is
   reported by `v_disposition_integrity` as `missing_recommended_event`.
 * **`function_version` on `results.check_run`.** Rules now depend on functions, and a
@@ -135,11 +135,13 @@ app.
 | 11 | `sql/11_views.sql` | current state, derived — reads 01 and 06 |
 | 12 | `sql/12_views_cde.sql` | coverage — reads 09, 10, 03 and 08's view |
 | 13 | `sql/13_views_threshold.sql` | where each rule's latest proposal has got to — reads 13 and 08's view |
-| 14 | `sql/14_grants.sql` | the control claim. Last, because it grants on objects that must already exist |
+| 14 | `sql/14_config_onboarding.sql` | which tables are checked, check templates, and binding proposals and decisions — append-only |
+| 15 | `sql/15_views_onboarding.sql` | how far each selected table has got — reads 15, 08's view and 11's |
+| 16 | `sql/16_grants.sql` | the control claim. Last, because it grants on objects that must already exist |
 
 | Artefact | What it is |
 |---|---|
-| `jobs/run_checks.py` | **DRAFT — never executed as a job.** The check runner. One aggregate per table rather than one query per rule. SQL generation and verdict logic are validated against a real catalog by `jobs/validate_run_checks.py`; the Spark write path is not. |
+| `jobs/run_checks.py` | **Scheduled in `workspace.dq_onboard` only** (the `dq-checks` job, daily). The check runner. One aggregate per table rather than one query per rule; checks the tables `config.monitored_table` selects. Verdict logic validated against a real catalog by `jobs/validate_run_checks.py`. |
 | `notebooks/03_group_and_advise.ipynb` | **Executed.** The triage job: groups breaches mechanically, reads the register, calls a model once per group, writes `results.cohort`. |
 | `notebooks/04_send_notification.ipynb` | **Never executed.** The mail sender behind `DQ_NOTIFY=job`. Needs a job, a secret scope and an SMTP host that do not exist. Writes no table. |
 | `notebooks/06_suggest_thresholds.ipynb` | **Never executed.** The threshold job: one model call per registered element, advising on each rule's fail_threshold_pct against the element's declared tolerance and the run history. Writes `results.threshold_proposal` and nothing else. |

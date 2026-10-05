@@ -1,4 +1,4 @@
--- DEPLOY STEP 08 of 14 — copied from sql/ddl/10_results_cde_profile.sql
+-- DEPLOY STEP 08 of 16 — copied from sql/ddl/10_results_cde_profile.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- cde_profile — what the data in a critical element actually looks like

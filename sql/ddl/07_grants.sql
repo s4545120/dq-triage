@@ -15,9 +15,11 @@
 --
 -- The claim is still achievable, but it takes two mechanisms rather than one:
 --
---   (a) MODIFY on exactly two tables, named individually — never on the schema.
+--   (a) MODIFY on named tables only (six since 2026-10-05, listed below) — never on
+--       the schema.
 --       Schema-level MODIFY would silently extend to every table added later.
---   (b) delta.appendOnly = true on both of those tables (set in 01 and 06), which
+--   (b) delta.appendOnly = true on every one of those tables (set in 01, 06, 13 and
+--       15), which
 --       makes UPDATE and DELETE fail for every principal, owner included.
 --
 -- Clearing (b) requires ALTER TABLE, which the app's SP cannot run (it is not the
@@ -34,7 +36,7 @@
 -- detective control. It is not preventive, and the spec says so.
 
 -- ---------------------------------------------------------------
--- 1. The app service principal — read everything in dq, append to two tables
+-- 1. The app service principal — read everything in dq, append to six tables
 -- ---------------------------------------------------------------
 
 GRANT USE CATALOG ON CATALOG {catalog} TO `{app_sp}`;
@@ -44,7 +46,7 @@ GRANT USE SCHEMA  ON SCHEMA  {catalog}.results TO `{app_sp}`;
 GRANT SELECT ON SCHEMA {catalog}.config  TO `{app_sp}`;
 GRANT SELECT ON SCHEMA {catalog}.results TO `{app_sp}`;
 
--- The only three writes in the whole application. Table-level, never schema-level.
+-- The triage half's three writes. Table-level, never schema-level.
 -- Two until 2026-09-28; the third is the reviewer's decision on a threshold
 -- proposal, which had nowhere else to live -- adopting one is an append to
 -- rule_registry (already granted), but a rejection or deferral recorded nowhere is
@@ -52,6 +54,21 @@ GRANT SELECT ON SCHEMA {catalog}.results TO `{app_sp}`;
 GRANT MODIFY ON TABLE {catalog}.results.disposition       TO `{app_sp}`;
 GRANT MODIFY ON TABLE {catalog}.config.rule_registry      TO `{app_sp}`;
 GRANT MODIFY ON TABLE {catalog}.results.threshold_review  TO `{app_sp}`;
+
+-- Onboarding, since 2026-10-05: three more, and THESE ARE A DECISION, NOT A DEPLOY.
+-- Until someone takes it they are granted only in the dq_onboard test schema. Running
+-- this file as it stands takes it: comment the three out to deploy without onboarding,
+-- and the Onboarding pages say "No tables are selected yet" and write nothing.
+--   * monitored_table  -- a person selecting, pausing or decommissioning a table
+--   * binding_proposal -- a person suggesting a binding the discovery job missed
+--   * binding_review   -- a person approving or rejecting a binding
+-- Each is an append signed with the platform identity, and 15_config_onboarding.sql
+-- constrains what each may say. Promotion of generated checks needs no new grant: it
+-- is the rule_registry append above. The element register is NOT among them -- an
+-- approved binding reaches config.cde_registry through the onboarding job.
+GRANT MODIFY ON TABLE {catalog}.config.monitored_table    TO `{app_sp}`;
+GRANT MODIFY ON TABLE {catalog}.config.binding_proposal   TO `{app_sp}`;
+GRANT MODIFY ON TABLE {catalog}.config.binding_review     TO `{app_sp}`;
 
 -- Deliberately NOT granted, and each omission is load-bearing:
 --   * anything at all on any prod catalog          -> the headline claim
@@ -62,8 +79,18 @@ GRANT MODIFY ON TABLE {catalog}.results.threshold_review  TO `{app_sp}`;
 --                                                     writes cohort
 --   * MODIFY on results.violation_sample           -> the app cannot alter the evidence
 --   * MODIFY on config.playbook                    -> approaches change by review, not in-app
+--   * MODIFY on config.cde_registry                -> no app writes the element register;
+--                                                     in-app CDE registration would be a
+--                                                     further grant and a further decision
+--   * MODIFY on config.check_template              -> templates are seeded from the repo,
+--                                                     where templates.py proves each one
 --   * CREATE TABLE / MANAGE anywhere               -> the SP cannot grant itself more
---   * ALTER on disposition                         -> the SP cannot clear delta.appendOnly
+--   * ALTER on any table above                     -> the SP cannot clear delta.appendOnly
+--
+-- The onboarding job (discovery, apply, generate) and the check runner run as their
+-- own job identity, not as this principal. They write binding_proposal (method
+-- uc_tag / value_signature / name_match), cde_registry, rule_registry (shadow rows
+-- only) and check_run; those grants belong to the job's owner and are not made here.
 
 -- ---------------------------------------------------------------
 -- 2. Human groups — under OBO these bound what a signed-in user can do
@@ -90,8 +117,10 @@ GRANT SELECT ON SCHEMA {catalog}.results TO `{approver_group}`;
 -- and on a schedule; save the results with the control documentation.
 
 -- 3a. Everything the app SP can write, anywhere in the metastore.
---     EXPECTED: exactly three rows — dq.results.disposition, dq.config.rule_registry
---     and dq.results.threshold_review. Any other row is a control failure.
+--     EXPECTED: exactly six rows — dq.results.disposition, dq.config.rule_registry,
+--     dq.results.threshold_review, and the onboarding three: dq.config.monitored_table,
+--     dq.config.binding_proposal, dq.config.binding_review. Three if onboarding was
+--     not granted. Any other row is a control failure.
 SELECT table_catalog, table_schema, table_name, privilege_type
 FROM   system.information_schema.table_privileges
 WHERE  grantee = '{app_sp}'
@@ -113,10 +142,13 @@ WHERE  grantee = '{app_sp}'
   AND  privilege_type IN ('MODIFY', 'ALL_PRIVILEGES');
 
 -- 3d. appendOnly is still set on every app-written table.
---     EXPECTED: all three report true. Run DESCRIBE DETAIL and read the properties map.
+--     EXPECTED: all six report true. Run DESCRIBE DETAIL and read the properties map.
 DESCRIBE DETAIL {catalog}.results.disposition;
 DESCRIBE DETAIL {catalog}.config.rule_registry;
 DESCRIBE DETAIL {catalog}.results.threshold_review;
+DESCRIBE DETAIL {catalog}.config.monitored_table;
+DESCRIBE DETAIL {catalog}.config.binding_proposal;
+DESCRIBE DETAIL {catalog}.config.binding_review;
 
 -- 3e. Has anyone rewritten the register? Non-INSERT operations on an appendOnly
 --     table should be impossible; this proves it stayed that way.

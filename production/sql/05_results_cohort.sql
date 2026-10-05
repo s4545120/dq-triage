@@ -1,4 +1,4 @@
--- DEPLOY STEP 05 of 14 — copied from sql/ddl/05_results_cohort.sql
+-- DEPLOY STEP 05 of 16 — copied from sql/ddl/05_results_cohort.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- cohort — grouped breaches, one root-cause hypothesis, one recommendation

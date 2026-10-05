@@ -1,4 +1,4 @@
--- DEPLOY STEP 01 of 14 — copied from sql/ddl/01_config_rule_registry.sql
+-- DEPLOY STEP 01 of 16 — copied from sql/ddl/01_config_rule_registry.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- rule_registry — what we check
@@ -83,7 +83,12 @@ CREATE TABLE IF NOT EXISTS {catalog}.config.rule_registry (
   created_at         TIMESTAMP          COMMENT 'when this version was authored',
   promoted_by        STRING             COMMENT 'identity that promoted shadow -> active; NULL while shadow. Spec Open Question: who is authorised to do this is unspecified',
   promoted_at        TIMESTAMP          COMMENT 'when the promotion happened',
-  note               STRING             COMMENT 'why this rule exists or why this version changed. Free text, read by humans in the Rule Registry Studio; the place to record that a scope_filter was added and what it excludes'
+  note               STRING             COMMENT 'why this rule exists or why this version changed. Free text, read by humans in the Rule Registry Studio; the place to record that a scope_filter was added and what it excludes',
+  -- Last, not beside the other identity columns: ALTER TABLE ADD COLUMN appends at the
+  -- end, so this is where they sit on every table that predates them, and a positional
+  -- INSERT written against this file must line up with those tables too.
+  template_id        STRING             COMMENT 'set when the onboarding generator wrote this rule from config.check_template; NULL for a hand-written rule. A column that already has hand-written rules is never given template rules',
+  template_version   INT                COMMENT 'the template version the rule was generated from; NULL exactly when template_id is'
 )
 USING DELTA
 CLUSTER BY (target_table, rule_id)
@@ -101,3 +106,7 @@ ALTER TABLE {catalog}.config.rule_registry
 ALTER TABLE {catalog}.config.rule_registry
   ADD CONSTRAINT rule_registry_version_positive
   CHECK (rule_version >= 1);
+
+ALTER TABLE {catalog}.config.rule_registry
+  ADD CONSTRAINT rule_registry_template_versioned
+  CHECK ((template_id IS NULL) = (template_version IS NULL));

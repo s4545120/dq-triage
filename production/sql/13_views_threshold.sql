@@ -1,4 +1,4 @@
--- DEPLOY STEP 13 of 14 — copied from sql/ddl/14_views_threshold.sql
+-- DEPLOY STEP 13 of 16 — copied from sql/ddl/14_views_threshold.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- Threshold views — where each rule's latest proposal has got to

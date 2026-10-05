@@ -1,4 +1,4 @@
--- DEPLOY STEP 12 of 14 — copied from sql/ddl/11_views_cde.sql
+-- DEPLOY STEP 12 of 16 — copied from sql/ddl/11_views_cde.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- CDE views — current definitions, and the coverage question they exist to answer

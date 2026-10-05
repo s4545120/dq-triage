@@ -1,4 +1,4 @@
--- DEPLOY STEP 00 of 14 — copied from sql/ddl/00_schemas.sql
+-- DEPLOY STEP 00 of 16 — copied from sql/ddl/00_schemas.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- Catalog and schemas for the DQ Triage Agent.

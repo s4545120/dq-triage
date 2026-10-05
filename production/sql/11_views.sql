@@ -1,4 +1,4 @@
--- DEPLOY STEP 11 of 14 — copied from sql/ddl/08_views.sql
+-- DEPLOY STEP 11 of 16 — copied from sql/ddl/08_views.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- Views — derived state, because none of it is stored

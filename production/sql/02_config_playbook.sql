@@ -1,4 +1,4 @@
--- DEPLOY STEP 02 of 14 — copied from sql/ddl/02_config_playbook.sql
+-- DEPLOY STEP 02 of 16 — copied from sql/ddl/02_config_playbook.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- playbook — remediation APPROACHES as reference material

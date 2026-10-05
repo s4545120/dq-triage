@@ -1,4 +1,4 @@
--- DEPLOY STEP 09 of 14 — copied from sql/ddl/12_functions.sql
+-- DEPLOY STEP 09 of 16 — copied from sql/ddl/12_functions.sql
 -- by tools/build_production.py. Placeholders are NOT substituted.
 --
 -- Shared predicate helpers — the idioms that repeat across rule_expr
