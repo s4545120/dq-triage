@@ -91,73 +91,12 @@ def _run_index(check_run: pd.DataFrame) -> pd.DataFrame:
 
 
 # --- Dimensions -------------------------------------------------------------
-# `_DIMENSION_OF` is the only place a rule type is assigned to a dimension. The prose
-# below describes the dimensions; `_dimension_for` is the only reader of the map.
+# Moved to theme.py on 2026-10-06 so the Rules page can label a rule with its
+# dimension without a second copy of the map. `theme.dimension_for` is still the
+# only reader of `theme.DIMENSION_OF`.
 
-_DIMENSION_OF = {
-    "not_null": "Completeness",
-    "format": "Validity",
-    "sentinel": "Validity",
-    "variance": "Validity",
-    "consistency": "Consistency",
-    "referential": "Consistency",
-    "uniqueness": "Uniqueness",
-}
-
-
-def _dimension_for(rule_type: str) -> str:
-    """Map local rule types to the DQ dimensions used in monitoring tools."""
-    return _DIMENSION_OF.get(rule_type, "Other")
-
-
-# The prose outlived two homes — four cards, then a grouping toggle. "Validity" is a
-# term of art, not a word a steward uses about their own data, so it is still defined
-# wherever it is printed: the short line in a check row's tooltip, the long one beside
-# the dimension badge in the check drawer.
-
-DIMENSIONS = {
-    "Completeness": {
-        "short": "Is the value there at all.",
-        "long": (
-            "Whether a value a record is supposed to carry is actually there. A "
-            "completeness check counts the rows where the column is null, blank, or "
-            "holds a placeholder standing in for a value nobody ever supplied. It "
-            "says nothing about whether the value that is there is any good — that "
-            "is Validity's job."
-        ),
-    },
-    "Validity": {
-        "short": "Does the value look like what it claims to be.",
-        "long": (
-            "Whether a value that is present conforms to the shape it is supposed to "
-            "have: an email with an @ and a real top-level domain, a mobile number "
-            "matching 04########, a date of birth that parses and puts the person "
-            "between 18 and 105. Placeholder values that pass a presence check but "
-            "mean nothing — 0400000000, a row of nines — are caught here too. A "
-            "valid value can still be the wrong value; no automated check can tell."
-        ),
-    },
-    "Consistency": {
-        "short": "Does it agree with the other columns and tables.",
-        "long": (
-            "Whether a value agrees with the rest of the record and the rest of the "
-            "estate. Two columns that have to move together — a document number "
-            "present whenever a document type is set — and two tables that have to "
-            "tell the same story about the same person. Each side can be perfectly "
-            "complete and perfectly valid and still disagree, which is why this is a "
-            "dimension of its own."
-        ),
-    },
-    "Uniqueness": {
-        "short": "Is it there exactly once.",
-        "long": (
-            "Whether a value that is supposed to identify one thing identifies "
-            "exactly one. A mobile service number live on two subscriptions at once "
-            "is not a wrong value in either row — both rows are individually fine, "
-            "and the defect only exists in the pair."
-        ),
-    },
-}
+_dimension_for = theme.dimension_for
+DIMENSIONS = theme.DIMENSIONS
 
 
 def _tagged(check_run: pd.DataFrame, registry: pd.DataFrame,

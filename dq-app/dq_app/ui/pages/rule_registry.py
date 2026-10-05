@@ -1,54 +1,57 @@
-"""Rule registry — the rules, read by the element they watch, and the promotion write.
+"""Rules — the critical data elements, the rules on the one picked, and one rule in full.
 
-Laid out like the scorecard since 2026-10-05: the critical data elements on the left,
-the rules naming the one picked on the right, split Active / Shadow, and a drawer for
-one rule. Until then this page was a thirteen-column dataframe over 67 rules, a
-selectbox of every rule id to inspect one, and a second dataframe of shadow rules
-above a second selectbox to promote one — three ways into the same list and none of
-them by the thing a steward actually thinks in. Every rule names its element since
-2026-09-28, so the element is the natural first cut; `All rules` is the list's first
-row for anyone who wants the registry flat.
-
-Same keyed containers as the scorecard (`dq_pillbar`, `dq_elsplit`, `dq_elcard`,
-`dq_elpane`, `dqrows_*`, `dq_check_drawer`), so every rule in theme.py that styles
-those cards — and the reasons written beside each — applies here unchanged.
+Redrawn 2026-10-06 from a design mock: three cards side by side. CDEs on the left
+(search, domain, paged), the picked element's rules in the middle, and the picked
+rule on the right — its pass rate against its own target, the rows it failed, and a
+Definition & code · Sample rows · History tabset. Until then this page was the
+scorecard's two-card layout with a drawer for one rule, and the rule's expression sat
+under its version table at the foot of the drawer.
 
 Three things worth knowing before reading a number here:
 
-**The registry is append-only and stores no `effective_to`.** A new version is a new
-row; the current version is derived at read time. That is why promoting a rule is an
-INSERT and why every past version is still in the drawer.
+**Rule logic is the runner's query, not an illustration.** The mock drew a
+`CASE WHEN … THEN 'FAIL'` select; nothing runs that. What is printed is the query
+`jobs/run_checks.py` runs to fetch the rows a rule flags (`domain/rule_sql.py`, diffed
+against the runner by `tests/test_rules_page.py`). Names print in canonical form —
+`prod.customer.*`, `dq.fn.is_blank_v1` — and are rewritten per workspace at seed time.
+This app never runs it.
 
-**The `rule_expr` values have been executed, and 33 of 34 agree with the fixture's
-Python evaluators.** `sql/out/checkrun.sql` runs each against the mock tables in
-`workspace.dq_triage`. The one disagreement is `XREF_NAME_AGREEMENT`, whose `<>` is not
-null-safe. The figure in the header is that run's result, not something computed here.
+**The mock's "Example values" are not here, because nobody wrote any.** A table of
+`alex@example.com → Pass` would be text this page invented. What is here instead is
+the values the rule actually flagged on its latest run, out of `violation_sample` —
+the one accepted PII surface, same rows and cap as the Sample rows tab.
 
-**Expressions print in canonical form.** `dq.fn.is_blank_v1(...)` is rewritten per
-layout at seed time, so what this page prints is not necessarily the string the
-warehouse holds. A referenced helper is immutable: a change is a `_v2` plus a new
-`rule_version`, never an edit.
+**The registry is append-only and stores no `effective_to`.** Promoting a shadow rule
+is an INSERT at `rule_version + 1`, and it asks first. Every past version is under
+History.
+
+The `33 of 34 expressions verified` figure is the result of `sql/out/checkrun.sql` in
+`workspace.dq_triage`, not something this page computes; `XREF_NAME_AGREEMENT`'s `<>`
+is the one that is not null-safe.
 """
 
 from __future__ import annotations
 
 import html
+import json
 
 import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter, identity
+from dq_app.domain import rule_sql
 from dq_app.ui import components, theme
 from dq_app.ui.components import opt
 
 components.page_chrome()
 
-ALL = "__all__"
-# The list and the rule tabs are fixed-height boxes that scroll inside, so the two
-# cards sit level whatever an element holds — the same construction, and the same
-# reason, as LIST_BODY / TAB_BODY on the scorecard.
-LIST_BODY = 470
-TAB_BODY = 410
+# The three cards are the same height by construction: the two lists and the detail
+# tabs are fixed-height boxes that scroll inside. Change a row's height or the
+# detail header's line count and these need re-measuring, as on the scorecard.
+CDE_PAGE = 7
+CDE_BODY = 456
+RULE_BODY = 576
+TAB_BODY = 420
 ROW_GRID = "minmax(0,1fr)"
 
 BELOW, MET, UNASSESSED = (theme.TONE["critical"]["fg"], theme.ACCENT,
@@ -57,41 +60,11 @@ _crit_rank = {c: i for i, c in enumerate(theme.CRITICALITY_ORDER)}
 _gap_rank = {g: i for i, g in enumerate(theme.COVERAGE_GAP_ORDER)}
 
 
-def _pct(v) -> str:
-    return "—" if v is None or pd.isna(v) else f"{float(v):.1f}%"
-
-
-def _row_markup(name: str, figure: str, figure_colour: str, bar: str,
-                left: str, right: str, dot: str = "", compact: bool = False) -> str:
-    """The scorecard's row: name and figure, the bar, the line under it. Copied rather
-    than imported because a page module cannot be imported without running it."""
-    head = (f'<span class="l1"><span class="nm">{dot}{html.escape(name)}</span>'
-            f'<span class="sc" style="color:{figure_colour}">{figure}</span></span>')
-    words = f"<span>{html.escape(left)}</span><span>{html.escape(right)}</span>"
-    if compact:
-        return f'<span class="dq-el c2">{head}<span class="l2">{bar}{words}</span></span>'
-    return f'<span class="dq-el">{head}{bar}<span class="l2">{words}</span></span>'
-
-
-SHADOW_GREY = "#c5c9d3"
-
-
-def _stack_bar(failing: int, passing: int, shadow: int) -> str:
-    """Rule count by where each stands, as one bar. Not a pass rate: an element whose
-    two active rules each fail one row in thirty reads as two failing rules here, and
-    the scorecard is where its row-weighted score lives."""
-    total = failing + passing + shadow
-    if not total:
-        return '<span class="dq-sbar"></span>'
-    parts = [(failing, BELOW), (passing, MET), (shadow, SHADOW_GREY)]
-    return ('<span class="dq-sbar">'
-            + "".join(f'<span style="flex:{n} 1 0;background:{c}"></span>'
-                      for n, c in parts if n)
-            + "</span>")
-
-
-def _dot(tone: str) -> str:
-    return f'<i class="dq-eldot" style="background:{theme.TONE[tone]["fg"]}"></i>'
+def _pct(v, places: int = 1) -> str:
+    if v is None or pd.isna(v):
+        return "—"
+    shown = f"{float(v):.{places}f}"
+    return (shown[:-2] if shown.endswith(".0") else shown) + "%"
 
 
 # --- Data ---------------------------------------------------------------------
@@ -101,12 +74,19 @@ current = adapter.get_rule_registry_current()
 runs = adapter.get_check_runs()
 elements = adapter.get_cde_registry_current()
 cde_cov = adapter.get_cde_coverage()
+samples = adapter.get_violation_samples()
 
-latest_run_id = runs.loc[runs["run_ts"].idxmax(), "run_id"] if not runs.empty else None
-latest = runs[runs["run_id"] == latest_run_id].drop_duplicates("rule_id").set_index("rule_id")
+# Each rule's own latest measurement. Not the estate's latest run: a shadow check
+# measured by the onboarding job is never in "the latest run" (see
+# `metrics.latest_run_id`), and its figures would vanish from its own page.
+measured = runs[runs["status"] != "error"]
+latest = (measured.sort_values("run_ts").drop_duplicates("rule_id", keep="last")
+          .set_index("rule_id"))
 # Rules the register says measure rows they should not. Their breach is a fact about
 # the rule, so it is never painted as bad data — as on the scorecard.
 disputed_ids = {i for lst in cde_cov["unscoped_rule_ids"] for i in components.as_list(lst)}
+expected_scope = {i: r["expected_scope_filter"] for _, r in cde_cov.iterrows()
+                  for i in components.as_list(r["unscoped_rule_ids"])}
 worst_gap = (cde_cov.assign(_g=cde_cov["coverage_gap"].map(_gap_rank))
              .sort_values("_g").groupby("cde_id").head(1).set_index("cde_id")["coverage_gap"])
 columns_of = {cid: [f"{str(r.target_table).split('.')[-1]}.{r.target_column}"
@@ -118,280 +98,256 @@ n_active = int((current["status"] == "active").sum())
 n_shadow = int((current["status"] == "shadow").sum())
 
 
-def _page_head(sub: str) -> str:
-    return ('<div class="dq-page-hd"><div class="t">Rule registry</div>'
-            f'<div class="s">{sub}</div></div>')
-
-
-# --- Title and filters ----------------------------------------------------------
-
-with st.container(key="dq_pillbar"):
-    head, f1, f2, f3 = st.columns([2.4, 1.05, 1.05, 1.5], vertical_alignment="center")
-    with f1:
-        sev_choice = st.selectbox(
-            "Severity", ["All"] + theme.SEVERITY_ORDER,
-            format_func=lambda s: s if s == "All" else
-            f"{theme.SEVERITY_SHORT[s]} {theme.SEVERITY_WORD.get(s, '')}".strip())
-    with f2:
-        domains = sorted(current["business_domain"].dropna().unique())
-        dom_choice = st.selectbox("Domain", ["All"] + domains)
-    with f3:
-        search = st.text_input("Find", placeholder="Find a rule, table or column",
-                               label_visibility="collapsed", key="_rule_search")
-    head.markdown(_page_head(
-        f"{n_active} active · {n_shadow} in shadow · {len(registry)} versions on record"
-        " · 33 of 34 expressions verified in the warehouse"
-        + theme.hint(
-            "Each rule_expr was run against the mock tables in workspace.dq_triage and "
-            "its count diffed against the fixture's Python evaluator. 33 agree. "
-            "XREF_NAME_AGREEMENT does not: its <> comparison is not null-safe, so it "
-            "reports 0 where the evaluator reports 2. That figure is the result of "
-            "sql/out/checkrun.sql, not something this page computes.", side="right")),
-        unsafe_allow_html=True)
-
-view = current
-if sev_choice != "All":
-    view = view[view["severity"] == sev_choice]
-if dom_choice != "All":
-    view = view[view["business_domain"] == dom_choice]
-if search:
-    hay = (view["rule_id"] + " " + view["rule_name"] + " " + view["target_table"] + " "
-           + view["target_column"].fillna("") + " " + view["cde_id"].fillna("")).str.lower()
-    view = view[hay.str.contains(search.lower(), regex=False)]
-filtered = sev_choice != "All" or dom_choice != "All" or bool(search)
-
-
 # --- One rule as a row ---------------------------------------------------------
 
 def _rule_row(r) -> dict:
     run = latest.loc[r["rule_id"]] if r["rule_id"] in latest.index else None
     ran = run is not None
-    bad = int(run["violation_count"]) if ran else None
-    rate = 100.0 - float(run["violation_pct"]) if ran else None
     limit = float(r["fail_threshold_pct"]) if pd.notna(r["fail_threshold_pct"]) else None
     over = ran and limit is not None and float(run["violation_pct"]) > limit
     shadow = r["status"] == "shadow"
-    where = str(r["target_table"]).split(".")[-1] + (
-        f".{r['target_column']}" if opt(r["target_column"]) else " (join)")
-    if not ran:
-        state = "Not run"
-    elif shadow:
-        state = f"Would flag {bad:,}" if bad else "Would pass"
-    elif over and r["rule_id"] in disputed_ids:
-        state = "Rule scope disputed"
+    disputed = r["rule_id"] in disputed_ids
+    if shadow:
+        state, tone = "Shadow", "moderate"
+    elif not ran:
+        state, tone = "Not run", "neutral"
+    elif over and disputed:
+        state, tone = "Scope disputed", "neutral"
     elif over:
-        state = "Failing"
+        state, tone = "Failing", "critical"
     else:
-        state = "Passing"
+        state, tone = "Passing", "success"
+    col = opt(r["target_column"])
     return {
         "Rule id": r["rule_id"], "Name": r["rule_name"], "Severity": r["severity"],
-        "Status": r["status"], "Where": where, "Rate": rate, "Bad": bad,
-        "Target": None if limit is None else 100.0 - limit,
-        "Failing": bool(over) and not shadow, "Over": bool(over),
-        "Disputed": r["rule_id"] in disputed_ids, "State": state,
-        "Version": int(r["rule_version"]), "Type": r["rule_type"],
-        "Scoped": bool(opt(r["scope_filter"])), "cde_id": r["cde_id"],
+        "Status": r["status"], "Dimension": theme.dimension_for(r["rule_type"]),
+        "Column": col if col else "join", "Table": str(r["target_table"]).split(".")[-1],
+        "Rate": 100.0 - float(run["violation_pct"]) if ran else None,
+        "Bad": int(run["violation_count"]) if ran else None,
+        "Rows": int(run["rows_scanned"]) if ran else None,
+        "Run ts": run["run_ts"] if ran else None,
+        "Run id": run["run_id"] if ran else None,
+        "Limit": limit, "Target": None if limit is None else 100.0 - limit,
+        "Failing": bool(over) and not shadow, "Disputed": disputed,
+        "State": state, "Tone": tone, "cde_id": r["cde_id"],
     }
 
 
-rows = [_rule_row(r) for _, r in view.iterrows()]
-# Failing first, worst first; then passing; then what has not run.
-rows.sort(key=lambda x: (not x["Failing"], x["Rate"] is None,
-                         -(x["Bad"] or 0) if x["Failing"] else 0,
-                         theme.SEVERITY_ORDER.index(x["Severity"])
-                         if x["Severity"] in theme.SEVERITY_ORDER else 9, x["Name"]))
-
-
-def _rule_cells(row) -> str:
-    colour = (UNASSESSED if row["Status"] == "shadow" or row["Rate"] is None or row["Disputed"]
-              else BELOW if row["Failing"] else MET)
-    figure = (_pct(row["Rate"])
-              + (f'<span class="of"> / ≥ {row["Target"]:.1f}%</span>'
-                 if row["Target"] is not None and row["Rate"] is not None else ""))
-    return _row_markup(
-        row["Name"], figure, BELOW if colour == BELOW else theme.NEUTRAL["text"],
-        theme.target_bar(row["Rate"], row["Target"], colour),
-        f"{row['Rule id']} · {row['Where']}", row["State"],
-        _dot(theme.SEVERITY_TONE.get(row["Severity"], "neutral")), compact=True)
-
-
-def _rule_tip(row) -> list:
-    return [row["Name"], (f"{row['Rule id']} · v{row['Version']}", "mono"),
-            f"{theme.SEVERITY_SHORT.get(row['Severity'], row['Severity'])} "
-            f"{theme.SEVERITY_WORD.get(row['Severity'], '')} · {row['Type']} · "
-            + ("scoped" if row["Scoped"] else "unscoped — every row"),
-            (row["Where"], "mono")]
-
-
-# --- Left: the elements --------------------------------------------------------
-
-def _el_row(cid, name, mine: list[dict], crit=None) -> dict:
-    act = [x for x in mine if x["Status"] == "active"]
-    shd = [x for x in mine if x["Status"] == "shadow"]
-    failing = sum(x["Failing"] for x in act)
-    return {
-        "key": cid, "Element": name, "Criticality": crit, "N": len(mine),
-        "Active": len(act), "Shadow": len(shd), "Failing": failing,
-        "Line": f"{len(act)} active · {len(shd)} shadow",
-        "Right": (f"{failing} failing" if failing else
-                  "No active rule" if not act else "All passing"),
-    }
-
-
+rows = [_rule_row(r) for _, r in current.iterrows()]
 by_el: dict = {}
 for x in rows:
     by_el.setdefault(x["cde_id"], []).append(x)
+for mine in by_el.values():
+    # Failing first, worst first; then passing; then shadow; then what has not run.
+    mine.sort(key=lambda x: (
+        0 if x["Failing"] else 1 if x["Status"] == "active" and x["Rate"] is not None
+        else 2 if x["Status"] == "shadow" else 3,
+        -(x["Bad"] or 0) if x["Failing"] else 0,
+        theme.SEVERITY_ORDER.index(x["Severity"])
+        if x["Severity"] in theme.SEVERITY_ORDER else 9, x["Name"]))
 
-el_rows = []
-for cid, er in el_by_id.iterrows():
-    mine = by_el.get(cid, [])
-    if filtered and not mine:
-        continue
-    el_rows.append(_el_row(cid, er["cde_name"], mine, er["criticality"]))
-el_rows.sort(key=lambda e: (-e["Failing"], _crit_rank.get(e["Criticality"], 9), e["Element"]))
-all_row = _el_row(ALL, "All rules", rows)
-listed = [all_row] + el_rows
 
+# --- Selection ---------------------------------------------------------------------
+# A rule can be asked for on its own (a test, or a link that knows only the rule); its
+# element follows from it. Picking an element clears the rule, so the first rule on
+# the new element opens.
+
+pick = st.session_state.get("_rule_pick")
+if pick not in set(current["rule_id"]):
+    pick = None
 scope = st.session_state.get("_rule_el")
-if scope not in {e["key"] for e in listed}:
-    scope = ALL
+if pick and scope is None:
+    scope = current.loc[current["rule_id"] == pick, "cde_id"].iloc[0]
 
 
-def _el_cells(row) -> str:
-    dot = (_dot(theme.CRITICALITY_TONE.get(row["Criticality"], "neutral"))
-           if row["Criticality"] else "")
-    return _row_markup(
-        row["Element"], f"{row['N']} {'rule' if row['N'] == 1 else 'rules'}",
-        theme.NEUTRAL["text"] if row["N"] else theme.NEUTRAL["text_2"],
-        _stack_bar(row["Failing"], row["Active"] - row["Failing"], row["Shadow"]),
-        row["Line"], row["Right"], dot)
+def _el_row(cid, er) -> dict:
+    mine = by_el.get(cid, [])
+    return {"key": cid, "Element": er["cde_name"], "Domain": er["business_domain"],
+            "Criticality": er["criticality"], "N": len(mine),
+            "Failing": sum(x["Failing"] for x in mine), "Gap": worst_gap.get(cid),
+            "Hay": " ".join([str(er["cde_name"]), cid, *columns_of.get(cid, []),
+                             *(f"{x['Rule id']} {x['Name']}" for x in mine)]).lower()}
 
 
-def _el_tip(row) -> list:
-    if row["key"] == ALL:
-        return ["All rules", "Every rule in the registry, whatever element it names"]
-    er = el_by_id.loc[row["key"]]
-    cols = columns_of.get(row["key"], [])
-    return [row["Element"],
-            f"{str(er['criticality']).capitalize()} criticality · "
-            f"{theme.COVERAGE_GAP_LABEL.get(worst_gap.get(row['key']), '')}",
-            (" · ".join(cols), "mono") if cols else None]
+all_el = [_el_row(cid, er) for cid, er in el_by_id.iterrows()]
+all_el.sort(key=lambda e: (-e["Failing"], _crit_rank.get(e["Criticality"], 9), e["Element"]))
+if scope not in {e["key"] for e in all_el}:
+    scope = all_el[0]["key"] if all_el else None
 
 
-with st.container(key="dq_elsplit"):
-    left, right = st.columns([1, 1.5], gap="medium")
+# --- Header ------------------------------------------------------------------------
 
-with left, st.container(key="dq_elcard"):
-    n_failing_el = sum(1 for e in el_rows if e["Failing"])
+sel_el = next((e for e in all_el if e["key"] == scope), None)
+el_rules = by_el.get(scope, [])
+if pick is None or pick not in {x["Rule id"] for x in el_rules}:
+    pick = el_rules[0]["Rule id"] if el_rules else None
+sel = next((x for x in el_rules if x["Rule id"] == pick), None)
+tab_key = f"_rule_tab_{pick}"
+captured = 0
+if sel is not None and sel["Run id"] is not None:
+    captured = int(((samples["rule_id"] == pick) & (samples["run_id"] == sel["Run id"])).sum())
+TAB_LABELS = ["Definition & code",
+              f"Sample rows · {captured:,}" if captured else "Sample rows", "History"]
+
+
+def _to_tab(label: str) -> None:
+    st.session_state[tab_key] = label
+
+
+crumb = ['<span class="dq-crumb"><b>Rules</b>']
+if sel_el:
+    crumb.append(f'&nbsp;&nbsp;/&nbsp;&nbsp;{html.escape(sel_el["Element"])}')
+if sel:
+    crumb.append(f'&nbsp;&nbsp;/&nbsp;&nbsp;{html.escape(sel["Name"])}')
+st.markdown("".join(crumb) + "</span>", unsafe_allow_html=True)
+
+head, ctl = st.columns([3, 1.4], vertical_alignment="top")
+with head:
+    if sel:
+        where = f'{sel["Table"]}.{sel["Column"]}' if sel["Column"] != "join" \
+            else f'{sel["Table"]} (join)'
+        st.markdown(
+            '<div class="dq-tmhead dq-rhead">'
+            f'<div class="n">{html.escape(sel["Name"])}{theme.badge(sel["State"], sel["Tone"])}</div>'
+            f'<div class="m">{html.escape(sel_el["Element"])} · '
+            f'<span class="fq">{html.escape(where)}</span></div></div>',
+            unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="dq-tmhead dq-rhead"><div class="n">Rules</div>'
+                    '<div class="m">Every rule names the element it watches.</div></div>',
+                    unsafe_allow_html=True)
+with ctl, st.container(key="dq_rctl"):
+    if sel:
+        st.button("View run history", icon=":material/history:", key="_rule_hist",
+                  on_click=_to_tab, args=(TAB_LABELS[2],), width="stretch")
     st.markdown(
-        '<div class="dq-elcard-hd"><div class="t">By critical data element'
-        + theme.hint("Every rule names the element it watches, so the register is the "
-                     "index. The bar splits an element's rules by where each stood on the "
-                     "latest run: active and failing, active and passing, or in shadow — "
-                     "measured on every run and never raised.", side="right")
-        + f'</div><div class="q">{len(el_rows)} elements · {n_failing_el} with a failing '
-          f"rule{' · filtered' if filtered else ''}</div></div>",
-        unsafe_allow_html=True,
-    )
-    with st.container(height=LIST_BODY, key="dqrows_rlist"):
-        got = components.clickable_rows(
-            listed, ROW_GRID, _el_cells, "rel", "key",
-            lambda row: f"Show rules on {row['Element']}", picked=scope, tip=_el_tip)
-    if got:
-        st.session_state["_rule_el"] = got
-        st.rerun()
-    st.markdown(
-        '<div class="dq-elfoot"><span>'
-        f'<i class="dq-sbkey" style="background:{BELOW}"></i>Failing'
-        f'<i class="dq-sbkey" style="background:{MET}"></i>Passing'
-        f'<i class="dq-sbkey" style="background:{SHADOW_GREY}"></i>Shadow</span>'
-        "<span>Most failing rules first</span></div>",
+        f'<div class="dq-tmrun">{n_active} active · {n_shadow} in shadow · '
+        "33 of 34 expressions verified"
+        + theme.hint(
+            "Each rule_expr was run against the mock tables in workspace.dq_triage and "
+            "its count diffed against the fixture's Python evaluator. 33 agree. "
+            "XREF_NAME_AGREEMENT does not: its <> comparison is not null-safe, so it "
+            "reports 0 where the evaluator reports 2. That figure is the result of "
+            "sql/out/checkrun.sql, not something this page computes.")
+        + "</div>",
         unsafe_allow_html=True)
 
 
-# --- Right: the rules on the element picked --------------------------------------
+# --- The three cards -----------------------------------------------------------------
 
-sel = next(e for e in listed if e["key"] == scope)
-scoped_rows = rows if scope == ALL else by_el.get(scope, [])
-active_rows = [x for x in scoped_rows if x["Status"] == "active"]
-shadow_rows = [x for x in scoped_rows if x["Status"] == "shadow"]
-picked_rule = st.session_state.get("_rule_pick")
+with st.container(key="dq_rsplit"):
+    c_el, c_rules, c_detail = st.columns([1, 1, 2.2], gap="small")
 
 
-def _rule_list(items: list[dict], key: str, empty: str) -> None:
-    if not items:
-        with st.container(height=TAB_BODY, border=False, key=f"dq_eltab_{key}_none"):
-            st.caption(empty)
-        return
-    with st.container(height=TAB_BODY, border=False, key=f"dqrows_{key}"):
-        got = components.clickable_rows(
-            items, ROW_GRID, _rule_cells, key, "Rule id",
-            lambda row: f"Open {row['Name']}", picked=picked_rule, tip=_rule_tip)
-    if got:
-        st.session_state["_rule_pick"] = got
-        st.rerun()
+# Left: the elements.
+with c_el, st.container(key="dq_rcde"):
+    st.markdown(f'<div class="dq-rcard-hd"><span class="t">CDEs</span>'
+                f'<span class="dq-count">{len(all_el)}</span></div>',
+                unsafe_allow_html=True)
+    term = st.text_input("Search CDEs", placeholder="Search CDEs, columns or rules",
+                         label_visibility="collapsed", icon=":material/search:",
+                         key="_rule_cde_search").strip().lower()
+    domains = sorted({str(e["Domain"]) for e in all_el if opt(e["Domain"])})
+    dom = st.selectbox("Domain", ["All domains"] + domains, key="_rule_domain",
+                       label_visibility="collapsed")
+    listed = [e for e in all_el
+              if (not term or term in e["Hay"]) and (dom == "All domains" or e["Domain"] == dom)]
+    pages = max(1, -(-len(listed) // CDE_PAGE))
+    page = min(st.session_state.get("_rule_cde_page", 0), pages - 1)
+    # The page the selection is on, the first time it is drawn — so a rule asked for
+    # by id does not open with its element on a page nobody is looking at.
+    if "_rule_cde_page" not in st.session_state and scope in {e["key"] for e in listed}:
+        page = [e["key"] for e in listed].index(scope) // CDE_PAGE
+    shown = listed[page * CDE_PAGE:(page + 1) * CDE_PAGE]
 
+    def _turn(to: int) -> None:
+        st.session_state["_rule_cde_page"] = to
 
-with right, st.container(key="dq_elpane"):
-    if scope == ALL:
-        badges = theme.badge(f"{len(el_rows)} elements", "neutral")
-        where = "Every table the registry checks"
-        kicker = "Whole registry" + (" · filtered" if filtered else "")
-    else:
-        er = el_by_id.loc[scope]
-        gap = worst_gap.get(scope)
-        badges = (theme.criticality_badge(er["criticality"])
-                  + theme.badge(theme.data_class_label(er["data_class"]), "neutral")
-                  + (theme.coverage_badge(gap) if gap else "")
-                  + (theme.badge("PII", "high", "shield") if er["pii"] else ""))
-        cols = columns_of.get(scope, [])
-        where = " · ".join(cols[:3]) + (f" + {len(cols) - 3} more" if len(cols) > 3 else "")
-        kicker = "Selected element"
-    st.markdown(
-        f'<div class="dq-elhd"><div class="k">{kicker}</div>'
-        f'<div class="n">{html.escape(sel["Element"])}</div>'
-        f'<div class="b">{badges}</div>'
-        f'<div class="w">{html.escape(where)}</div>'
-        f'<div class="sr"><span class="s">{sel["N"]}</span>'
-        f'<span>{"rule" if sel["N"] == 1 else "rules"}</span>'
-        f'<span>{sel["Active"]} active · {sel["Shadow"]} in shadow</span>'
-        + (f'<span class="dq-below">{sel["Failing"]} failing</span>' if sel["Failing"] else "")
-        + "</div></div>",
-        unsafe_allow_html=True,
-    )
+    def _el_cells(e) -> str:
+        badge = theme.coverage_badge(e["Gap"]) if e["Gap"] else ""
+        n = f'{e["N"]} {"rule" if e["N"] == 1 else "rules"}' if e["N"] else "No rules"
+        fail = (f' · <span class="dq-below">{e["Failing"]} failing</span>'
+                if e["Failing"] else "")
+        return (f'<span class="dq-rr"><span class="a"><span class="nm">'
+                f'{html.escape(e["Element"])}</span>'
+                f'<span class="q">{html.escape(str(e["Domain"]))} · {n}{fail}</span></span>'
+                f"{badge}</span>")
 
-    tabs = [f"Active · {len(active_rows)}", f"Shadow · {len(shadow_rows)}"]
-    if scope != ALL:
-        tabs.append("Element")
-    t = st.tabs(tabs)
-    with t[0]:
-        _rule_list(active_rows, "ract", "No active rule watches this element"
-                   + (" among the rules shown." if filtered else "."))
-    with t[1]:
-        _rule_list(shadow_rows, "rshd", "No shadow rule waiting"
-                   + (" among the rules shown." if filtered else "."))
-    if scope != ALL:
-        with t[2], st.container(height=TAB_BODY, border=False, key="dq_eltab_overview"):
-            tol = er.get("tolerance_pct")
-            gap = worst_gap.get(scope)
-            st.markdown(
-                '<div class="dq-elover">'
-                + (f'<div class="dq-dim-prose">{html.escape(str(er["definition"]))}</div>'
-                   if opt(er.get("definition")) else "")
-                + '<div class="dq-elnote">'
-                + (f"<b>Tolerance {float(tol):g}%.</b> " if pd.notna(tol) else
-                   "<b>No tolerance declared.</b> ")
-                + html.escape(theme.COVERAGE_GAP_MEANING.get(gap, "")) + "</div></div>",
-                unsafe_allow_html=True,
-            )
-            if st.button("Every binding and what checks it", key="_rule_el_details",
-                         icon=":material/open_in_new:", type="tertiary"):
+    def _el_tip(e) -> list:
+        cols = columns_of.get(e["key"], [])
+        return [e["Element"],
+                f"{str(e['Criticality']).capitalize()} criticality · "
+                + theme.COVERAGE_GAP_MEANING.get(e["Gap"], ""),
+                (" · ".join(cols), "mono") if cols else None]
+
+    with st.container(height=CDE_BODY, border=False, key="dqrows_rcde"):
+        if shown:
+            got = components.clickable_rows(
+                shown, ROW_GRID, _el_cells, "rc", "key",
+                lambda e: f"Show rules on {e['Element']}", picked=scope, tip=_el_tip)
+            if got:
+                st.session_state["_rule_el"] = got
                 st.session_state.pop("_rule_pick", None)
-                st.session_state["_rule_cde_pick"] = scope
                 st.rerun()
+        else:
+            st.markdown('<div class="dq-tmempty">No element matches.</div>',
+                        unsafe_allow_html=True)
+
+    with st.container(key="dq_rpager", horizontal=True, vertical_alignment="center"):
+        st.markdown(f'<span class="dq-rpage">Showing {len(shown)} of {len(listed)}</span>',
+                    unsafe_allow_html=True)
+        # Callbacks, not a button then `st.rerun()`: a rerun called here stops the run
+        # before the detail card's tabs are drawn, and a widget not drawn in a run
+        # loses its state — the open tab snapped back to the first on every page turn.
+        st.button("Previous page", icon=":material/chevron_left:", key="_rule_prev",
+                  disabled=page == 0, on_click=_turn, args=(page - 1,))
+        st.button("Next page", icon=":material/chevron_right:", key="_rule_next",
+                  disabled=page >= pages - 1, type="primary", on_click=_turn,
+                  args=(page + 1,))
+
+# Middle: the rules on that element.
+with c_rules, st.container(key="dq_rrules"):
+    st.markdown(f'<div class="dq-rcard-hd"><span class="t">Rules</span>'
+                f'<span class="dq-count">{len(el_rules)}</span></div>',
+                unsafe_allow_html=True)
+    rterm = st.text_input("Search rules", placeholder="Search rules",
+                          label_visibility="collapsed", icon=":material/search:",
+                          key=f"_rule_search_{scope}").strip().lower()
+    rlisted = [x for x in el_rules
+               if not rterm or rterm in f"{x['Name']} {x['Rule id']} {x['Column']}".lower()]
+
+    def _rule_cells(x) -> str:
+        line = x["Dimension"]
+        if x["Status"] == "shadow" and x["Bad"] is not None:
+            line += f" · would flag {x['Bad']:,}" if x["Bad"] else " · would pass"
+        return (f'<span class="dq-rr"><span class="a"><span class="nm">'
+                f'{html.escape(x["Name"])}</span>'
+                f'<span class="q">{html.escape(line)}</span></span>'
+                f'{theme.badge(x["State"], x["Tone"])}</span>')
+
+    def _rule_tip(x) -> list:
+        return [x["Name"], (f"{x['Rule id']} · {x['Table']}.{x['Column']}", "mono"),
+                f"{theme.severity_text(x['Severity'])} · {x['Dimension']} — "
+                + theme.DIMENSIONS.get(x["Dimension"], {}).get("short", "")]
+
+    with st.container(height=RULE_BODY, border=False, key="dqrows_rrules"):
+        if rlisted:
+            got = components.clickable_rows(
+                rlisted, ROW_GRID, _rule_cells, "rr", "Rule id",
+                lambda x: f"Open {x['Name']}", picked=pick, tip=_rule_tip)
+            if got:
+                st.session_state["_rule_el"] = scope
+                st.session_state["_rule_pick"] = got
+                st.rerun()
+        else:
+            st.markdown('<div class="dq-tmempty">'
+                        + ("No rule matches." if el_rules else
+                           "No rule watches this element. The register knows the column "
+                           "matters; the rule set does not yet.")
+                        + "</div>", unsafe_allow_html=True)
 
 
-# --- The drawer: one rule --------------------------------------------------------
+# --- Promotion -------------------------------------------------------------------
 
 def _promote_dialog(r) -> None:
     run = latest.loc[r["rule_id"]] if r["rule_id"] in latest.index else None
@@ -404,7 +360,7 @@ def _promote_dialog(r) -> None:
         if run is not None:
             limit = float(r["fail_threshold_pct"])
             breach = float(run["violation_pct"]) > limit
-            outcome = (f"On the latest run it measured <b>{int(run['violation_count']):,}"
+            outcome = (f"On its latest measurement it flagged <b>{int(run['violation_count']):,}"
                        f"</b> of {int(run['rows_scanned']):,} rows ({float(run['violation_pct']):.2f}%) "
                        f"against a limit of {limit:g}%, so from the next run it would "
                        + ("<b>breach</b>, and its breaches go to Triage to be grouped into "
@@ -439,127 +395,202 @@ def _promote_dialog(r) -> None:
     _dialog()
 
 
-def _rule_drawer(rule_id: str) -> None:
-    r = current[current["rule_id"] == rule_id].iloc[0]
-    run = latest.loc[rule_id] if rule_id in latest.index else None
-    shadow = r["status"] == "shadow"
+# --- Right: one rule -----------------------------------------------------------------
 
-    head, close = st.columns([5, 1], vertical_alignment="center")
-    with head:
-        st.markdown(
-            '<div class="dq-dim-panel-hd">'
-            f'<span class="t">{html.escape(str(r["rule_name"]))}</span>'
-            + theme.severity_badge(r["severity"])
-            + theme.badge(r["status"], "success" if r["status"] == "active" else "moderate")
-            + theme.badge(r["rule_type"], "neutral")
-            + f'<span class="q"><code>{html.escape(rule_id)}</code> · v{int(r["rule_version"])}'
-              f' · {html.escape(str(r["target_table"]))}'
-            + (f".{html.escape(str(r['target_column']))}" if opt(r["target_column"]) else "")
-            + "</span></div>",
-            unsafe_allow_html=True,
-        )
-    if close.button("Close", key="_rule_close", width="stretch"):
-        st.session_state.pop("_rule_pick", None)
-        st.rerun()
+def _flagged_values(rule_id: str, run_id, column: str) -> pd.DataFrame:
+    """The distinct values of the rule's own column among the rows it flagged."""
+    mine = samples[(samples["rule_id"] == rule_id) & (samples["run_id"] == run_id)]
+    values = []
+    for raw in mine["sample_row"]:
+        try:
+            values.append(json.loads(raw).get(column))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    if not values:
+        return pd.DataFrame()
+    shown = pd.Series(["NULL" if v is None else repr(v) if str(v).strip() == "" else str(v)
+                       for v in values])
+    return (shown.value_counts().rename_axis("Value").reset_index(name="Rows")
+            .assign(Result="Fail"))[["Value", "Result", "Rows"]]
 
-    if run is not None:
-        bad = int(run["violation_count"])
-        tone = "" if shadow or not bad else f' style="color:{BELOW}"'
-        st.markdown(
-            '<div class="dq-tilegrid compact" '
-            'style="grid-template-columns:repeat(3,minmax(0,1fr));margin:.15rem 0 .2rem">'
-            f'<div class="dq-tile"><div class="lab">{"Would flag" if shadow else "Bad rows"}</div>'
-            f'<div class="val"{tone}>{bad:,}</div>'
-            f'<div class="sub">{float(run["violation_pct"]):.2f}% of rows checked</div></div>'
-            '<div class="dq-tile"><div class="lab">Rows checked</div>'
-            f'<div class="val">{int(run["rows_scanned"]):,}</div>'
-            f'<div class="sub">latest run, {run["run_ts"]:%-d %b}</div></div>'
-            '<div class="dq-tile"><div class="lab">Limit</div>'
-            f'<div class="val">{float(r["fail_threshold_pct"]):g}%</div>'
-            '<div class="sub">breaches above this</div></div></div>',
-            unsafe_allow_html=True,
-        )
-        if shadow:
-            st.caption("Shadow: measured on every run and never raised.")
 
-    if shadow:
-        if st.button("Promote to active", key="_promote_open", type="primary",
-                     icon=":material/arrow_upward:"):
-            st.session_state["_promote_ask"] = rule_id
-            st.rerun()
+def _stat(label: str, value: str, colour: str | None = None, sub: str = "") -> str:
+    style = f' style="color:{colour}"' if colour else ""
+    return (f'<div><span class="l">{label}</span><b{style}>{value}</b>'
+            + (f'<span class="s">{sub}</span>' if sub else "") + "</div>")
 
-    note = opt(r["note"])
-    if note:
-        st.markdown(f'<div class="dq-dim-prose">{html.escape(str(note))}</div>',
+
+with c_detail, st.container(key="dq_rdetail"):
+    if sel is None:
+        st.markdown('<div class="dq-rdet-hd"><div class="k">Rule details</div>'
+                    f'<div class="n">{html.escape(sel_el["Element"]) if sel_el else "—"}</div>'
+                    "</div>", unsafe_allow_html=True)
+        st.markdown('<div class="dq-tmempty">No rule to show. '
+                    + html.escape(theme.COVERAGE_GAP_MEANING.get(sel_el["Gap"], "")
+                                  if sel_el else "") + "</div>",
                     unsafe_allow_html=True)
-    scope_f = opt(r["scope_filter"])
-    join = opt(r.get("join_sql"))
-    st.markdown(
-        (f'<div class="dq-expr scope">from {html.escape(str(join))}</div>' if join else "")
-        + f'<div class="dq-expr">{html.escape(str(r["rule_expr"]))}</div>'
-        + (f'<div class="dq-expr scope">scoped to {html.escape(str(scope_f))}</div>'
-           if scope_f else
-           f'<div class="dq-dim-prose q" style="color:{theme.TONE["moderate"]["fg"]}">'
-           "No scope filter — this rule runs on every row of the table.</div>")
-        + '<div class="dq-dim-prose q">Expression as written — this app never runs it.</div>',
-        unsafe_allow_html=True,
-    )
-
-    if opt(r["cde_id"]) and r["cde_id"] in el_by_id.index:
-        er = el_by_id.loc[r["cde_id"]]
-        st.caption(f"Watching **{er['cde_name']}** · {er['criticality']} criticality · "
-                   f"{'PII' if er['pii'] else 'not PII'}")
-    if rule_id in disputed_ids:
-        st.caption(":red[The CDE register disputes this rule's scope] — it measures rows "
-                   "the binding says are legitimately empty.")
-
-    trend = runs[runs["rule_id"] == rule_id].sort_values("run_ts")
-    if len(trend) > 1:
-        breached = trend[trend["status"] == "breach"]["run_ts"]
+        if sel_el and st.button("Every binding and what checks it", type="tertiary",
+                                key="_rule_el_details", icon=":material/open_in_new:"):
+            st.session_state["_rule_cde_pick"] = scope
+            st.rerun()
+    else:
+        r = current[current["rule_id"] == pick].iloc[0]
+        shadow = sel["Status"] == "shadow"
+        dim = sel["Dimension"]
         st.markdown(
-            '<div class="dq-quiet">Bad rows per run '
-            + theme.sparkline(list(trend["violation_count"]), width=180,
-                              tone="neutral" if shadow else "critical")
-            + (" · measured, never raised" if shadow else
-               f" · first breached {breached.min():%-d %b}" if len(breached)
-               else " · never breached")
+            '<div class="dq-rdet-hd"><div class="k">Rule details</div>'
+            f'<div class="n">{html.escape(sel["Name"])}</div>'
+            '<div class="b">'
+            + theme.badge(dim, "neutral")
+            + (theme.hint(theme.DIMENSIONS[dim]["long"]) if dim in theme.DIMENSIONS else "")
+            + theme.severity_badge(sel["Severity"])
+            + (theme.badge("Shadow — measured, never raised", "moderate") if shadow else "")
+            + f'<span class="id">{html.escape(pick)} · v{int(r["rule_version"])}</span>'
+            + "</div></div>",
+            unsafe_allow_html=True)
+
+        ran = sel["Rate"] is not None
+        rate_colour = (UNASSESSED if shadow or sel["Disputed"] else
+                       BELOW if sel["Failing"] else None)
+        st.markdown(
+            '<div class="dq-rstats">'
+            + _stat("Pass rate", _pct(sel["Rate"]) if ran else "—", rate_colour,
+                    "scope disputed" if sel["Disputed"] and sel["Failing"] else "")
+            + _stat("Target", f'≥ {_pct(sel["Target"])}' if sel["Target"] is not None else "—")
+            + _stat("Would flag" if shadow else "Failed rows",
+                    f'{sel["Bad"]:,}<span class="of"> / {sel["Rows"]:,}</span>' if ran else "—",
+                    BELOW if sel["Failing"] and not sel["Disputed"] else None)
+            + _stat("Last run", f'{sel["Run ts"]:%-d %b, %H:%M}' if ran else "Not run")
             + "</div>",
-            unsafe_allow_html=True,
-        )
+            unsafe_allow_html=True)
 
-    st.markdown(
-        theme.kv("Domain", f"{r['business_domain']} · {r['owner_group']}")
-        + theme.kv("Source layer", r["source_layer"])
-        + theme.kv("In shadow since" if shadow else "In force since",
-                   f"{pd.Timestamp(r['effective_from']):%-d %b %Y}")
-        + theme.kv("Authored by", r["created_by"])
-        + (theme.kv("Promoted by", r["promoted_by"]) if opt(r["promoted_by"]) else ""),
-        unsafe_allow_html=True,
-    )
+        if shadow:
+            if st.button("Promote to active", key="_promote_open", type="primary",
+                         icon=":material/arrow_upward:"):
+                st.session_state["_promote_ask"] = pick
+                st.rerun()
 
-    versions = registry[registry["rule_id"] == rule_id].sort_values(
-        "rule_version", ascending=False)
-    theme.section(f"Version history · {len(versions)}")
-    st.dataframe(
-        versions[["rule_version", "status", "effective_from", "created_by",
-                  "fail_threshold_pct", "note"]].rename(columns={
-            "rule_version": "Ver", "status": "Status", "effective_from": "From",
-            "created_by": "By", "fail_threshold_pct": "Limit", "note": "Note"}),
-        width="stretch", hide_index=True,
-        column_config={"Limit": st.column_config.NumberColumn(format="%.2f%%")},
-    )
-    st.caption("Append-only: a change is a new version, never an edit. Who may sign off "
-               "a promotion is an open question in the spec — the app records who did "
-               "it, not whether they were entitled to.")
+        if st.session_state.get(tab_key) not in TAB_LABELS:
+            st.session_state.pop(tab_key, None)
+        t_def, t_rows, t_hist = st.tabs(TAB_LABELS, key=tab_key, on_change="rerun")
 
-    if st.session_state.get("_promote_ask") == rule_id and shadow:
-        _promote_dialog(r)
+        with t_def, st.container(height=TAB_BODY, border=False, key="dq_rtab_def"):
+            note = opt(r["note"])
+            scope_f = opt(r["scope_filter"])
+            st.markdown(
+                '<div class="dq-rsec">What this rule checks</div>'
+                f'<div class="dq-dim-prose"><b>{html.escape(sel["Name"])}.</b> '
+                f'{html.escape(theme.DIMENSIONS.get(dim, {}).get("short", ""))}'
+                + (f' It is {theme.severity_text(sel["Severity"]).lower()} severity.'
+                   if sel["Severity"] in theme.SEVERITY_WORD else "")
+                + "</div>"
+                + (f'<div class="dq-dim-prose q">{html.escape(str(note))}</div>' if note else "")
+                + '<div class="dq-rscope"><span>Scope: '
+                + (f"rows of {html.escape(sel['Table'])} where <code>{html.escape(str(scope_f))}</code>"
+                   if scope_f else
+                   f"every row of the join, driven by {html.escape(sel['Table'])}"
+                   if sel["Column"] == "join" else f"all rows in {html.escape(sel['Table'])}")
+                + f'</span><span>Allowed failure rate: ≤ {_pct(sel["Limit"], 2)}</span></div>'
+                + (f'<div class="dq-rwarn">The CDE register disputes this scope: the binding '
+                   f"says the column is only populated where "
+                   f'<code>{html.escape(str(expected_scope.get(pick)))}</code>, and this rule '
+                   "measures every row. The rule is wrong, not the data.</div>"
+                   if sel["Disputed"] else ""),
+                unsafe_allow_html=True)
+
+            st.markdown(
+                '<div class="dq-rsec row"><span>Rule logic</span>'
+                '<span class="dq-rchip">Databricks SQL</span></div>',
+                unsafe_allow_html=True)
+            st.code(rule_sql.rule_logic(r), language="sql", line_numbers=True, wrap_lines=True)
+            st.markdown(
+                '<div class="dq-dim-prose q">'
+                + ("The query the check runner runs for this rule's verdict. "
+                   if rule_sql.shape(r) == "variance" else
+                   "The query the check runner runs for the rows this rule flags. ")
+                + f"The rule passes when flagged ÷ evaluated rows ≤ {_pct(sel['Limit'], 2)}. "
+                "Names are canonical and rewritten per workspace; this app never runs it."
+                "</div>",
+                unsafe_allow_html=True)
+
+            if sel["Column"] != "join" and sel["Bad"]:
+                vals = _flagged_values(pick, sel["Run id"], sel["Column"])
+                if not vals.empty:
+                    st.markdown(
+                        '<div class="dq-rsec">Flagged values'
+                        '<span class="sub">From the sampled rows on its latest run — '
+                        "real values, not illustrations</span></div>",
+                        unsafe_allow_html=True)
+                    st.dataframe(vals.head(8), hide_index=True, width="stretch")
+            if sel["Bad"]:
+                st.button(f"View {sel['Bad']:,} {'flagged' if shadow else 'failed'} rows",
+                          type="tertiary", key="_rule_to_rows",
+                          icon=":material/arrow_forward:", icon_position="right",
+                          on_click=_to_tab, args=(TAB_LABELS[1],))
+            if st.button(f"About {sel_el['Element']}", type="tertiary",
+                         key="_rule_el_details", icon=":material/open_in_new:"):
+                st.session_state["_rule_cde_pick"] = scope
+                st.rerun()
+
+        with t_rows, st.container(height=TAB_BODY, border=False, key="dq_rtab_rows"):
+            if sel["Bad"]:
+                components.failed_rows(pick, {"run_id": sel["Run id"],
+                                              "violation_count": sel["Bad"]},
+                                       samples, heading=False)
+            else:
+                st.caption("No row failed this rule on its latest run." if ran else
+                           "This rule has not been measured yet.")
+
+        with t_hist, st.container(height=TAB_BODY, border=False, key="dq_rtab_hist"):
+            mine = measured[measured["rule_id"] == pick].sort_values("run_ts")
+            if len(mine) > 1:
+                points = [(f"{ts:%-d %b}", 100.0 - float(v))
+                          for ts, v in zip(mine["run_ts"], mine["violation_pct"])]
+                st.markdown(
+                    '<div><span class="dq-lg"><i></i>Pass rate'
+                    + ('<i class="dash"></i>Target' if not sel["Disputed"] else "")
+                    + "</span></div>"
+                    + theme.target_chart(points, None if sel["Disputed"] else sel["Target"],
+                                         620, 140),
+                    unsafe_allow_html=True)
+            past = (mine.sort_values("run_ts", ascending=False)
+                    .assign(**{"Run": lambda d: d["run_ts"],
+                               "Result": lambda d: d["status"].map(
+                                   {"breach": "Over limit", "pass": "Within limit",
+                                    "skipped": "Shadow"}).fillna(d["status"]),
+                               "Flagged": lambda d: d["violation_count"].astype(int),
+                               "Pass rate": lambda d: 100.0 - d["violation_pct"].astype(float),
+                               "Limit": lambda d: d["threshold_pct"].astype(float)})
+                    [["Run", "Result", "Flagged", "Pass rate", "Limit"]])
+            theme.section(f"Runs · {len(past)}")
+            st.dataframe(past, hide_index=True, width="stretch", height=220,
+                         column_config={
+                             "Run": st.column_config.DatetimeColumn(format="D MMM, HH:mm"),
+                             "Pass rate": st.column_config.NumberColumn(format="%.1f%%"),
+                             "Limit": st.column_config.NumberColumn(format="%.2f%%"),
+                         })
+            versions = registry[registry["rule_id"] == pick].sort_values(
+                "rule_version", ascending=False)
+            theme.section(f"Versions · {len(versions)}")
+            st.dataframe(
+                versions[["rule_version", "status", "effective_from", "created_by",
+                          "fail_threshold_pct", "note"]].rename(columns={
+                    "rule_version": "Ver", "status": "Status", "effective_from": "From",
+                    "created_by": "By", "fail_threshold_pct": "Limit", "note": "Note"}),
+                width="stretch", hide_index=True,
+                column_config={"Limit": st.column_config.NumberColumn(format="%.2f%%")},
+            )
+            st.caption(
+                "Append-only: a change is a new version, never an edit. "
+                + (f"Promoted by {r['promoted_by']}. " if opt(r["promoted_by"]) else "")
+                + "Who may sign off a promotion is an open question in the spec — the app "
+                "records who did it, not whether they were entitled to.")
+
+        if st.session_state.get("_promote_ask") == pick and shadow:
+            _promote_dialog(r)
 
 
-if picked_rule in set(current["rule_id"]):
-    with st.container(key="dq_check_drawer"):
-        _rule_drawer(picked_rule)
-elif st.session_state.get("_rule_cde_pick"):
+if st.session_state.get("_rule_cde_pick"):
     with st.container(key="dq_element_drawer"):
         components.element_panel(cde_cov, current, st.session_state["_rule_cde_pick"],
                                  pick_key="_rule_cde_pick")

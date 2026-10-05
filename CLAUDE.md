@@ -153,18 +153,30 @@ can open a check without simulating a click. Since 2026-10-01 a passing check op
 too — the breakdown lists every check on the element — and says that no row failed
 rather than printing an empty sample table.
 
-**The Rules page was redrawn on 2026-10-05 in the scorecard's layout.** It was a
-thirteen-column dataframe, a selectbox of every rule id to inspect one, and a second
-dataframe plus selectbox to promote — three ways into one list, none by element. Now:
-the CDE register on the left (`All rules` first, then each element, its bar the rules
-split failing / passing / shadow by count — not a score, the scorecard owns that), the
-picked element's rules on the right in `Active` / `Shadow` tabs, and one rule in a
-drawer with its expression, history and versions. It reuses the scorecard's keyed
-containers (`dq_elsplit`, `dq_elcard`, `dq_elpane`, `dq_check_drawer`), so their CSS
-applies unchanged. **Promote now asks first**: the drawer's button opens an
-`st.dialog` saying which version is appended, in whose name, and whether the rule
-would breach on the latest run; the write happens only on its Promote.
-`test_promoting_asks_first_and_writes_only_on_confirm` pins that.
+**The Rules page was redrawn again on 2026-10-06 from a design mock: three cards.**
+CDEs on the left (search, domain, paged seven at a time), the picked element's rules
+in the middle (each with a Failing / Passing / Scope disputed / Shadow badge and its
+dimension), and the picked rule on the right — pass rate, target, failed rows and last
+run, then Definition & code · Sample rows · History. The 2026-10-05 version (the
+scorecard's two cards plus a drawer) is gone, and with it the severity filter and the
+`All rules` row; the CDE search matches an element's columns and the ids and names of
+its rules, so a rule id still finds its element. Things to know:
+
+* **Rule logic is the runner's query, not the mock's `CASE WHEN … 'FAIL'`.**
+  `domain/rule_sql.py` is a copy of `jobs/run_checks.sample_sql` less its LIMIT (and
+  `variance_sql` for variance), because only `dq-app/` ships;
+  `tests/test_rules_page.py` diffs it against the runner for every rule.
+* **The mock's "Example values" are not built**: nobody wrote any, and a page
+  inventing `alex@example.com → Pass` is the thing this app must not do. In their
+  place, the values the rule actually flagged on its latest run, from
+  `violation_sample` — same rows and cap as the Sample rows tab, so no new PII surface.
+* A rule's figures are its OWN latest measurement, not the estate's latest run, or a
+  shadow check measured by the onboarding job would show nothing.
+* The pager turns pages by `on_click`, never button-then-`st.rerun()`: that rerun stops
+  before the tabs are drawn and the open tab is lost. Pinned.
+* `theme.DIMENSION_OF` / `DIMENSIONS` moved out of `scorecard.py` so both pages read one
+  map. **Promote still asks first** (`st.dialog`, write only on its Promote);
+  `test_promoting_asks_first_and_writes_only_on_confirm` pins that.
 
 **The Tables pages were redrawn on 2026-10-06 from a design mock.** The inventory
 was an `st.dataframe` under a domain multiselect; it is now four figures (monitored

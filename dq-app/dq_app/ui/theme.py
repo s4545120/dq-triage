@@ -68,6 +68,76 @@ SEVERITY_SHORT = {"P1_block": "P1", "P2_alert": "P2", "P3_monitor": "P3"}
 SEVERITY_WORD = {"P1_block": "Critical", "P2_alert": "High", "P3_monitor": "Monitor"}
 SEVERITY_ORDER = ["P1_block", "P2_alert", "P3_monitor"]
 
+# --- Dimensions -------------------------------------------------------------
+# `DIMENSION_OF` is the only place a rule type is assigned to a dimension. The prose
+# below describes the dimensions; `dimension_for` is the only reader of the map.
+
+DIMENSION_OF = {
+    "not_null": "Completeness",
+    "format": "Validity",
+    "sentinel": "Validity",
+    "variance": "Validity",
+    "consistency": "Consistency",
+    "referential": "Consistency",
+    "uniqueness": "Uniqueness",
+}
+
+
+def dimension_for(rule_type: str) -> str:
+    """Map local rule types to the DQ dimensions used in monitoring tools."""
+    return DIMENSION_OF.get(rule_type, "Other")
+
+
+# The prose outlived two homes — four cards, then a grouping toggle. "Validity" is a
+# term of art, not a word a steward uses about their own data, so it is still defined
+# wherever it is printed: the short line in a check row's tooltip, the long one beside
+# the dimension badge in the check drawer.
+
+DIMENSIONS = {
+    "Completeness": {
+        "short": "Is the value there at all.",
+        "long": (
+            "Whether a value a record is supposed to carry is actually there. A "
+            "completeness check counts the rows where the column is null, blank, or "
+            "holds a placeholder standing in for a value nobody ever supplied. It "
+            "says nothing about whether the value that is there is any good — that "
+            "is Validity's job."
+        ),
+    },
+    "Validity": {
+        "short": "Does the value look like what it claims to be.",
+        "long": (
+            "Whether a value that is present conforms to the shape it is supposed to "
+            "have: an email with an @ and a real top-level domain, a mobile number "
+            "matching 04########, a date of birth that parses and puts the person "
+            "between 18 and 105. Placeholder values that pass a presence check but "
+            "mean nothing — 0400000000, a row of nines — are caught here too. A "
+            "valid value can still be the wrong value; no automated check can tell."
+        ),
+    },
+    "Consistency": {
+        "short": "Does it agree with the other columns and tables.",
+        "long": (
+            "Whether a value agrees with the rest of the record and the rest of the "
+            "estate. Two columns that have to move together — a document number "
+            "present whenever a document type is set — and two tables that have to "
+            "tell the same story about the same person. Each side can be perfectly "
+            "complete and perfectly valid and still disagree, which is why this is a "
+            "dimension of its own."
+        ),
+    },
+    "Uniqueness": {
+        "short": "Is it there exactly once.",
+        "long": (
+            "Whether a value that is supposed to identify one thing identifies "
+            "exactly one. A mobile service number live on two subscriptions at once "
+            "is not a wrong value in either row — both rows are individually fine, "
+            "and the defect only exists in the pair."
+        ),
+    },
+}
+
+
 # --- Critical data elements -------------------------------------------------
 # Criticality is a property of the ELEMENT and severity is a property of the RULE.
 # They are deliberately different scales with different colours, because they answer
@@ -1558,6 +1628,7 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 }}
 .dq-rowgrid > * {{ min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }}
+.dq-rowgrid > .dq-rr {{ white-space: normal; }}
 .dq-rowgrid .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 .dq-rowgrid .name {{ font-size: clamp(.76rem, .9vw, .84rem); color: {NEUTRAL["text"]};
   font-weight: 500; }}
@@ -1654,15 +1725,11 @@ h1, h2, h3 {{ letter-spacing: 0; }}
    the box keeps only the rules above and below it, and its end rows lose the corner
    radius they take when the box is the outline. */
 .st-key-dq_elcard .st-key-dqrows_elist, .st-key-dq_elpane .st-key-dqrows_checks,
-.st-key-dq_elpane .st-key-dqrows_problems,
-/* The Rules page borrows both cards: its element list and its Active / Shadow tabs. */
-.st-key-dq_elcard .st-key-dqrows_rlist, .st-key-dq_elpane .st-key-dqrows_ract,
-.st-key-dq_elpane .st-key-dqrows_rshd {{
+.st-key-dq_elpane .st-key-dqrows_problems {{
   border: none; border-top: 1px solid var(--dq-border); border-radius: 0;
   background: transparent; scrollbar-gutter: auto;
 }}
-.st-key-dq_elpane .st-key-dqrows_checks, .st-key-dq_elpane .st-key-dqrows_problems,
-.st-key-dq_elpane .st-key-dqrows_ract, .st-key-dq_elpane .st-key-dqrows_rshd {{
+.st-key-dq_elpane .st-key-dqrows_checks, .st-key-dq_elpane .st-key-dqrows_problems {{
   border-top: none; }}
 .st-key-dq_elpane .st-key-dqrows_problems .dq-rowgrid {{ padding: .6rem 1rem; }}
 .st-key-dq_elcard [class*="st-key-dqrow_"], .st-key-dq_elpane [class*="st-key-dqrow_"] {{
@@ -1696,14 +1763,6 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-tbar > span {{ display: block; height: 100%; border-radius: 3px; min-width: 2px; }}
 .dq-tbar > i {{ position: absolute; top: -3px; width: 2px; height: 12px;
   border-radius: 1px; background: {NEUTRAL["text"]}; }}
-/* A composition bar: the Rules page's element rows, split failing / passing /
-   shadow by rule count. Same height and track as `.dq-tbar`, no target tick. */
-.dq-sbar {{ display: flex; height: 6px; border-radius: 3px; overflow: hidden;
-  background: #eef0f3; margin: .12rem 0; gap: 2px; }}
-.dq-sbar > span {{ display: block; height: 100%; }}
-.dq-elfoot i.dq-sbkey {{ display: inline-block; width: .55rem; height: .55rem;
-  border-radius: 2px; margin: 0 .3rem 0 .7rem; vertical-align: -.02rem; }}
-.dq-elfoot i.dq-sbkey:first-child {{ margin-left: 0; }}
 /* Three lines, so the row is taller than the two-line `.stack` rows — and the height
    is asked for on the row container, for the reason given at `st-key-dqrow_` below. */
 [class*="st-key-dqrow_"]:has(.dq-el) {{ min-height: 4.7rem; }}
@@ -1747,7 +1806,7 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .st-key-dq_elpane .stTabs [data-testid="stTabPanel"] {{ padding-top: 0; }}
 .st-key-dq_eltab_overview, .st-key-dq_eltab_rows, .st-key-dq_eltab_nochecks,
 .st-key-dq_eltab_hist,
-.st-key-dq_eltab_notriage, .st-key-dq_eltab_ract_none, .st-key-dq_eltab_rshd_none {{ padding: .8rem 1rem .6rem; gap: .55rem; }}
+.st-key-dq_eltab_notriage {{ padding: .8rem 1rem .6rem; gap: .55rem; }}
 .dq-elover .d {{ font-size: clamp(.74rem, .88vw, .82rem); color: var(--dq-text-2);
   margin-bottom: .2rem; }}
 .dq-elover .dq-trendw {{ --dq-trend-gap: .35rem; }}
@@ -2168,6 +2227,128 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   color: {NEUTRAL["text"]}; margin-bottom: .45rem; }}
 .st-key-dq_tmstart .q b {{ color: {TONE["critical"]["fg"]}; font-weight: 550; }}
 .st-key-dq_tmstart .stButton button {{ color: {ACCENT}; padding-left: 0; }}
+
+/* --- The Rules page: three cards, CDEs | Rules | one rule. Redrawn 2026-10-06. ---
+   Same construction as the scorecard's lower cards: the border is on the keyed
+   container, its stacking gap is zero (Streamlit counts it against the height
+   whether or not it is drawn), and each block brings its own padding. The two lists
+   and the detail tabs are fixed-height boxes, so the three floors meet; the
+   stretch below is the backstop for a header that wraps. */
+.st-key-dq_rcde, .st-key-dq_rrules, .st-key-dq_rdetail {{
+  border: 1px solid var(--dq-border); border-radius: 10px;
+  background: {NEUTRAL["surface"]}; gap: 0; padding: 0; flex: 1 1 auto; }}
+.st-key-dq_rcde [data-testid="stMarkdownContainer"],
+.st-key-dq_rrules [data-testid="stMarkdownContainer"],
+.st-key-dq_rdetail [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.st-key-dq_rsplit {{ margin-top: clamp(.8rem, 1.6vw, 1.4rem); }}
+.st-key-dq_rsplit [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap;
+  align-items: stretch; row-gap: .8rem; }}
+.st-key-dq_rsplit [data-testid="stColumn"] {{ display: flex; flex-direction: column; }}
+.st-key-dq_rsplit [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
+[data-testid="stLayoutWrapper"]:is(:has(> .st-key-dq_rcde), :has(> .st-key-dq_rrules),
+  :has(> .st-key-dq_rdetail)) {{ flex: 1 1 auto; }}
+.st-key-dq_rsplit [data-testid="stColumn"]:has(.st-key-dq_rcde),
+.st-key-dq_rsplit [data-testid="stColumn"]:has(.st-key-dq_rrules) {{
+  flex: 1 1 14rem !important; min-width: min(15rem, 100%); }}
+.st-key-dq_rsplit [data-testid="stColumn"]:has(.st-key-dq_rdetail) {{
+  flex: 2.2 1 26rem !important; min-width: min(26rem, 100%); }}
+.dq-rcard-hd {{ display: flex; align-items: center; gap: .5rem; padding: 1rem 1rem .7rem; }}
+.dq-rcard-hd .t {{ font-size: clamp(1rem, 1.2vw, 1.12rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; }}
+.dq-count {{ font-size: .74rem; font-weight: 600; color: {ACCENT}; background: {ACCENT_TINT};
+  border-radius: 999px; padding: .08rem .5rem; font-variant-numeric: tabular-nums; }}
+.st-key-dq_rcde [data-testid="stElementContainer"]:has(:is(input, [data-baseweb="select"])),
+.st-key-dq_rrules [data-testid="stElementContainer"]:has(input) {{ padding: 0 1rem .6rem; }}
+.st-key-dqrows_rcde, .st-key-dqrows_rrules {{ border-top: 1px solid var(--dq-border);
+  scrollbar-gutter: auto; }}
+.st-key-dq_rcde [class*="st-key-dqrow_"], .st-key-dq_rrules [class*="st-key-dqrow_"] {{
+  border-radius: 0 !important; }}
+/* A list row: name over a muted line, the badge on the right. The picked row
+   carries the accent down its left edge, as the mock does. */
+.dq-rr {{ display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+  min-width: 0; }}
+.dq-rr .a {{ display: flex; flex-direction: column; gap: .2rem; min-width: 0; }}
+/* The name wraps to two lines, as the mock's do, and is cut after that; the row
+   container grows with it (measured: the row tracks its grid). The muted line stays
+   on one. */
+.dq-rr .nm {{ font-size: clamp(.82rem, .96vw, .9rem); font-weight: 500;
+  color: {NEUTRAL["text"]}; line-height: 1.35; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
+.dq-rr .q {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.dq-rr .q {{ font-size: clamp(.72rem, .85vw, .79rem); color: var(--dq-text-2); }}
+.dq-rr .dq-badge {{ flex: none; }}
+[class*="st-key-dqrow_"]:has(.dq-rr) {{ min-height: 4.1rem; }}
+[class*="st-key-dqrow_"] .dq-rowgrid:has(.dq-rr) {{ padding: .7rem 1rem;
+  border-left: 3px solid transparent; }}
+[class*="st-key-dqrow_"] .dq-rowgrid.dq-row-on:has(.dq-rr) {{ border-left-color: {ACCENT}; }}
+.st-key-dq_rpager {{ border-top: 1px solid var(--dq-border); padding: .6rem 1rem;
+  justify-content: space-between; gap: .4rem; margin-top: auto; flex-wrap: nowrap; }}
+.st-key-dq_rpager > [data-testid="stElementContainer"] {{ width: auto !important;
+  flex: none; }}
+.st-key-dq_rpager .stButton button {{ min-height: 2rem; padding: 0 .45rem; }}
+.st-key-dq_rpager .stButton button p {{ display: none; }}
+.dq-rpage {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); flex: 1 1 auto; }}
+.st-key-dq_rpager > [data-testid="stElementContainer"]:has(.dq-rpage) {{
+  flex: 1 1 0; min-width: 0; }}
+
+/* The detail card. */
+.dq-rdet-hd {{ padding: 1rem 1.1rem .4rem; }}
+.dq-rdet-hd .k {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--dq-text-3); font-weight: 600; }}
+.dq-rdet-hd .n {{ font-size: clamp(1.15rem, 1.6vw, 1.45rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; margin-top: .25rem; letter-spacing: -.01em; line-height: 1.3; }}
+.dq-rdet-hd .b {{ margin-top: .45rem; display: flex; flex-wrap: wrap; align-items: center;
+  gap: .35rem; }}
+.dq-rdet-hd .id {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .72rem; color: var(--dq-text-3); margin-left: .2rem; }}
+.dq-rstats {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: .6rem 1.1rem .9rem; gap: .6rem 0; }}
+.dq-rstats > div {{ display: flex; flex-direction: column; gap: .2rem; min-width: 0;
+  padding: 0 .9rem; }}
+.dq-rstats > div:first-child {{ padding-left: 0; }}
+.dq-rstats > div + div {{ border-left: 1px solid var(--dq-border); }}
+.dq-rstats .l {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); }}
+.dq-rstats b {{ font-size: clamp(1.05rem, 1.45vw, 1.5rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; font-variant-numeric: tabular-nums; line-height: 1.15;
+  white-space: nowrap; }}
+.dq-rstats b .of {{ font-weight: 400; color: var(--dq-text-2); }}
+.dq-rstats > div:last-child b {{ font-size: clamp(.92rem, 1.15vw, 1.2rem); font-weight: 500;
+  line-height: 1.5; }}
+.dq-rstats .s {{ font-size: .72rem; color: var(--dq-text-3); }}
+@media (max-width: 1100px) {{
+  .dq-rstats {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .dq-rstats > div:nth-child(3) {{ padding-left: 0; border-left: none; }}
+}}
+.st-key-dq_rdetail [data-testid="stElementContainer"]:has(.st-key-_promote_open),
+.st-key-dq_rdetail .stElementContainer:has(button[kind="primary"]) {{ padding: 0 1.1rem .7rem; }}
+.st-key-dq_rdetail .stTabs [role="tablist"] {{ padding: 0 1.1rem; }}
+.st-key-dq_rdetail .stTabs [data-testid="stTabPanel"] {{ padding-top: 0; }}
+.st-key-dq_rtab_def, .st-key-dq_rtab_rows, .st-key-dq_rtab_hist {{
+  padding: .9rem 1.1rem .7rem; gap: .55rem; }}
+.dq-rsec {{ font-size: clamp(.92rem, 1.08vw, 1rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; margin-top: .35rem; }}
+.dq-rsec .sub {{ display: block; font-size: var(--dq-fs-sub); font-weight: 400;
+  color: var(--dq-text-2); margin-top: .1rem; }}
+.dq-rsec.row {{ display: flex; justify-content: space-between; align-items: center; }}
+.dq-rchip {{ font-size: .74rem; font-weight: 500; color: var(--dq-text-2);
+  border: 1px solid var(--dq-border); border-radius: 6px; padding: .18rem .55rem; }}
+.dq-rscope {{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: .3rem 1rem;
+  background: {NEUTRAL["canvas"]}; border-radius: 8px; padding: .6rem .85rem;
+  margin-top: .6rem; font-size: clamp(.78rem, .92vw, .86rem); color: {NEUTRAL["text"]}; }}
+.dq-rscope > span + span {{ color: var(--dq-text-2); }}
+.dq-rscope code, .dq-rwarn code {{ font-size: .92em; overflow-wrap: anywhere; }}
+.dq-rwarn {{ margin-top: .5rem; font-size: clamp(.78rem, .92vw, .86rem); line-height: 1.5;
+  color: var(--dq-text-2); border-left: 3px solid {TONE["high"]["fg"]}; padding: .1rem .7rem; }}
+.st-key-dq_rdetail [data-testid="stCode"] pre {{ font-size: .76rem; }}
+.st-key-dq_rctl {{ gap: .4rem; }}
+.st-key-dq_rctl [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.dq-rhead .m .fq {{ font-size: .8rem; }}
+/* A long rule name wraps; the badge rides on its last line rather than floating
+   off to the right of a two-line flex item. */
+.dq-tmhead.dq-rhead .n {{ display: block; }}
+.dq-tmhead.dq-rhead .n .dq-badge {{ margin-left: .6rem; vertical-align: .3rem; }}
+[data-testid="stColumn"]:has(> [data-testid="stVerticalBlock"] .st-key-dq_rctl) {{
+  flex: 1.4 1 14rem !important; min-width: min(14rem, 100%); }}
 
 /* The detail page's header. */
 .st-key-dq_tmcrumb {{ gap: .35rem; margin-bottom: -.4rem; }}
