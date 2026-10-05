@@ -139,6 +139,19 @@ can open a check without simulating a click. Since 2026-10-01 a passing check op
 too — the breakdown lists every check on the element — and says that no row failed
 rather than printing an empty sample table.
 
+**The Rules page was redrawn on 2026-10-05 in the scorecard's layout.** It was a
+thirteen-column dataframe, a selectbox of every rule id to inspect one, and a second
+dataframe plus selectbox to promote — three ways into one list, none by element. Now:
+the CDE register on the left (`All rules` first, then each element, its bar the rules
+split failing / passing / shadow by count — not a score, the scorecard owns that), the
+picked element's rules on the right in `Active` / `Shadow` tabs, and one rule in a
+drawer with its expression, history and versions. It reuses the scorecard's keyed
+containers (`dq_elsplit`, `dq_elcard`, `dq_elpane`, `dq_check_drawer`), so their CSS
+applies unchanged. **Promote now asks first**: the drawer's button opens an
+`st.dialog` saying which version is appended, in whose name, and whether the rule
+would breach on the latest run; the write happens only on its Promote.
+`test_promoting_asks_first_and_writes_only_on_confirm` pins that.
+
 **The three queue-shaped tables are not `st.dataframe`s.** The scorecard's element
 list, the check breakdown beside it, and the Triage queue are drawn as clickable rows
 — one `st.container` per row holding its markup and a real button stretched over the

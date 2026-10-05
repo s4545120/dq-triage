@@ -767,3 +767,46 @@ def test_the_queue_shows_the_new_titles():
     body = _body(at)
     assert "rule flags valid rows" in body
     assert "Neither of these is a data defect</span>" not in body
+
+
+# --- The Rules page -----------------------------------------------------------
+
+RULES = "dq_app/ui/pages/rule_registry.py"
+
+
+def test_rules_are_listed_by_the_element_they_name():
+    """Since 2026-10-05 the page opens on `All rules` and an element narrows it.
+    Every rule names its element, so each element's row has to account for exactly
+    the rules naming it — a rule outside every element row would be one the page
+    lists under `All` and nowhere else."""
+    from dq_app.data import adapter
+    reg = adapter.get_rule_registry_current()
+    dob = reg[reg["cde_id"] == "CDE_CUST_DOB"]
+    at = _run(RULES, _rule_el="CDE_CUST_DOB")
+    body = _body(at)
+    assert "Customer date of birth" in body
+    assert f"Shadow · {int((dob['status'] == 'shadow').sum())}" in [t.label for t in at.tabs]
+    for rule_id in dob["rule_id"]:
+        assert rule_id in body
+    others = reg[reg["cde_id"] != "CDE_CUST_DOB"]
+    assert not [i for i in others["rule_id"] if f"{i} ·" in body]
+
+
+def test_promoting_asks_first_and_writes_only_on_confirm():
+    """Every write button opens a confirmation first. Opening the dialog must
+    append nothing; confirming appends exactly one version."""
+    from dq_app.data import adapter
+    reg = adapter.get_rule_registry_current()
+    rule_id = sorted(reg[reg["status"] == "shadow"]["rule_id"])[0]
+    at = _run(RULES, _rule_pick=rule_id)
+    next(b for b in at.button if b.key == "_promote_open").click().run()
+    assert not at.exception
+    assert "_pending_rule_versions" not in at.session_state \
+        or not at.session_state["_pending_rule_versions"]
+    assert "Appends version" in _body(at)
+
+    next(b for b in at.button if b.key == "_promote_yes").click().run()
+    assert not at.exception, [e.message for e in at.exception]
+    written = at.session_state["_pending_rule_versions"]
+    assert len(written) == 1
+    assert written[0]["rule_id"] == rule_id and written[0]["status"] == "active"

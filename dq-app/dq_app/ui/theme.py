@@ -1170,6 +1170,16 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   padding: 0 0 0 .3rem; text-overflow: ellipsis;
 }}
 
+/* A search field in the same row: the same pill, its own border dropped. */
+.st-key-dq_pillbar [data-testid="stTextInput"] [data-baseweb="input"] {{
+  height: 2.35rem; border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["surface"]};
+}}
+.st-key-dq_pillbar [data-testid="stTextInput"] [data-baseweb="input"]:focus-within {{
+  border-color: {ACCENT}; box-shadow: 0 0 0 1px {ACCENT};
+}}
+.st-key-dq_pillbar [data-testid="stTextInput"] input {{ font-size: .82rem; }}
+
 /* A pill that is a button rather than a control: same height, same corner, so the
    row reads as one set. */
 .st-key-dq_pillbar .stButton button {{
@@ -1655,11 +1665,15 @@ h1, h2, h3 {{ letter-spacing: 0; }}
    the box keeps only the rules above and below it, and its end rows lose the corner
    radius they take when the box is the outline. */
 .st-key-dq_elcard .st-key-dqrows_elist, .st-key-dq_elpane .st-key-dqrows_checks,
-.st-key-dq_elpane .st-key-dqrows_problems {{
+.st-key-dq_elpane .st-key-dqrows_problems,
+/* The Rules page borrows both cards: its element list and its Active / Shadow tabs. */
+.st-key-dq_elcard .st-key-dqrows_rlist, .st-key-dq_elpane .st-key-dqrows_ract,
+.st-key-dq_elpane .st-key-dqrows_rshd {{
   border: none; border-top: 1px solid var(--dq-border); border-radius: 0;
   background: transparent; scrollbar-gutter: auto;
 }}
-.st-key-dq_elpane .st-key-dqrows_checks, .st-key-dq_elpane .st-key-dqrows_problems {{
+.st-key-dq_elpane .st-key-dqrows_checks, .st-key-dq_elpane .st-key-dqrows_problems,
+.st-key-dq_elpane .st-key-dqrows_ract, .st-key-dq_elpane .st-key-dqrows_rshd {{
   border-top: none; }}
 .st-key-dq_elpane .st-key-dqrows_problems .dq-rowgrid {{ padding: .6rem 1rem; }}
 .st-key-dq_elcard [class*="st-key-dqrow_"], .st-key-dq_elpane [class*="st-key-dqrow_"] {{
@@ -1693,6 +1707,14 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-tbar > span {{ display: block; height: 100%; border-radius: 3px; min-width: 2px; }}
 .dq-tbar > i {{ position: absolute; top: -3px; width: 2px; height: 12px;
   border-radius: 1px; background: {NEUTRAL["text"]}; }}
+/* A composition bar: the Rules page's element rows, split failing / passing /
+   shadow by rule count. Same height and track as `.dq-tbar`, no target tick. */
+.dq-sbar {{ display: flex; height: 6px; border-radius: 3px; overflow: hidden;
+  background: #eef0f3; margin: .12rem 0; gap: 2px; }}
+.dq-sbar > span {{ display: block; height: 100%; }}
+.dq-elfoot i.dq-sbkey {{ display: inline-block; width: .55rem; height: .55rem;
+  border-radius: 2px; margin: 0 .3rem 0 .7rem; vertical-align: -.02rem; }}
+.dq-elfoot i.dq-sbkey:first-child {{ margin-left: 0; }}
 /* Three lines, so the row is taller than the two-line `.stack` rows — and the height
    is asked for on the row container, for the reason given at `st-key-dqrow_` below. */
 [class*="st-key-dqrow_"]:has(.dq-el) {{ min-height: 4.7rem; }}
@@ -1735,7 +1757,7 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .st-key-dq_elpane .stTabs [role="tablist"] {{ padding: 0 1rem; }}
 .st-key-dq_elpane .stTabs [data-testid="stTabPanel"] {{ padding-top: 0; }}
 .st-key-dq_eltab_overview, .st-key-dq_eltab_rows, .st-key-dq_eltab_nochecks,
-.st-key-dq_eltab_notriage {{ padding: .8rem 1rem .6rem; gap: .55rem; }}
+.st-key-dq_eltab_notriage, .st-key-dq_eltab_ract_none, .st-key-dq_eltab_rshd_none {{ padding: .8rem 1rem .6rem; gap: .55rem; }}
 .dq-elover .d {{ font-size: clamp(.74rem, .88vw, .82rem); color: var(--dq-text-2);
   margin-bottom: .2rem; }}
 .dq-elover .dq-trendw {{ --dq-trend-gap: .35rem; }}
