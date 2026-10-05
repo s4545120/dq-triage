@@ -487,9 +487,14 @@ RULE_COLS = ("rule_id, rule_version, rule_name, target_table, target_column, cde
 def generate(conn) -> None:
     targets = run(conn, f"""
         SELECT b.cde_id, b.cde_name, b.data_class, b.tolerance_pct, b.target_table,
-               b.target_column, b.expected_scope_filter, m.table_code, m.owner_group,
-               m.business_domain, c.data_type
+               b.target_column, b.expected_scope_filter, m.table_code,
+               -- The table's own, else the element's: a check with no domain vanished
+               -- from every domain filter in the app.
+               coalesce(m.owner_group, e.owner_group) AS owner_group,
+               coalesce(m.business_domain, e.business_domain) AS business_domain,
+               c.data_type
         FROM   {t('config', 'v_binding_current')} b
+        JOIN   {t('config', 'v_cde_registry_current')} e ON e.cde_id = b.cde_id
         JOIN   {t('config', 'v_monitored_table_current')} m
                ON m.target_table = b.target_table AND m.status = 'selected'
         -- system.information_schema spans every catalog; {CATALOG}.information_schema

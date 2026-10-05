@@ -141,7 +141,7 @@ def domain_filter(runs: pd.DataFrame, key_prefix: str) -> tuple[pd.DataFrame, in
         with l1:
             st.markdown('<div class="dq-strip-lab">Domains</div>', unsafe_allow_html=True)
         with f1:
-            domains = sorted(set(runs["business_domain"].dropna()))
+            domains = sorted(set(metrics.domains_of(runs)))
             picked = st.multiselect("Domain", domains, default=domains,
                                     label_visibility="collapsed",
                                     key=f"{key_prefix}_domains")
@@ -173,5 +173,5 @@ def domain_filter(runs: pd.DataFrame, key_prefix: str) -> tuple[pd.DataFrame, in
                 unsafe_allow_html=True,
             )
 
-    in_domain = runs[runs["business_domain"].isin(picked)]
+    in_domain = runs[metrics.domains_of(runs).isin(picked)]
     return in_domain[in_domain["rule_id"].isin(cde_rules)], window

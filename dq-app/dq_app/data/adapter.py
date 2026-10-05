@@ -299,7 +299,7 @@ OnboardingRejected = onboarding.OnboardingRejected
 
 def select_table(target_table: str, row_key: list[str], owner_group: str,
                  schedule_group: str = "daily_0300", scan_mode: str = "full",
-                 note: str | None = None) -> dict:
+                 note: str | None = None, business_domain: str | None = None) -> dict:
     who = identity.current()
     _require_platform_identity(who, "Selecting a table", OnboardingRejected)
     if not row_key:
@@ -334,7 +334,8 @@ def select_table(target_table: str, row_key: list[str], owner_group: str,
     row = {
         "target_table": target_table, "table_version": version, "table_code": code,
         "row_key": list(row_key), "owner_group": owner_group.strip(),
-        "business_domain": None, "schedule_group": schedule_group, "scan_mode": scan_mode,
+        "business_domain": (business_domain or "").strip() or None,
+        "schedule_group": schedule_group, "scan_mode": scan_mode,
         "status": "selected", "effective_from": datetime.now(), "selected_by": who.email,
         "note": note,
     }

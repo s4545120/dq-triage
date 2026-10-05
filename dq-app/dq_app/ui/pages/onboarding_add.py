@@ -127,7 +127,8 @@ if draft:
         f'{theme.badge("Not submitted yet", "neutral")}</div>'
         f'<div class="onb-mono" style="margin:.25rem 0 .6rem">{html.escape(fqn)} · row key '
         f'{html.escape(", ".join(draft["row_key"]))} · daily at 03:00 · owner '
-        f'{html.escape(draft["owner"])}</div>', unsafe_allow_html=True)
+        f'{html.escape(draft["owner"])} · {html.escape(str(draft.get("domain") or ""))}</div>',
+        unsafe_allow_html=True)
 
     left, right = st.columns([1, 2])
     with left, st.container(key="onbcard_next"):
@@ -197,7 +198,8 @@ if draft:
 
     def _submit():
         try:
-            adapter.select_table(fqn, draft["row_key"], draft["owner"])
+            adapter.select_table(fqn, draft["row_key"], draft["owner"],
+                                 business_domain=draft.get("domain"))
         except adapter.OnboardingRejected as exc:
             return str(exc)
         sent, refused = 0, []
@@ -224,6 +226,7 @@ if draft:
         f'<span class="onb-mono">{html.escape(fqn)}</span>'
         + ui.items([f"Row key: <b>{html.escape(', '.join(draft['row_key']))}</b>",
                     f"Owner of record: <b>{html.escape(draft['owner'])}</b>",
+                    f"Business domain: <b>{html.escape(str(draft.get('domain') or ''))}</b>",
                     f"Checked daily at 03:00, full table scan ({html.escape(draft['scan'])})"])
         + (f"<b>{len(picks)} suggestion{'s' if len(picks) != 1 else ''}</b>, each to its "
            "element's owner — you can't approve your own:" + ui.items(lines)
@@ -390,6 +393,10 @@ with side, st.container(key="onbcard_sel"):
                                  help="The column(s) that identify a row. Stamped on every "
                                       "failed row the checks sample.")
             owner = st.selectbox("Owner of record", groups or ["dq-stewards"], key="add_owner")
+            # Every check on the table carries this, and the Tables page and scorecard
+            # filter by it -- a table onboarded without one vanished from both.
+            domains = sorted({d for d in regs["business_domain"].dropna()}) if len(regs) else []
+            domain = st.selectbox("Business domain", domains or ["Customer"], key="add_domain")
             scan = f'{r["Size"]} · {onboarding.scan_label(r["SizeBytes"])}'
             st.selectbox("Checked", ["Daily at 03:00"], disabled=True, key="add_sched")
             st.selectbox("Scan", [f"Full table · {scan}"], disabled=True, key="add_scan")
@@ -398,7 +405,8 @@ with side, st.container(key="onbcard_sel"):
             if st.button("Continue", key="add_continue", type="primary", disabled=not key,
                          use_container_width=True):
                 st.session_state["_add_draft"] = {"fqn": fqn, "row_key": list(key),
-                                                  "owner": owner, "scan": scan}
+                                                  "owner": owner, "domain": domain,
+                                                  "scan": scan}
                 st.session_state.pop("_add_pick", None)
                 st.rerun()
         if st.button("Cancel", key="add_cancel", use_container_width=True):

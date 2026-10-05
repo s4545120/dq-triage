@@ -53,8 +53,27 @@ def _pct(n: float, d: float) -> float | None:
 # opens with triage throughput is answering a question nobody asked first.
 
 
+UNASSIGNED = "Unassigned"
+
+
+def domains_of(runs: pd.DataFrame) -> pd.Series:
+    """Each run's business domain, with a missing one named rather than dropped. A
+    table onboarded without a domain once vanished from every domain filter."""
+    return runs["business_domain"].fillna(UNASSIGNED)
+
+
 def latest_run_id(check_run: pd.DataFrame):
-    return None if check_run.empty else check_run.loc[check_run["run_ts"].idxmax(), "run_id"]
+    """The latest run that measured an active check.
+
+    A shadow-only run -- the onboarding job measures new shadow checks on one table the
+    moment they exist -- records nothing but `skipped` verdicts. Taken as "the latest
+    run" it would make every page show only that table, with nothing raised.
+    """
+    if check_run.empty:
+        return None
+    live = check_run[check_run["status"] != "skipped"]
+    pool = live if len(live) else check_run
+    return pool.loc[pool["run_ts"].idxmax(), "run_id"]
 
 
 def detection_summary(check_run: pd.DataFrame) -> dict:
