@@ -80,6 +80,9 @@ PAGES = {
 
 # Group → the pages linked under it. The only list that decides what the sidebar shows.
 SIDEBAR = {
+    # `Onboarding` has its own group, first: choosing which tables are checked comes
+    # before monitoring them. It sat under Monitor until 2026-10-05.
+    "Onboard": ["onboarding"],
     # `Rules` sits under Monitor because the group it used to share — Evidence — held
     # the Register, and with that page gone a group label reading "Evidence" over a
     # single rule-authoring link described nothing. What a rule IS is part of what is
@@ -87,9 +90,7 @@ SIDEBAR = {
     # `Thresholds` is under Monitor with `Rules` because a limit is a property of
     # a rule and of what is being watched -- detection, not triage. The decisions
     # made there are about rules, never about problems.
-    # `Onboarding` is under Monitor for the same reason: selecting a table and
-    # promoting its checks decide what is watched, never what a problem is.
-    "Monitor": ["scorecard", "tables", "rules", "thresholds", "onboarding"],
+    "Monitor": ["scorecard", "tables", "rules", "thresholds"],
     "Work": ["triage"],
 }
 
