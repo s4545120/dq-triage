@@ -197,3 +197,54 @@ def test_a_refused_insert_reports_false(monkeypatch):
     _patched(monkeypatch, landed=False)
     row = {"rule_id": "R", "rule_version": 3, "created_by": "a@example.com", "note": "x"}
     assert src.append_rule_version(row) is False
+
+
+def test_an_array_column_is_bound_as_json_not_as_a_list(monkeypatch):
+    """The connector cannot bind a list. Selecting a table on the deployed app failed
+    with "Could not infer parameter type from value: ['customerID']" until row_key was
+    sent as JSON and rebuilt with from_json inside the INSERT."""
+    from dq_app.data import databricks_source as src
+
+    cur = _patched(monkeypatch, landed=True)
+    row = {"target_table": "samples.bakehouse.sales_customers", "table_version": 1,
+           "table_code": "SALES_CUSTOMERS", "row_key": ["customerID"],
+           "status": "selected", "selected_by": "a@example.com"}
+    assert src.write_monitored_table(row) is True
+
+    insert, params = cur.calls[0]
+    assert not any(isinstance(v, (list, tuple)) for v in params.values())
+    assert '["customerID"]' in params.values()
+    assert "from_json(:v3, 'array<string>')" in insert
+    assert "customerID" not in insert
+
+
+def test_a_batch_of_promotions_is_one_guarded_insert_and_reports_what_landed(monkeypatch):
+    """Promoting a table's checks one statement at a time took over a minute. The batch
+    is one INSERT, every value bound, the stale-version guard applied per row, and the
+    caller is told which rows landed from a read-back -- not from the attempt."""
+    import contextlib
+
+    from dq_app.data import databricks_source as src
+
+    class Cur:
+        calls = []
+
+        def execute(self, sql, params=None):
+            self.calls.append((sql, params or {}))
+
+        def fetchall(self):
+            # A landed; B was beaten to its version by someone else.
+            return [("A", 3, "me@example.com"), ("B", 3, "other@example.com")]
+
+    cur = Cur()
+    monkeypatch.setattr(src, "_cursor", contextlib.contextmanager(lambda: (yield cur)))
+    rows = [{"rule_id": "A", "rule_version": 3, "created_by": "me@example.com",
+             "note": "x'); DROP TABLE t; --"},
+            {"rule_id": "B", "rule_version": 3, "created_by": "me@example.com", "note": "y"}]
+    assert src.append_rule_versions(rows) == {"A"}
+
+    insert, params = cur.calls[0]
+    assert insert.count("INSERT INTO") == 1 and "VALUES" in insert
+    assert "x.rule_version >= v.rule_version" in insert
+    assert "DROP TABLE" not in insert and "x'); DROP TABLE t; --" in params.values()
+    assert len(params) == 8

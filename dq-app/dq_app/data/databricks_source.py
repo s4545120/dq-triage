@@ -34,7 +34,10 @@ from Unity Catalog alone, without reading this file. See `sql/README.md` for why
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -79,6 +82,22 @@ def _t(schema: str, table: str) -> str:
 WAREHOUSE_ID = os.getenv("DATABRICKS_WAREHOUSE_ID", "").strip()
 
 
+_CFG = None
+_CFG_LOCK = threading.Lock()
+
+
+def _config(Config):
+    """One SDK Config for the process. Building one per query re-ran authentication
+    every time -- from a laptop that is a `databricks auth token` subprocess per query,
+    and a page probing a dozen tables at once had those subprocesses race for the OS
+    keyring and fail. The SDK refreshes the token inside one Config on its own."""
+    global _CFG
+    with _CFG_LOCK:
+        if _CFG is None:
+            _CFG = Config()
+        return _CFG
+
+
 @contextlib.contextmanager
 def _cursor():
     """One cursor on the app's SQL warehouse, closed with its connection."""
@@ -97,7 +116,7 @@ def _cursor():
             "resource, then map it in app.yaml with `valueFrom: <the resource key>`."
         )
 
-    cfg = Config()
+    cfg = _config(Config)
     with dbsql.connect(
         server_hostname=cfg.host,
         http_path=f"/sql/1.0/warehouses/{WAREHOUSE_ID}",
@@ -237,9 +256,18 @@ def _guarded_insert(table: str, row: dict, columns: list[str], guard: str,
     three written tables should make the second fail instead, since this INSERT reads
     its own table; that is not set, and not yet tested on a warehouse.
     """
-    params = {f"v{i}": _param(row.get(c)) for i, c in enumerate(columns)}
+    # An array column cannot be bound: the connector refuses a Python list ("Could not
+    # infer parameter type"), which is how selecting a table first failed on the
+    # deployed app -- `row_key` is ARRAY<STRING>. It travels as JSON text and is turned
+    # back into an array inside the INSERT, so it is still a bound value, never SQL.
+    arrays = {i for i, c in enumerate(columns)
+              if isinstance(row.get(c), (list, tuple, np.ndarray))}
+    params = {f"v{i}": (json.dumps([str(x) for x in row.get(c)]) if i in arrays
+                        else _param(row.get(c)))
+              for i, c in enumerate(columns)}
     params.update({f"g_{k}": _param(v) for k, v in guard_params.items()})
-    select = ", ".join(f":v{i}" for i in range(len(columns)))
+    select = ", ".join(f"from_json(:v{i}, 'array<string>')" if i in arrays else f":v{i}"
+                       for i in range(len(columns)))
     with _cursor() as cur:
         cur.execute(
             f"INSERT INTO {table} ({', '.join(columns)}) "
@@ -311,8 +339,243 @@ def append_rule_version(row: dict) -> bool:
     )
 
 
+def append_rule_versions(rows: list[dict]) -> set[str]:
+    """Several new rule versions in ONE statement, each under `append_rule_version`'s
+    guard. Returns the rule_ids that landed, read back rather than assumed.
+
+    The rows ride in a VALUES list and the guard is evaluated per row against the table
+    as it stands, so a rule someone changed since the page was read is left out while
+    the rest land. Every value is still a bound parameter.
+    """
+    if not rows:
+        return set()
+    table = _t("config", "rule_registry")
+    cols = list(rows[0].keys())
+    params, tuples = {}, []
+    for i, row in enumerate(rows):
+        names = []
+        for j, c in enumerate(cols):
+            params[f"r{i}c{j}"] = _param(row.get(c))
+            names.append(f":r{i}c{j}")
+        tuples.append("(" + ", ".join(names) + ")")
+    collist = ", ".join(cols)
+    with _cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {table} ({collist}) "
+            f"SELECT {collist} FROM (VALUES {', '.join(tuples)}) AS v({collist}) "
+            f"WHERE NOT EXISTS (SELECT 1 FROM {table} x "
+            "WHERE x.rule_id = v.rule_id AND x.rule_version >= v.rule_version)",
+            params,
+        )
+        ids = {f"q{i}": r["rule_id"] for i, r in enumerate(rows)}
+        cur.execute(
+            f"SELECT rule_id, rule_version, created_by FROM {table} "
+            f"WHERE rule_id IN ({', '.join(':' + k for k in ids)})", ids)
+        seen = {(r[0], int(r[1]), r[2]) for r in cur.fetchall()}
+    return {r["rule_id"] for r in rows
+            if (r["rule_id"], int(r["rule_version"]), r["created_by"]) in seen}
+
+
 def promote_rule(row: dict) -> bool:
     return append_rule_version(row)
+
+
+def _q_optional(table: str, columns: list[str]) -> pd.DataFrame:
+    """A table this catalog may not have yet. The onboarding tables exist only where
+    onboarding has been set up (the dq_onboard test schema today), and a missing table
+    means nothing is being onboarded -- not an error to put in front of a reader."""
+    try:
+        return _q(f"SELECT * FROM {table}")
+    except Exception as exc:  # noqa: BLE001 -- only a missing table is swallowed
+        if "TABLE_OR_VIEW_NOT_FOUND" not in str(exc):
+            raise
+        return pd.DataFrame({c: pd.Series(dtype="object") for c in columns})
+
+
+def monitored_tables() -> pd.DataFrame:
+    from dq_app.domain.onboarding import MONITORED_COLUMNS
+    return _q_optional(_t("config", "monitored_table"), MONITORED_COLUMNS)
+
+
+def binding_proposals() -> pd.DataFrame:
+    from dq_app.domain.onboarding import PROPOSAL_COLUMNS
+    return _q_optional(_t("config", "binding_proposal"), PROPOSAL_COLUMNS)
+
+
+def binding_reviews() -> pd.DataFrame:
+    from dq_app.domain.onboarding import REVIEW_COLUMNS
+    return _q_optional(_t("config", "binding_review"), REVIEW_COLUMNS)
+
+
+def check_templates() -> pd.DataFrame:
+    return _q_optional(_t("config", "check_template"),
+                       ["template_id", "template_version", "data_class", "check_code", "title"])
+
+
+# --- Onboarding: browsing Unity Catalog -------------------------------------------------
+# Through system.information_schema, which lists only what the querying principal may
+# see. Today that principal is the app's service principal; browsing as the signed-in
+# user needs the app's user-authorization scope and the user's token on this cursor.
+
+def _ident(fqn: str) -> str:
+    """catalog.schema.table as a quoted identifier. The parts come from
+    information_schema, but they are quoted anyway: a backtick in a name is legal."""
+    parts = fqn.split(".")
+    if len(parts) != 3 or not all(parts):
+        raise ValueError(f"not a three-part table name: {fqn!r}")
+    return ".".join("`" + p.replace("`", "``") + "`" for p in parts)
+
+
+def catalog_tables() -> pd.DataFrame:
+    df = _q("""
+        SELECT table_catalog, table_schema, table_name, table_type, table_owner
+        FROM   system.information_schema.tables
+        WHERE  table_schema <> 'information_schema' AND table_catalog <> 'system'""")
+    df["size_bytes"] = None
+    df["readable"] = None
+    return df
+
+
+def catalog_columns(fqn: str | None = None) -> pd.DataFrame:
+    """Columns of one table (`catalog.schema.table`) or of every table in one schema
+    (`catalog.schema`) -- the second is how the table list gets column and tag counts
+    for every row in one statement."""
+    where, params = "", None
+    if fqn:
+        parts = fqn.split(".")
+        where = "WHERE c.table_catalog = :c AND c.table_schema = :s"
+        params = {"c": parts[0], "s": parts[1]}
+        if len(parts) == 3:
+            where += " AND c.table_name = :t"
+            params["t"] = parts[2]
+    return _q(f"""
+        SELECT c.table_catalog, c.table_schema, c.table_name, c.column_name,
+               c.data_type, c.ordinal_position, g.tag_value AS tag_cde
+        FROM   system.information_schema.columns c
+        LEFT JOIN system.information_schema.column_tags g
+               ON  g.catalog_name = c.table_catalog AND g.schema_name = c.table_schema
+               AND g.table_name = c.table_name AND g.column_name = c.column_name
+               AND g.tag_name = 'cde'
+        {where}
+        ORDER  BY c.table_catalog, c.table_schema, c.table_name, c.ordinal_position""",
+        params)
+
+
+def table_probe(fqn: str) -> dict:
+    """Size, and whether this principal can read it. Two cheap statements: DESCRIBE
+    DETAIL reads the Delta log, and a LIMIT 0 select plans without scanning."""
+    out = {"size_bytes": None, "readable": False}
+    ident = _ident(fqn)
+    try:
+        d = _q(f"DESCRIBE DETAIL {ident}")
+        if len(d) and "sizeInBytes" in d:
+            out["size_bytes"] = _param(d.iloc[0]["sizeInBytes"])
+    except Exception:  # noqa: BLE001 -- a view has no detail; size stays unknown
+        pass
+    try:
+        _q(f"SELECT 1 FROM {ident} LIMIT 0")
+        out["readable"] = True
+    except Exception:  # noqa: BLE001 -- not readable is the answer, not an error
+        pass
+    return out
+
+
+_GRANTED = "(p.grantee = current_user() OR is_account_group_member(p.grantee))"
+
+
+def readable_tables(catalog: str, schema: str) -> set[str]:
+    """Every table in one schema this principal can SELECT, in ONE statement.
+
+    Read from the privilege views rather than by trying a SELECT on each table: the
+    per-table probe was two statements a table on a fresh connection each, and a
+    dozen-table schema took a minute to list. Owner, a table grant, or SELECT inherited
+    from the schema or catalog -- directly or through a group. `select_table` still
+    makes the exact per-table check at the moment a table is submitted.
+    """
+    df = _q(f"""
+        SELECT t.table_name FROM system.information_schema.tables t
+        WHERE t.table_catalog = :c AND t.table_schema = :s AND (
+          t.table_owner = current_user() OR is_account_group_member(t.table_owner)
+          OR EXISTS (SELECT 1 FROM system.information_schema.table_privileges p
+                     WHERE p.table_catalog = t.table_catalog AND p.table_schema = t.table_schema
+                       AND p.table_name = t.table_name
+                       AND p.privilege_type IN ('SELECT', 'ALL PRIVILEGES') AND {_GRANTED})
+          OR EXISTS (SELECT 1 FROM system.information_schema.schema_privileges p
+                     WHERE p.catalog_name = t.table_catalog AND p.schema_name = t.table_schema
+                       AND p.privilege_type IN ('SELECT', 'ALL PRIVILEGES') AND {_GRANTED})
+          OR EXISTS (SELECT 1 FROM system.information_schema.catalog_privileges p
+                     WHERE p.catalog_name = t.table_catalog
+                       AND p.privilege_type IN ('SELECT', 'ALL PRIVILEGES') AND {_GRANTED}))""",
+        {"c": catalog, "s": schema})
+    return set(df["table_name"]) if len(df) else set()
+
+
+def _sizes_on_one_connection(fqns: list[str]) -> dict[str, float | None]:
+    out = {}
+    with _cursor() as cur:
+        for fqn in fqns:
+            try:
+                cur.execute(f"DESCRIBE DETAIL {_ident(fqn)}")
+                cols = [d[0] for d in cur.description]
+                row = cur.fetchone()
+                size = row[cols.index("sizeInBytes")] if row and "sizeInBytes" in cols else None
+                out[fqn] = float(size) if size is not None else None
+            except Exception:  # noqa: BLE001 -- a view has no size; that is the answer
+                out[fqn] = None
+    return out
+
+
+def table_sizes(fqns: tuple[str, ...], workers: int = 4) -> dict[str, float | None]:
+    """Delta size of each table: one DESCRIBE DETAIL apiece, but on a few connections
+    reused across the batch rather than a new one per statement -- opening the
+    connection, not the statement, was most of each probe's cost."""
+    fqns = list(fqns)
+    if not fqns:
+        return {}
+    n = min(workers, len(fqns))
+    chunks = [fqns[i::n] for i in range(n)]
+    out: dict[str, float | None] = {}
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        for part in pool.map(_sizes_on_one_connection, chunks):
+            out.update(part)
+    return out
+
+
+# --- Onboarding: three appends -----------------------------------------------------------
+
+def write_monitored_table(row: dict) -> bool:
+    """Select (or re-version) a table. Refused if a version at or above this exists."""
+    table = _t("config", "monitored_table")
+    return _guarded_insert(
+        table, row, list(row.keys()),
+        guard=(f"NOT EXISTS (SELECT 1 FROM {table} WHERE target_table = :g_target_table "
+               "AND table_version >= :g_table_version)"),
+        guard_params={"target_table": row["target_table"],
+                      "table_version": row["table_version"]},
+        readback={"target_table": row["target_table"], "table_version": row["table_version"]},
+    )
+
+
+def write_binding_proposal(row: dict) -> bool:
+    """A person's suggested binding. Lands in the same queue as the discovery job's."""
+    table = _t("config", "binding_proposal")
+    return _guarded_insert(
+        table, row, list(row.keys()),
+        guard=f"NOT EXISTS (SELECT 1 FROM {table} WHERE proposal_id = :g_proposal_id)",
+        guard_params={"proposal_id": row["proposal_id"]},
+        readback={"proposal_id": row["proposal_id"]},
+    )
+
+
+def write_binding_review(row: dict) -> bool:
+    """One decision per proposal. Refused if the proposal already has one."""
+    table = _t("config", "binding_review")
+    return _guarded_insert(
+        table, row, list(row.keys()),
+        guard=f"NOT EXISTS (SELECT 1 FROM {table} WHERE proposal_id = :g_proposal_id)",
+        guard_params={"proposal_id": row["proposal_id"]},
+        readback={"proposal_id": row["proposal_id"], "reviewed_by": row["reviewed_by"]},
+    )
 
 
 def threshold_proposals() -> pd.DataFrame:

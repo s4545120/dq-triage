@@ -27,6 +27,9 @@ import streamlit as st
 _PENDING_KEY = "_pending_disposition_events"
 _PENDING_RULES_KEY = "_pending_rule_versions"
 _PENDING_REVIEWS_KEY = "_pending_threshold_reviews"
+_PENDING_ONB = {"monitored": "_pending_monitored_tables",
+                "proposal": "_pending_binding_proposals",
+                "review": "_pending_binding_reviews"}
 
 
 # Deployed, only `dq-app/` is shipped — the app source path is the folder holding
@@ -101,6 +104,34 @@ def threshold_proposals() -> pd.DataFrame:
     return _read("results.threshold_proposal")
 
 
+def _read_optional(table: str, columns: list[str]) -> pd.DataFrame:
+    """A table the fixture does not carry reads as empty, with its columns."""
+    try:
+        return _read(table)
+    except FileNotFoundError:
+        return pd.DataFrame({c: pd.Series(dtype="object") for c in columns})
+
+
+def monitored_tables() -> pd.DataFrame:
+    from dq_app.domain.onboarding import MONITORED_COLUMNS
+    return _read_optional("config.monitored_table", MONITORED_COLUMNS)
+
+
+def binding_proposals() -> pd.DataFrame:
+    from dq_app.domain.onboarding import PROPOSAL_COLUMNS
+    return _read_optional("config.binding_proposal", PROPOSAL_COLUMNS)
+
+
+def binding_reviews() -> pd.DataFrame:
+    from dq_app.domain.onboarding import REVIEW_COLUMNS
+    return _read_optional("config.binding_review", REVIEW_COLUMNS)
+
+
+def check_templates() -> pd.DataFrame:
+    return _read_optional("config.check_template",
+                          ["template_id", "template_version", "data_class", "check_code", "title"])
+
+
 def threshold_reviews() -> pd.DataFrame:
     """As generated. Session-recorded reviews are layered on by the adapter."""
     return _read("results.threshold_review")
@@ -135,6 +166,11 @@ def append_rule_version(row: dict) -> bool:
     return True
 
 
+def append_rule_versions(rows: list[dict]) -> set[str]:
+    """Each row under the same guard as `append_rule_version`; the ids that landed."""
+    return {r["rule_id"] for r in rows if append_rule_version(r)}
+
+
 def promote_rule(row: dict) -> bool:
     return append_rule_version(row)
 
@@ -162,7 +198,89 @@ def pending_threshold_reviews() -> list[dict]:
     return list(st.session_state.get(_PENDING_REVIEWS_KEY, []))
 
 
+# --- Onboarding: the catalog, and three session-only writes ----------------------------
+# The fixture has no Unity Catalog. A test that needs one writes `catalog.tables` and
+# `catalog.columns` parquet beside the fixture; without them the picker is empty.
+
+_CATALOG_TABLE_COLUMNS = ["table_catalog", "table_schema", "table_name", "table_type",
+                          "table_owner", "size_bytes", "readable"]
+_CATALOG_COLUMN_COLUMNS = ["table_catalog", "table_schema", "table_name", "column_name",
+                           "data_type", "ordinal_position", "tag_cde"]
+
+
+def catalog_tables() -> pd.DataFrame:
+    return _read_optional("catalog.tables", _CATALOG_TABLE_COLUMNS)
+
+
+def catalog_columns(fqn: str | None = None) -> pd.DataFrame:
+    df = _read_optional("catalog.columns", _CATALOG_COLUMN_COLUMNS)
+    if fqn and len(df):
+        parts = fqn.split(".")
+        df = df[(df["table_catalog"] == parts[0]) & (df["table_schema"] == parts[1])]
+        if len(parts) == 3:
+            df = df[df["table_name"] == parts[2]]
+    return df.sort_values("ordinal_position") if len(df) else df
+
+
+def readable_tables(catalog: str, schema: str) -> set[str]:
+    t = catalog_tables()
+    if t.empty:
+        return set()
+    t = t[(t["table_catalog"] == catalog) & (t["table_schema"] == schema)]
+    return set(t.loc[t["readable"].astype(bool), "table_name"])
+
+
+def table_sizes(fqns: tuple[str, ...]) -> dict[str, float | None]:
+    return {f: table_probe(f)["size_bytes"] for f in fqns}
+
+
+def table_probe(fqn: str) -> dict:
+    t = catalog_tables()
+    if len(t):
+        hit = t[t["table_catalog"] + "." + t["table_schema"] + "." + t["table_name"] == fqn]
+        if len(hit):
+            return {"size_bytes": hit.iloc[0]["size_bytes"], "readable": bool(hit.iloc[0]["readable"])}
+    return {"size_bytes": None, "readable": False}
+
+
+def _append_pending(kind: str, row: dict) -> bool:
+    st.session_state.setdefault(_PENDING_ONB[kind], []).append(row)
+    return True
+
+
+def pending_onboarding(kind: str) -> list[dict]:
+    return list(st.session_state.get(_PENDING_ONB[kind], []))
+
+
+def write_monitored_table(row: dict) -> bool:
+    """Refused if the table already has a version at or above this one."""
+    seen = [r["table_version"] for r in pending_onboarding("monitored")
+            if r["target_table"] == row["target_table"]]
+    base = monitored_tables()
+    if len(base):
+        seen += base.loc[base["target_table"] == row["target_table"], "table_version"].tolist()
+    if any(int(v) >= int(row["table_version"]) for v in seen):
+        return False
+    return _append_pending("monitored", row)
+
+
+def write_binding_proposal(row: dict) -> bool:
+    return _append_pending("proposal", row)
+
+
+def write_binding_review(row: dict) -> bool:
+    """One decision per proposal: refused if it already has one."""
+    base = binding_reviews()
+    decided = set(base["proposal_id"]) if len(base) else set()
+    decided |= {r["proposal_id"] for r in pending_onboarding("review")}
+    if row["proposal_id"] in decided:
+        return False
+    return _append_pending("review", row)
+
+
 def discard_pending() -> None:
+    for key in _PENDING_ONB.values():
+        st.session_state[key] = []
     st.session_state[_PENDING_KEY] = []
     st.session_state[_PENDING_RULES_KEY] = []
     st.session_state[_PENDING_REVIEWS_KEY] = []
