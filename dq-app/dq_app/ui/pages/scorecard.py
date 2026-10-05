@@ -500,11 +500,11 @@ with st.container(key="dq_pillbar"):
     with f1:
         # A dropdown, not a chip field. Every domain is selected by default, and a
         # multiselect spends a third of the strip rendering that fact back as chips.
-        domains = sorted(set(runs["business_domain"].dropna()))
+        domains = sorted(set(metrics.domains_of(runs)))
         choice = st.selectbox("Domain", ["All"] + domains)
         picked = domains if choice == "All" else [choice]
 
-    in_domain = runs[runs["business_domain"].isin(picked)]
+    in_domain = runs[metrics.domains_of(runs).isin(picked)]
 
     with f2:
         # Newest first, and the default. Reading an older run is how someone answers

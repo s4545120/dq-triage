@@ -45,7 +45,7 @@ import streamlit as st
 
 from dq_app.data import identity
 from dq_app.data import notify as _notify_transport
-from dq_app.domain import coverage, lifecycle, thresholds
+from dq_app.domain import coverage, lifecycle, onboarding, thresholds
 
 APP_VERSION = "dq-triage-app/1.0.0"
 
@@ -204,6 +204,257 @@ def get_cde_coverage() -> pd.DataFrame:
         get_cde_registry(), get_rule_registry(), get_check_runs(), get_cde_profile())
 
 
+@st.cache_data(**_CACHE)
+def _base_monitored_tables() -> pd.DataFrame:
+    return _impl.monitored_tables()
+
+
+@st.cache_data(**_CACHE)
+def _base_binding_proposals() -> pd.DataFrame:
+    return _impl.binding_proposals()
+
+
+@st.cache_data(**_CACHE)
+def _base_binding_reviews() -> pd.DataFrame:
+    return _impl.binding_reviews()
+
+
+def _with_pending(base: pd.DataFrame, kind: str) -> pd.DataFrame:
+    pending = getattr(_impl, "pending_onboarding", lambda _k: [])(kind)
+    if not pending:
+        return base
+    return pd.concat([base, pd.DataFrame(pending)], ignore_index=True)
+
+
+def get_monitored_tables() -> pd.DataFrame:
+    """Every version of every row in config.monitored_table, including selections made
+    in this session. Empty where the catalog has no onboarding tables."""
+    return _with_pending(_base_monitored_tables(), "monitored")
+
+
+def get_binding_proposals() -> pd.DataFrame:
+    return _with_pending(_base_binding_proposals(), "proposal")
+
+
+def get_binding_reviews() -> pd.DataFrame:
+    return _with_pending(_base_binding_reviews(), "review")
+
+
+# The catalog changes slowly and listing it is the slow part of Add tables, so it is
+# held for an hour rather than five minutes. A table selected is still checked exactly
+# (`probe_table`) at the moment it is submitted.
+_CATALOG_CACHE = dict(ttl=3600, show_spinner=False)
+
+
+@st.cache_data(**_CATALOG_CACHE)
+def get_catalog_tables() -> pd.DataFrame:
+    """Every table this principal can see in Unity Catalog, `system` excluded."""
+    return _impl.catalog_tables()
+
+
+@st.cache_data(**_CATALOG_CACHE)
+def get_readable_tables(catalog: str, schema: str) -> set[str]:
+    return _impl.readable_tables(catalog, schema)
+
+
+@st.cache_data(**_CATALOG_CACHE)
+def get_table_sizes(fqns: tuple[str, ...]) -> dict:
+    return _impl.table_sizes(tuple(fqns))
+
+
+@st.cache_data(**_CATALOG_CACHE)
+def get_catalog_columns(fqn: str) -> pd.DataFrame:
+    return _impl.catalog_columns(fqn)
+
+
+@st.cache_data(**_CACHE)
+def probe_table(fqn: str) -> dict:
+    return _impl.table_probe(fqn)
+
+
+
+@st.cache_data(**_CACHE)
+def get_check_templates() -> pd.DataFrame:
+    """The checks a bound column would get, by data class. Empty where the catalog has
+    no template table (the fixture, dq_triage)."""
+    return _impl.check_templates()
+
+
+def get_onboarding_status() -> pd.DataFrame:
+    """One row per selected table with its stage -- the Python twin of
+    v_onboarding_status, computed so a promotion made in this session moves the stage."""
+    return onboarding.derive_status(
+        get_monitored_tables(), get_binding_proposals(), get_binding_reviews(),
+        get_cde_registry(), get_rule_registry_current(), get_check_runs())
+
+
+# --- Onboarding writes ---------------------------------------------------------------------
+# Selecting a table, suggesting a binding and deciding one. Each is an append signed with
+# the platform identity -- refused from a laptop against Unity Catalog, the same guard as
+# promotion -- and none of them writes the element register: the apply job does that, so
+# no two reviewers ever race for a cde_version.
+
+OnboardingRejected = onboarding.OnboardingRejected
+
+
+def select_table(target_table: str, row_key: list[str], owner_group: str,
+                 schedule_group: str = "daily_0300", scan_mode: str = "full",
+                 note: str | None = None, business_domain: str | None = None) -> dict:
+    who = identity.current()
+    _require_platform_identity(who, "Selecting a table", OnboardingRejected)
+    if not row_key:
+        raise OnboardingRejected("Choose the column(s) that identify a row.")
+    if not (owner_group or "").strip():
+        raise OnboardingRejected("Name the group accountable for this table.")
+    # Uncached on purpose: this is the exact check, made at the moment of the write.
+    probe = _impl.table_probe(target_table)
+    if not probe["readable"]:
+        raise OnboardingRejected(
+            f"{target_table} cannot be read with the checks' identity, so every run would "
+            "fail. Ask its owner to grant SELECT first.")
+    size = probe["size_bytes"]
+    if size is not None and float(size) > onboarding.SCAN_LIMIT_BYTES:
+        raise OnboardingRejected(
+            f"{target_table} is too large for a full daily scan. Large tables wait on "
+            "partition scans.")
+    existing = get_monitored_tables()
+    mine = existing[existing["target_table"] == target_table] if len(existing) else existing
+    current = onboarding.current_monitored(existing, ("selected", "paused"))
+    if len(current) and target_table in set(current["target_table"]):
+        st_ = current.loc[current["target_table"] == target_table, "status"].iloc[0]
+        raise OnboardingRejected(
+            f"{target_table} is already onboarded" + (" and paused — resume it on its page."
+                                                     if st_ == "paused" else "."))
+    # Codes of every table ever onboarded, retired ones too: a reused code would give a
+    # new table's checks the rule ids of a decommissioned one's.
+    taken = set(onboarding.latest_monitored(existing)["table_code"]) if len(existing) else set()
+    version = int(mine["table_version"].max()) + 1 if len(mine) else 1
+    code = (mine.sort_values("table_version").iloc[-1]["table_code"] if len(mine)
+            else onboarding.table_code(target_table, taken))
+    row = {
+        "target_table": target_table, "table_version": version, "table_code": code,
+        "row_key": list(row_key), "owner_group": owner_group.strip(),
+        "business_domain": (business_domain or "").strip() or None,
+        "schedule_group": schedule_group, "scan_mode": scan_mode,
+        "status": "selected", "effective_from": datetime.now(), "selected_by": who.email,
+        "note": note,
+    }
+    if not _impl.write_monitored_table(row):
+        clear_cache()
+        raise OnboardingRejected(f"{target_table} changed since you opened it. Refresh and "
+                                 "check its current state.")
+    clear_cache()
+    return row
+
+
+def set_table_status(target_table: str, status: str, note: str) -> dict:
+    """Pause, resume or retire a table: a new version of its config.monitored_table row.
+    Pausing and resuming leave its checks as they are; the daily run checks only
+    `selected` tables. See `decommission_table` for retiring."""
+    who = identity.current()
+    _require_platform_identity(who, "Changing a table's status", OnboardingRejected)
+    latest = onboarding.latest_monitored(get_monitored_tables())
+    row = latest[latest["target_table"] == target_table] if len(latest) else latest
+    if row.empty:
+        raise OnboardingRejected(f"{target_table} is not onboarded.")
+    cur = row.iloc[0].to_dict()
+    if status not in onboarding.TRANSITIONS.get(cur["status"], set()):
+        raise OnboardingRejected(f"{target_table} is {cur['status']}; it cannot become {status}.")
+    if not (note or "").strip():
+        raise OnboardingRejected("Say why. The reason is kept with the table's history.")
+    cur.update({"table_version": int(cur["table_version"]) + 1, "status": status,
+                "effective_from": datetime.now(), "selected_by": who.email,
+                "note": note.strip(), "row_key": list(cur["row_key"])})
+    if not _impl.write_monitored_table(cur):
+        clear_cache()
+        raise OnboardingRejected(f"{target_table} changed since you opened it. Refresh and "
+                                 "check its current state.")
+    clear_cache()
+    return cur
+
+
+def decommission_table(target_table: str, note: str) -> tuple[int, list[str]]:
+    """Retire a table and every check on it. Returns (checks retired, refusals).
+
+    The table first, so the daily run stops checking it even if a check's retirement is
+    refused; then every current check in one guarded append, as promotion does.
+    Bindings on the element register are removed by the onboarding job, which is the
+    only writer of that register. Results and Triage problems are history and stay.
+    """
+    set_table_status(target_table, "retired", note)
+    who = identity.current()
+    now = datetime.now()
+    current = get_rule_registry_current()
+    rows = []
+    for _, r in current[current["target_table"] == target_table].iterrows():
+        row = r.drop(labels=["effective_to"], errors="ignore").to_dict()
+        row.update({"rule_version": int(r["rule_version"]) + 1, "status": "retired",
+                    "effective_from": now, "created_by": who.email, "created_at": now,
+                    "note": f"Retired with its table: {note.strip()}"})
+        rows.append(row)
+    landed = _impl.append_rule_versions(rows) if rows else set()
+    refused = [f"{r['rule_id']}: changed since you opened it, so it was not retired."
+               for r in rows if r["rule_id"] not in landed]
+    clear_cache()
+    return len(landed), refused
+
+
+def suggest_binding(target_table: str, target_column: str, cde_id: str, reason: str) -> dict:
+    who = identity.current()
+    _require_platform_identity(who, "Suggesting a binding", OnboardingRejected)
+    if not (reason or "").strip():
+        raise OnboardingRejected("Say what makes you sure. The owner decides on it.")
+    cdes = get_cde_registry_current()
+    if cde_id not in set(cdes["cde_id"]):
+        raise OnboardingRejected(f"{cde_id} is not a registered element.")
+    bound = {(b["target_table"], b["target_column"])
+             for b in coverage.bound_columns(get_cde_registry())}
+    if (target_table, target_column) in bound:
+        raise OnboardingRejected(f"{target_column} is already bound.")
+    row = {
+        "proposal_id": str(uuid.uuid4()), "proposed_at": datetime.now(),
+        "target_table": target_table, "target_column": target_column, "cde_id": cde_id,
+        "method": "suggested", "confidence": 1.0, "evidence": reason.strip(),
+        "proposed_by": who.email,
+    }
+    if not _impl.write_binding_proposal(row):
+        clear_cache()
+        raise OnboardingRejected("The suggestion was not recorded. Refresh and try again.")
+    clear_cache()
+    return row
+
+
+def self_approval_waived() -> bool:
+    """Whether this deployment waives the second-approver rule on binding suggestions.
+    Off unless DQ_ONBOARD_ALLOW_SELF_APPROVAL=1 -- set on the dq-onboard test app only.
+    A self-approval made under it is marked in its reason (`onboarding.WAIVER_MARK`)."""
+    return os.getenv("DQ_ONBOARD_ALLOW_SELF_APPROVAL", "").strip() == "1"
+
+
+def review_binding(proposal_id: str, decision: str, reason: str | None = None) -> dict:
+    who = identity.current()
+    _require_platform_identity(who, "Deciding a binding", OnboardingRejected)
+    open_p = onboarding.open_proposals(get_binding_proposals(), get_binding_reviews(),
+                                       get_cde_registry())
+    match = open_p[open_p["proposal_id"] == proposal_id] if len(open_p) else open_p
+    if match.empty:
+        raise OnboardingRejected("That proposal is already decided, or no longer open.")
+    proposal = match.iloc[0].to_dict()
+    waived = self_approval_waived()
+    onboarding.validate_review(proposal, who.email, decision, reason, allow_self=waived)
+    reason = (reason or "").strip() or None
+    if waived and decision == "approved" and onboarding.is_own(proposal, who.email):
+        reason = f"{onboarding.WAIVER_MARK} {reason or ''}".strip()
+    row = {"proposal_id": proposal_id, "decision": decision, "reviewed_by": who.email,
+           "reviewed_at": datetime.now(), "reason": reason}
+    if not _impl.write_binding_review(row):
+        clear_cache()
+        raise OnboardingRejected("Someone decided this proposal since you opened it. "
+                                 "The page has been refreshed.")
+    clear_cache()
+    return row
+
+
 def clear_cache() -> None:
     st.cache_data.clear()
 
@@ -340,13 +591,23 @@ def _notify(row: dict, title: str | None) -> None:
         )
 
 
-def promote_rule(rule_id: str, note: str) -> dict:
-    """Promote a shadow rule to active by appending a new version. The app's only
-    other write, and an INSERT for the same reason as the register.
+def _require_platform_identity(who: identity.Identity, what: str, exc=None) -> None:
+    """Refuse a durable rule-registry write the platform has not vouched for.
 
-    Who is authorised to do this is an open question in the spec, deliberately
-    unresolved here — the app records who did it, not whether they were allowed to.
+    The register is protected from a laptop by two CHECK constraints on
+    `actor_source`. The rule registry has no such column: run against Unity Catalog
+    from a laptop, a promotion would append a version signed `created_by` /
+    `promoted_by` with a demo persona's address, indistinguishable from a real one.
+    Session-only writes on the fixture are a demo and stay allowed.
     """
+    if writes_are_durable() and not who.is_platform:
+        raise (exc or WriteRejected)(
+            f"{what} signs the rule registry with your name, and there is no platform "
+            "identity here -- this is a laptop, not the deployed app. Deploy to do it.")
+
+
+def _promotion_row(rule_id: str, note: str, who, now) -> dict:
+    """The new version a promotion appends. Refuses a rule that is not in shadow."""
     reg = get_rule_registry()
     versions = reg[reg["rule_id"] == rule_id]
     if versions.empty:
@@ -357,9 +618,6 @@ def promote_rule(rule_id: str, note: str) -> dict:
             f"{rule_id} is '{latest['status']}', not 'shadow'. Only a shadow rule is "
             "promoted; changing an active rule is a new version with a changed expression."
         )
-
-    who = identity.current()
-    now = datetime.now()
     row = latest.to_dict()
     row.update(
         {
@@ -373,6 +631,19 @@ def promote_rule(rule_id: str, note: str) -> dict:
             "note": note,
         }
     )
+    return row
+
+
+def promote_rule(rule_id: str, note: str) -> dict:
+    """Promote a shadow rule to active by appending a new version. The app's only
+    other write, and an INSERT for the same reason as the register.
+
+    Who is authorised to do this is an open question in the spec, deliberately
+    unresolved here — the app records who did it, not whether they were allowed to.
+    """
+    who = identity.current()
+    _require_platform_identity(who, "Promoting a rule")
+    row = _promotion_row(rule_id, note, who, datetime.now())
     if not _impl.append_rule_version(row):
         clear_cache()
         raise WriteRejected(
@@ -380,6 +651,31 @@ def promote_rule(rule_id: str, note: str) -> dict:
             "not written. The page has been refreshed; check its current state.")
     clear_cache()
     return row
+
+
+def promote_rules(rule_ids: list[str], note: str) -> tuple[list[str], list[str]]:
+    """Promote several shadow rules in one append. Returns (promoted, refused reasons).
+
+    One statement instead of one per rule: promoting a table's 21 checks one at a time
+    took over a minute on the deployed app. The guard is still per rule -- a rule that
+    gained a version since the page was read is refused, and only that rule.
+    """
+    who = identity.current()
+    _require_platform_identity(who, "Promoting rules")
+    now = datetime.now()
+    rows, refused = [], []
+    for rid in rule_ids:
+        try:
+            rows.append(_promotion_row(rid, note, who, now))
+        except WriteRejected as exc:
+            refused.append(f"{rid}: {exc}")
+    landed = _impl.append_rule_versions(rows) if rows else set()
+    for r in rows:
+        if r["rule_id"] not in landed:
+            refused.append(f"{r['rule_id']}: gained a new version after you opened it, so "
+                           "its promotion was not written.")
+    clear_cache()
+    return [r["rule_id"] for r in rows if r["rule_id"] in landed], refused
 
 
 # The domain refuses reviews; this is the same exception under the name the page uses.
@@ -412,6 +708,8 @@ def review_threshold(
         raise ReviewRejected("That proposal is not the latest for its rule, or does not exist.")
     p = match.iloc[0]
     who = identity.current()
+    if decision == "adopted":
+        _require_platform_identity(who, "Adopting a limit", ReviewRejected)
     thresholds.validate_review(
         decision, reason=reason, review_by_date=review_by_date,
         state=str(p["review_state"]))

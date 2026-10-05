@@ -24,6 +24,9 @@ PAGES = [
     "dq_app/ui/pages/triage_detail.py",
     "dq_app/ui/pages/rule_registry.py",
     "dq_app/ui/pages/thresholds.py",
+    "dq_app/ui/pages/onboarding.py",
+    "dq_app/ui/pages/onboarding_table.py",
+    "dq_app/ui/pages/onboarding_add.py",
 ]
 
 SCORECARD = "dq_app/ui/pages/scorecard.py"

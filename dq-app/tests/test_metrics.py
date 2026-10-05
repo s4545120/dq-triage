@@ -233,3 +233,22 @@ def test_records_affected_is_empty_when_nothing_is_breaching(check_runs):
     out = metrics.records_affected_floor(_samples(), quiet)
     assert out["floor"] == 0
     assert out["exact"] is True
+
+
+def test_a_shadow_only_run_is_never_the_latest_run():
+    """The onboarding job measures new shadow checks on one table the moment they exist.
+    Taken as the latest run, that run made every page show one table, raising nothing."""
+    import pandas as pd
+
+    from dq_app.domain import metrics
+    runs = pd.DataFrame([
+        dict(run_id="daily", run_ts=pd.Timestamp("2026-10-05 03:00"), status="pass",
+             business_domain="Customer"),
+        dict(run_id="daily", run_ts=pd.Timestamp("2026-10-05 03:00"), status="breach",
+             business_domain=None),
+        dict(run_id="shadow", run_ts=pd.Timestamp("2026-10-05 09:00"), status="skipped",
+             business_domain="Sales"),
+    ])
+    assert metrics.latest_run_id(runs) == "daily"
+    assert metrics.latest_run_id(runs[runs["run_id"] == "shadow"]) == "shadow"  # nothing else
+    assert list(metrics.domains_of(runs)) == ["Customer", metrics.UNASSIGNED, "Sales"]

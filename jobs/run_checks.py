@@ -303,7 +303,7 @@ def plan(rules: list[Rule], resolve: dict[str, str]) -> dict:
 # Execution — the only part that needs Spark
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--catalog", default="dq")
     ap.add_argument("--schema", default=None,
@@ -319,9 +319,14 @@ def main() -> int:
                     help="Comma-separated target tables to check. Without it the run takes "
                          "the selected tables from config.monitored_table when that table "
                          "exists, and every table otherwise.")
+    ap.add_argument("--shadow-only", action="store_true",
+                    help="Run only shadow rules. For the event-triggered onboarding job: a "
+                         "shadow result raises nothing, so measuring new checks the moment "
+                         "they are generated is safe, while active results stay on the "
+                         "daily schedule.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the SQL this run would execute and write nothing.")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
     def t(schema: str, table: str) -> str:
         if not a.schema:
@@ -358,6 +363,11 @@ def main() -> int:
     if selected is not None:
         rules = [r for r in rules if r.target_table in selected]
         print(f"checking {len(selected)} selected tables: {', '.join(sorted(selected))}")
+    if a.shadow_only:
+        rules = [r for r in rules if r.status == "shadow"]
+        print(f"shadow only: {len(rules)} rules")
+        if not rules:
+            return 0
 
     # In a real deployment the registry already holds production table names and this
     # map is empty. It exists for the sandpit, where sql/seed.py rewrote
@@ -439,7 +449,15 @@ def main() -> int:
             message=msg, duration_sec=None, dbu_estimate=None))
         if status == "breach":
             tgt = resolve.get(r.target_table, r.target_table)
-            rows = spark.sql(sample_sql(r, tgt, resolve)).limit(SAMPLE_CAP).toPandas()
+            # Sampling reads the rows themselves, so a predicate that only errors on some
+            # values (a date cast meeting '31-02-1988' under ANSI) can fail here after the
+            # count succeeded. The verdict stands; the missing sample is said in the
+            # message instead of taking every other table's verdicts down with it.
+            try:
+                rows = spark.sql(sample_sql(r, tgt, resolve)).limit(SAMPLE_CAP).toPandas()
+            except Exception as exc:                # noqa: BLE001 -- recorded, not hidden
+                verdicts[-1]["message"] += f" | samples not captured: {_first_line(exc)}"
+                continue
             import json
             for _, sr in rows.iterrows():
                 d = {k: (None if v is None else str(v)) for k, v in sr.to_dict().items()}

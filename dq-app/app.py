@@ -63,6 +63,8 @@ PAGES = {
                      icon=":material/rule:"),
     "thresholds": st.Page("dq_app/ui/pages/thresholds.py", title="Thresholds",
                           icon=":material/tune:"),
+    "onboarding": st.Page("dq_app/ui/pages/onboarding.py", title="Onboarding",
+                          icon=":material/add_task:"),
     # Drill-downs. Registered so `st.switch_page` can reach them, deliberately absent
     # from SIDEBAR below — each is opened from the page above it, never from a click
     # in the nav, and opening one cold shows an empty selector.
@@ -70,10 +72,17 @@ PAGES = {
                             icon=":material/frame_inspect:"),
     "triage_detail": st.Page("dq_app/ui/pages/triage_detail.py", title="Problem detail",
                              icon=":material/frame_inspect:"),
+    "onboarding_add": st.Page("dq_app/ui/pages/onboarding_add.py", title="Add tables",
+                              icon=":material/add_task:"),
+    "onboarding_table": st.Page("dq_app/ui/pages/onboarding_table.py", title="Onboarding",
+                                icon=":material/add_task:"),
 }
 
 # Group → the pages linked under it. The only list that decides what the sidebar shows.
 SIDEBAR = {
+    # `Onboarding` has its own group, first: choosing which tables are checked comes
+    # before monitoring them. It sat under Monitor until 2026-10-05.
+    "Onboard": ["onboarding"],
     # `Rules` sits under Monitor because the group it used to share — Evidence — held
     # the Register, and with that page gone a group label reading "Evidence" over a
     # single rule-authoring link described nothing. What a rule IS is part of what is
