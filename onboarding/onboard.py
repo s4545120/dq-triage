@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -46,8 +47,8 @@ except NameError:
 sys.path.insert(0, str(_HERE))
 import mock_lead
 import templates as tpl
-from wh import (CATALOG, PREFIX, SCHEMA, SOURCE_SCHEMA, connect, in_databricks, lit, run, src,
-                t)
+import wh
+from wh import CATALOG, PREFIX, SOURCE_SCHEMA, connect, in_databricks, lit, run, src, t
 
 HERE = _HERE
 LEAD = src("crm_lead")
@@ -93,7 +94,13 @@ MONITORED = dict(
 # ---------------------------------------------------------------------------
 
 def setup(conn) -> None:
-    S = f"{CATALOG}.{SCHEMA}"
+    """The disposable test schema: clones of dq_triage, the onboarding DDL, a mock source
+    table with tags, and that table selected. Never against dq_triage itself -- it clones
+    FROM there; `install` is what a real schema takes."""
+    if wh.SCHEMA == SOURCE_SCHEMA:
+        raise SystemExit(f"setup builds a test schema cloned from {SOURCE_SCHEMA}; "
+                         f"use `--schema {SOURCE_SCHEMA} install` there")
+    S = f"{CATALOG}.{wh.SCHEMA}"
     stmts = [
         f"CREATE SCHEMA IF NOT EXISTS {S} COMMENT 'Onboarding test. Disposable: DROP SCHEMA "
         f"{S} CASCADE resets it. Cloned from {SOURCE_SCHEMA} on creation.'",
@@ -116,12 +123,20 @@ def setup(conn) -> None:
     ]
     for s in stmts:
         run(conn, s)
+    install(conn)
+    _mock_source(conn)
+    _select(conn)
+    print(f"setup done: {S}")
 
-    # The clone predates the template columns; dq_triage has not taken them yet. ADD
-    # COLUMNS appends at the end, which is where sql/ddl/01 declares them.
+
+def install(conn) -> None:
+    """The onboarding schema on an existing triage schema: the template columns on the
+    rule register, sql/ddl/15 and 16, the views re-created over them, and the templates
+    seeded. Idempotent. Selects nothing and writes no business table."""
+    # ADD COLUMNS appends at the end, which is where sql/ddl/01 declares them.
     have = {r["column_name"] for r in run(conn, f"""
         SELECT column_name FROM {CATALOG}.information_schema.columns
-        WHERE table_schema = '{SCHEMA}' AND table_name = '{PREFIX}config_rule_registry'""")}
+        WHERE table_schema = '{wh.SCHEMA}' AND table_name = '{PREFIX}config_rule_registry'""")}
     if "template_id" not in have:
         run(conn, f"ALTER TABLE {t('config', 'rule_registry')} ADD COLUMNS ("
                   f"template_id STRING, template_version INT)")
@@ -130,14 +145,57 @@ def setup(conn) -> None:
                f"CHECK ((template_id IS NULL) = (template_version IS NULL))")
 
     # Everything else is the repo's DDL, rendered for this schema exactly as
-    # sql/render.py renders it for dq_triage. The onboarding tables are no longer
-    # declared here: a second CREATE TABLE is a second shape, and they had drifted.
+    # sql/render.py renders it. No CREATE TABLE lives in this file: a second one is a
+    # second shape, and the prototype's had drifted.
     for f in DDL_FILES:
         _run_ddl(conn, f)
     _seed_templates(conn)
-    _mock_source(conn)
-    _select(conn)
-    print(f"setup done: {S}")
+    print(f"install done: {CATALOG}.{wh.SCHEMA}")
+
+
+def adopt(conn) -> None:
+    """Select every table that already carries an active rule and is not selected yet.
+
+    The check runner checks every table while monitored_table is empty and only the
+    selected ones once anything is selected -- so without this, the first table
+    onboarded in a schema checked before onboarding existed would silently stop the
+    rest being checked. One append per table, signed by whoever runs it, saying why."""
+    rows = run(conn, f"""
+        SELECT r.target_table,
+               max(r.owner_group) AS owner_group, max(r.business_domain) AS business_domain
+        FROM   {t('config', 'v_rule_registry_current')} r
+        LEFT ANTI JOIN {t('config', 'v_monitored_table_current')} m
+               ON m.target_table = r.target_table
+        WHERE  r.status = 'active'
+        GROUP BY r.target_table""")
+    if not rows:
+        print("adopt: every table with an active rule is already selected")
+        return
+    taken = {r["table_code"] for r in run(conn, f"SELECT DISTINCT table_code FROM "
+                                                f"{t('config', 'monitored_table')}")}
+    for r in rows:
+        tbl = r["target_table"]
+        key = next((v for k, v in ADOPT_ROW_KEY.items() if tbl.upper().endswith(k)), None)
+        if not key:
+            print(f"adopt: {tbl} skipped -- no row key known for it; select it in the app")
+            continue
+        code = re.sub(r"[^A-Za-z0-9]+", "_", tbl.split(".")[-1]).strip("_").upper()[:16]
+        while code in taken:
+            code += "X"
+        taken.add(code)
+        run(conn, f"""INSERT INTO {t('config', 'monitored_table')} ({MONITORED_COLS})
+SELECT {lit(tbl)}, 1, {lit(code)}, array({', '.join(lit(k) for k in key)}),
+       {lit(r['owner_group'])}, {lit(r['business_domain'])}, 'daily_0300', 'full', 'selected',
+       current_timestamp(), current_user(),
+       'Checked before onboarding existed; selected so the daily check run keeps checking it '
+       'once other tables are onboarded.'
+WHERE NOT EXISTS (SELECT 1 FROM {t('config', 'monitored_table')} WHERE target_table = {lit(tbl)})""")
+        print(f"adopt: selected {tbl} as {code}, row key {key}")
+
+
+# Row keys of the tables checked before onboarding, matched on the end of the name.
+# The runner's own fallback for a schema with no selection uses the same two.
+ADOPT_ROW_KEY = {"SUBS_C": ["SUBS_KEY"], "CTCT_C": ["CTCT_KEY"]}
 
 
 # The repo's DDL that setup runs, in sql/render.py's order. 15 is the onboarding tables;
@@ -153,7 +211,7 @@ def _run_ddl(conn, fname: str) -> None:
     sys.path.insert(0, str(HERE.parent / "sql"))
     import render
     text = render.render((HERE.parent / "sql" / "ddl" / fname).read_text(),
-                        CATALOG, SCHEMA, PREFIX)
+                        CATALOG, wh.SCHEMA, PREFIX)
     n = 0
     for stmt in render.statements(text):
         # ADD CONSTRAINT is not idempotent, and re-running setup must be.
@@ -505,7 +563,7 @@ def run_checks(_conn) -> None:
     job = {"run_name": "dq-onboard: run_checks",
            "tasks": [{"task_key": "run_checks", "environment_key": "env",
                       "spark_python_task": {"python_file": remote, "parameters": [
-                          "--catalog", CATALOG, "--schema", SCHEMA, "--prefix", PREFIX,
+                          "--catalog", CATALOG, "--schema", wh.SCHEMA, "--prefix", PREFIX,
                           "--fn-prefix", f"{CATALOG}.{SOURCE_SCHEMA}.{PREFIX}fn_"]}}],
            "environments": [{"environment_key": "env", "spec": {"client": "3"}}]}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
@@ -611,7 +669,7 @@ def measure_shadow(conn) -> None:
     sys.path.insert(0, str(HERE.parent / "jobs"))
     import run_checks   # noqa: PLC0415 -- the job's own runner, imported where Spark exists
     print(f"measuring shadow checks on {', '.join(tables)}")
-    rc = run_checks.main(["--catalog", CATALOG, "--schema", SCHEMA, "--prefix", PREFIX,
+    rc = run_checks.main(["--catalog", CATALOG, "--schema", wh.SCHEMA, "--prefix", PREFIX,
                           "--fn-prefix", f"{CATALOG}.{SOURCE_SCHEMA}.{PREFIX}fn_",
                           "--tables", ",".join(tables), "--shadow-only"])
     if rc:
@@ -646,17 +704,22 @@ def _try(conn, sql: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=["setup", "discover", "apply", "generate", "run", "status",
-                                     "pipeline", "steps"])
-    step = ap.parse_args().step
-    if step == "setup":
+    ap.add_argument("step", choices=["setup", "install", "adopt", "discover", "apply",
+                                     "generate", "run", "status", "pipeline", "steps"])
+    ap.add_argument("--schema", default=wh.TEST_SCHEMA,
+                    help=f"schema to act on (default {wh.TEST_SCHEMA}, the test schema)")
+    args = ap.parse_args()
+    step = args.step
+    wh.use_schema(args.schema)
+    if step in ("setup", "install"):
         miss = tpl.equivalence()
         if miss:
             print(f"templates do not reproduce their source rules: {miss}")
             return 1
     with connect() as conn:
-        {"setup": setup, "discover": discover, "apply": apply, "generate": generate,
-         "run": run_checks, "status": status, "pipeline": pipeline, "steps": steps}[step](conn)
+        {"setup": setup, "install": install, "adopt": adopt, "discover": discover,
+         "apply": apply, "generate": generate, "run": run_checks, "status": status,
+         "pipeline": pipeline, "steps": steps}[step](conn)
     return 0
 
 

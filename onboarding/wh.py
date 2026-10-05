@@ -1,6 +1,7 @@
 """Warehouse access for the onboarding test, and the names of everything it touches.
 
-The test lives in its own schema, `workspace.dq_onboard`, laid out the way sql/render.py
+The test lives in its own schema, `workspace.dq_onboard` (and `use_schema` points the
+same code at `dq_triage`, where onboarding runs for real since 2026-10-06), laid out the way sql/render.py
 lays out the sandpit (`dq_<group>_<table>`), so jobs/run_checks.py can run against it
 with `--schema dq_onboard`. Nothing here reads from or writes to `dq_triage` except the
 one-time clone in `onboard.py setup`. Dropping the schema resets the test.
@@ -14,6 +15,14 @@ PROFILE = "dbc-19c77b90-423e"
 WAREHOUSE = "ebf2cf6b81ca710b"
 CATALOG, SCHEMA, PREFIX = "workspace", "dq_onboard", "dq_"
 SOURCE_SCHEMA = "dq_triage"
+TEST_SCHEMA = SCHEMA
+
+
+def use_schema(name: str) -> None:
+    """Point every name built here at another schema -- `onboard.py --schema dq_triage`.
+    Read at call time by t() and src(), so it must run before the first statement."""
+    global SCHEMA
+    SCHEMA = name
 
 # Rules in the registry call the shared helpers by their resolved sandpit name. The
 # onboarding schema reuses dq_triage's functions rather than cloning them, so a
@@ -21,8 +30,8 @@ SOURCE_SCHEMA = "dq_triage"
 FN_RESOLVED = f"{CATALOG}.{SOURCE_SCHEMA}.{PREFIX}fn_"
 
 
-def t(group: str, name: str, schema: str = SCHEMA) -> str:
-    return f"{CATALOG}.{schema}.{PREFIX}{group}_{name}"
+def t(group: str, name: str, schema: str | None = None) -> str:
+    return f"{CATALOG}.{schema or SCHEMA}.{PREFIX}{group}_{name}"
 
 
 def src(name: str) -> str:

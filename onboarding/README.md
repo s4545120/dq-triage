@@ -12,6 +12,8 @@ the app write against that DDL.
 | Step | Who | Command |
 |---|---|---|
 | Set up schema, clones, the onboarding DDL, mock table, UC tags | job | `onboard.py setup` (idempotent) |
+| The onboarding DDL and templates on a real schema | job | `onboard.py --schema dq_triage install` |
+| Select every table already carrying an active rule | job | `onboard.py --schema dq_triage adopt` |
 | Propose bindings from UC tags and value patterns | job | `onboard.py discover` |
 | **Approve or reject the proposals** | **person** | `review.sql` step 1 |
 | Write approved bindings into the element register | job | `onboard.py apply` |
@@ -57,3 +59,9 @@ Two jobs, split by what their results can do:
 So a table goes: submit → proposals within minutes → review → shadow numbers within minutes
 → promote → live from the next 03:00 run. The app triggers neither job; they watch the
 tables. Pause either from Jobs & Pipelines.
+
+### In `dq_triage` (since 2026-10-06)
+
+The same two jobs with `--schema dq_triage`: `dq-triage onboard steps` (906515649279596)
+and `dq-triage checks` (568071030107709, daily 03:00). Every step takes `--schema`;
+the default is `dq_onboard`.

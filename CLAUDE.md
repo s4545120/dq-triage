@@ -37,8 +37,8 @@ because a rejection recorded nowhere is a proposal that comes back every pass. N
 changes a limit without a person's name on the row that did it. See *The threshold
 job* below. This is detection, not triage: nothing on the Triage pages reads it.
 
-**Onboarding (2026-10-05) adds three more writes — granted only in the `dq_onboard`
-test schema, not in `dq_triage`.** Selecting a table (`config.monitored_table`), a
+**Onboarding (2026-10-05) adds three more writes — granted in the `dq_onboard` test
+schema; in `dq_triage` the tables exist since 2026-10-06 and the grants are pending.** Selecting a table (`config.monitored_table`), a
 person's binding suggestion (`config.binding_proposal`) and a binding decision
 (`config.binding_review`), each an append signed with the platform identity. The
 element register itself is still written by no app: approved bindings reach it through
@@ -54,8 +54,8 @@ labelled as that decision: running the file as written takes it.
 | `sql/ddl/` | Current. Spec v1.0 + Addendum A. **Executed** — as `sql/out/`, rendered for `workspace.dq_triage`. See `RUNBOOK-personal-workspace.md`. |
 | `fixtures/` | Current. Local Parquet dataset generated from the pilot CSVs. Verified. |
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16; scorecard redrawn around targets 2026-10-01. Runs on the fixture **and** against Unity Catalog; deployed as the Databricks App `dq-triage`. |
-| `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard` only** (by `onboard.py setup`); rendered into `sql/out/13_`–`14_` for `dq_triage` and **not run there** — nor are `01`'s two template columns. |
-| `onboarding/` + `jobs/run_checks.py` | Current, 2026-10-05. **Running on a schedule — in `workspace.dq_onboard` only**: the `dq-checks` job (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`. The app half is deployed as a second Databricks App, `dq-onboard`. See *Onboarding*. |
+| `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard`** (`onboard.py setup`) **and to `dq_triage`** (`onboard.py --schema dq_triage install`, 2026-10-06, with `01`'s two template columns). |
+| `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app is **not yet redeployed** with the Onboarding pages — it waits on the grants. See *Onboarding in dq_triage*. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
 
 **There is a real workspace and it is LOADED — which is not the same as having been
@@ -72,10 +72,10 @@ Read this before repeating any number from this file to anyone. `fixtures/README
 the local twin of this list; this one is about the workspace.
 
 **The sentence to never say is "it has been running for 30 days."** Against
-`dq_triage` it has not run on a schedule once; the app has been *readable* for a month
-and nothing there has been *executing*. Since 2026-10-05 the check runner does run on a
-schedule — daily, as the `dq-checks` job — but against the `dq_onboard` test schema and
-its mock tables, not against `dq_triage`. Say which schema before saying "running".
+`dq_triage` the check runner first ran as a job on 2026-10-06 (run `9fe4d55c…`, 31
+active checks, 19 breaching) and is scheduled daily from then; everything before that
+date is the one 2026-09-17 run plus 39 seeded ones. Say which schema and since when
+before saying "running" — and the source tables are still the 1000-row mocks.
 
 ### Real
 
@@ -93,7 +93,7 @@ its mock tables, not against `dq_triage`. Say which schema before saying "runnin
 | What | Reality |
 |---|---|
 | **39 of the 40 check runs** | Back-projected by `build_fixtures.py` on four invented profiles, all stamped exactly `03:00:00`. The dates exist so closure rate and MTTR have a denominator |
-| **Any schedule** | None against `dq_triage`. `jobs/run_checks.py` has run as a Lakeflow job since 2026-10-05, scheduled daily — against `dq_onboard` only (see *Onboarding*) |
+| **Any schedule before 2026-10-06** | None against `dq_triage` until then. `dq-triage checks` runs daily from 2026-10-06; `dq_onboard`'s `dq-checks` from 2026-10-05 |
 | **The source data** | Two mock tables, **1000 rows each**, loaded from CSVs in `~/Downloads`. Not production data. The defects in them are real defects, which is why the findings hold |
 | **The disposition register** | All 65 events seeded. Latest is `2026-09-01`; **zero events after the Databricks run, and zero written by the deployed app.** No person has ever recorded a decision through it. The write path is exercised by `test_write_path.py`, not by a steward |
 | **Every identity** | Synthetic, on `example.com` |
@@ -1259,8 +1259,31 @@ set. What changed around it:
   tables keep their old column comments and no `CLUSTER BY`: `CREATE TABLE IF NOT
   EXISTS` does not alter a table that is there.
 
-**Open, and decisions rather than code:** the three grants in `dq_triage` (now written in
-`07_grants.sql`), and running 15, 16 and `01`'s template columns there; who may approve a binding (the element's `owner_group` is shown, not enforced —
+**Onboarding in dq_triage — 2026-10-06.** Taken as a decision ("full onboarding in
+dq_triage"), in this order:
+
+* `onboard.py --schema dq_triage install` — `01`'s template columns, 15, the views
+  re-created (08, 11, 14, 16), 15 templates seeded. Every statement `EXPLAIN`ed first;
+  coverage read 8 · 12 · 4 · 2 before and after. `setup` refuses `dq_triage`: it clones
+  FROM there. `wh.use_schema` / `--schema` is how one codebase serves both schemas.
+* `onboard.py --schema dq_triage adopt` — selects every table carrying an active rule:
+  `dq_mock_ctct_c` and `dq_mock_subs_c`, codes `DQ_MOCK_CTCT_C` / `DQ_MOCK_SUBS_C`,
+  signed, with a note saying why. **It exists because of a trap**: `run_checks.py` runs
+  every table while `monitored_table` is empty and only selected ones once anything is,
+  so the first table onboarded would have silently stopped the mocks being checked.
+* Two jobs, copies of `dq_onboard`'s with `--schema dq_triage`. The first steps run
+  proposed nothing, generated 4 shadow checks (bound columns with no rule) and measured
+  40 shadow checks; the first check run wrote 31 active verdicts, no errors.
+* **Not done: the grants and the redeploy.** Granting the `dq-triage` principal
+  (`fa379f33-…`) `SELECT` on schema `dq_triage` and `MODIFY` on monitored_table,
+  binding_proposal, binding_review and threshold_review was refused by the session's
+  permission check and is for a person to run. Redeploying before them breaks the
+  Scorecard and Tables pages: `_q_optional` tolerates a missing table, not a missing
+  privilege, deliberately.
+* There is no self-approval waiver in `dq-triage`: a person's binding suggestion needs a
+  second person. Job proposals can be approved by anyone.
+
+**Open, and decisions rather than code:** who may approve a binding (the element's `owner_group` is shown, not enforced —
 those groups do not exist in this workspace); browsing as the signed-in user (needs the
 app's user-authorization scope); `CTCT_BRTH_PLAUSIBLE`'s `year(BRTH_TS)` fails on
 `'31-02-1988'` under ANSI (the runner now records the missing sample instead of failing);
@@ -1341,7 +1364,7 @@ shadow since 2026-10-05 — the 34 below are additions, not a change to this des
 permits `UPDATE`/`DELETE` too. The enforceable equivalent is table-level `MODIFY` on
 exactly six tables plus `delta.appendOnly` — the register, the rule registry, since
 2026-09-28 the threshold review, and since 2026-10-05 onboarding's monitored_table,
-binding_proposal and binding_review (granted so far only in `dq_onboard`). See
+binding_proposal and binding_review (granted in `dq_onboard`; pending in `dq_triage`). See
 `sql/README.md`.
 
 ## Commands
@@ -1376,9 +1399,9 @@ but the DDL does not declare, which fails in a workspace and passes locally.
 
 ## Known gaps, deliberately unresolved
 
-- **Nothing writes `results.check_run` in `dq_triage`.** The runner works — it runs daily
-  as `dq-checks` against `dq_onboard` — but no job points at `dq_triage`, and ownership of
-  one there is unconfirmed. Cohorts cannot form without it.
+- **`results.check_run` in `dq_triage` is written daily since 2026-10-06** by `dq-triage
+  checks`, owned by the account that created it. Nothing schedules notebook 03 after it,
+  so no new cohort forms from those runs.
 - **The `rule_expr` comparison is done: 33 of 34 agree.** `XREF_NAME_AGREEMENT`'s
   stored SQL misses 2 violations because `<>` is not null-safe, and
   `XREF_OPEN_TS_AGREEMENT` carries the same pattern latently. See *What the workspace
