@@ -8,6 +8,8 @@ one-time clone in `onboard.py setup`. Dropping the schema resets the test.
 
 from __future__ import annotations
 
+import os
+
 PROFILE = "dbc-19c77b90-423e"
 WAREHOUSE = "ebf2cf6b81ca710b"
 CATALOG, SCHEMA, PREFIX = "workspace", "dq_onboard", "dq_"
@@ -29,7 +31,28 @@ def src(name: str) -> str:
     return f"{CATALOG}.{SCHEMA}.{PREFIX}src_{name}"
 
 
+def in_databricks() -> bool:
+    return bool(os.getenv("DATABRICKS_RUNTIME_VERSION"))
+
+
+class _SparkConn:
+    """Inside a Lakeflow task there is no CLI profile, and no need for one: the same
+    statements run through the task's own Spark session."""
+
+    def __init__(self):
+        from pyspark.sql import SparkSession
+        self.spark = SparkSession.builder.getOrCreate()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 def connect():
+    if in_databricks():
+        return _SparkConn()
     from databricks import sql as dbsql
     from databricks.sdk.core import Config
 
@@ -40,6 +63,8 @@ def connect():
 
 
 def run(conn, sql: str) -> list[dict]:
+    if isinstance(conn, _SparkConn):
+        return [r.asDict() for r in conn.spark.sql(sql).collect()]
     with conn.cursor() as cur:
         cur.execute(sql)
         if cur.description is None:

@@ -40,3 +40,16 @@ per element per run, so two reviewers can't collide on a version number.
 
 `mock_lead.py` lists every column, the discovery path it exercises, and every planted
 defect with its count. The first check run should find each of them.
+
+## The jobs (since 2026-10-05)
+
+Two jobs, split by what their results can do:
+
+| Job | Runs | Does | Can raise a problem? |
+|---|---|---|---|
+| `dq-onboard steps` (172834918560011) | When `dq_config_monitored_table` or `dq_config_binding_review` changes (table-update trigger; settles 61 s) | `onboard.py steps`: discover, apply approved bindings, generate shadow checks, measure only new shadow checks (`run_checks.py --shadow-only`) | No: everything it writes is shadow or config |
+| `dq-checks` (851061192655949) | Daily 03:00 Australia/Sydney | `run_checks.py` on every selected table | Yes: the only source of active results |
+
+So a table goes: submit → proposals within minutes → review → shadow numbers within minutes
+→ promote → live from the next 03:00 run. The app triggers neither job; they watch the
+tables. Pause either from Jobs & Pipelines.
