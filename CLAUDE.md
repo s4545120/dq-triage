@@ -38,7 +38,7 @@ changes a limit without a person's name on the row that did it. See *The thresho
 job* below. This is detection, not triage: nothing on the Triage pages reads it.
 
 **Onboarding (2026-10-05) adds three more writes — granted in the `dq_onboard` test
-schema; in `dq_triage` the tables exist since 2026-10-06 and the grants are pending.** Selecting a table (`config.monitored_table`), a
+schema, and in `dq_triage` since 2026-10-06.** Selecting a table (`config.monitored_table`), a
 person's binding suggestion (`config.binding_proposal`) and a binding decision
 (`config.binding_review`), each an append signed with the platform identity. The
 element register itself is still written by no app: approved bindings reach it through
@@ -55,7 +55,7 @@ labelled as that decision: running the file as written takes it.
 | `fixtures/` | Current. Local Parquet dataset generated from the pilot CSVs. Verified. |
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16; scorecard redrawn around targets 2026-10-01. Runs on the fixture **and** against Unity Catalog; deployed as the Databricks App `dq-triage`. |
 | `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard`** (`onboard.py setup`) **and to `dq_triage`** (`onboard.py --schema dq_triage install`, 2026-10-06, with `01`'s two template columns). |
-| `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app is **not yet redeployed** with the Onboarding pages — it waits on the grants. See *Onboarding in dq_triage*. |
+| `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app carries the Onboarding pages since 2026-10-06 (deployment `01f1c110…`). See *Onboarding in dq_triage*. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
 
 **There is a real workspace and it is LOADED — which is not the same as having been
@@ -1274,12 +1274,13 @@ dq_triage"), in this order:
 * Two jobs, copies of `dq_onboard`'s with `--schema dq_triage`. The first steps run
   proposed nothing, generated 4 shadow checks (bound columns with no rule) and measured
   40 shadow checks; the first check run wrote 31 active verdicts, no errors.
-* **Not done: the grants and the redeploy.** Granting the `dq-triage` principal
-  (`fa379f33-…`) `SELECT` on schema `dq_triage` and `MODIFY` on monitored_table,
-  binding_proposal, binding_review and threshold_review was refused by the session's
-  permission check and is for a person to run. Redeploying before them breaks the
-  Scorecard and Tables pages: `_q_optional` tolerates a missing table, not a missing
-  privilege, deliberately.
+* **Grants, then redeploy.** A person granted the `dq-triage` principal (`fa379f33-…`)
+  `SELECT` on schema `dq_triage` and `MODIFY` on monitored_table, binding_proposal,
+  binding_review and threshold_review — six MODIFYs in all, as `07_grants.sql` says —
+  and the app was redeployed from main after. The order matters: `_q_optional`
+  tolerates a missing table, not a missing privilege, deliberately, so the new code
+  before the grants breaks the Scorecard and Tables pages. The threshold_review grant
+  is the one *Known gaps* listed as written and unapplied; it is applied now.
 * There is no self-approval waiver in `dq-triage`: a person's binding suggestion needs a
   second person. Job proposals can be approved by anyone.
 
@@ -1364,7 +1365,7 @@ shadow since 2026-10-05 — the 34 below are additions, not a change to this des
 permits `UPDATE`/`DELETE` too. The enforceable equivalent is table-level `MODIFY` on
 exactly six tables plus `delta.appendOnly` — the register, the rule registry, since
 2026-09-28 the threshold review, and since 2026-10-05 onboarding's monitored_table,
-binding_proposal and binding_review (granted in `dq_onboard`; pending in `dq_triage`). See
+binding_proposal and binding_review (granted in both `dq_onboard` and `dq_triage`). See
 `sql/README.md`.
 
 ## Commands
@@ -1416,11 +1417,10 @@ but the DDL does not declare, which fails in a workspace and passes locally.
   the fixture; in the workspace it is 2 rules until `fix_cde_email_binding.sql` runs. What the
   coverage view now reports instead is `no_rule` on four bindings, and that has a
   surface: the scorecard's element list.
-- **Two workspace steps are written and NOT applied** (2026-10-01):
-  `sql/out/fix_cde_email_binding.sql` (one binding — see *Migrations applied*), and the
-  grants on the two threshold tables to the app's service principal: `SELECT` on
-  `threshold_proposal`, `SELECT` + `MODIFY` on `threshold_review`. Without the second,
-  the deployed Thresholds page cannot read and its review cannot write.
+- **One workspace step is written and NOT applied** (2026-10-01):
+  `sql/out/fix_cde_email_binding.sql` (one binding — see *Migrations applied*). The
+  threshold grants that sat beside it were applied on 2026-10-06 (schema-level `SELECT`
+  on `dq_triage`, `MODIFY` on `threshold_review`).
 - **No model has produced a threshold proposal.** Notebook 06 has never run. The first
   run is the test of the ceiling, of `unchanged` being reached for, and of the figures in
   the rationale — `notebooks/README.md` item 6.
