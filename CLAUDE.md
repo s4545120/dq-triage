@@ -166,8 +166,34 @@ applies unchanged. **Promote now asks first**: the drawer's button opens an
 would breach on the latest run; the write happens only on its Promote.
 `test_promoting_asks_first_and_writes_only_on_confirm` pins that.
 
-**The three queue-shaped tables are not `st.dataframe`s.** The scorecard's element
-list, the check breakdown beside it, and the Triage queue are drawn as clickable rows
+**The Tables pages were redrawn on 2026-10-06 from a design mock.** The inventory
+was an `st.dataframe` under a domain multiselect; it is now four figures (monitored
+tables, need attention, breaching rules, P1 failures), the tables as clickable rows
+(`dqrow_tm_`, a row opens the table — status stripe, checks passing with its bar, the
+period's trend, breaching / P1, findings, owner), a Rule health bar and a "Start with
+critical failures" card that opens the table with the most P1s on its first P1 rule.
+The detail page is the scorecard's layout on the scorecard's containers: checks
+passing over the period against all passing, a run summary, then `Applied rules`
+(Breaching / All, search) beside the picked rule in `dq_elpane` with Overview ·
+Sample rows · History tabs. "Investigate rows" switches to the Sample rows tab
+(`st.tabs(key=...)`, set from a callback); no new PII surface. Things to know:
+
+* **These pages count checks, the scorecard counts rows**, and both Tables pages say
+  "checks passing, not row-level quality". Same scope as the scorecard:
+  `monitoring.scoped_runs` keeps checks on a registered element and drops retired
+  rules, so `ctct_c` reads 16 checks, not 17.
+* **A disputed rule is grey on the detail page**, as on the scorecard: COH-B's two
+  rules on `subs_c` still count as breaching, but their bar is not red and their pane
+  says "not assessed" rather than "N pts below".
+* A table's domain and owner are the values most of its checks carry (`subs_c` has
+  one Billing rule among fifteen Customer ones). The mock's "Primary" tier is not
+  data and is not shown; the row says how many rows the table has instead.
+* `components.failed_rows` moved out of `scorecard.py` so both pages draw sampled rows
+  with one function. `tests/test_tables_pages.py` pins the pages.
+
+**The queue-shaped tables are not `st.dataframe`s.** The scorecard's element
+list, the check breakdown beside it, the Triage queue and (since 2026-10-06) the Tables
+inventory are drawn as clickable rows
 — one `st.container` per row holding its markup and a real button stretched over the
 whole row at zero opacity. Three reasons, and the third is the one a reader notices: a
 dataframe cell cannot hold a tinted severity badge, it cannot colour a phrase, and its

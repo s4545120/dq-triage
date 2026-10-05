@@ -1,52 +1,54 @@
-"""Shared render helpers for the monitored-table pages.
+"""Shared figures for the two Tables pages — the inventory and one table opened up.
 
-`domain_filter` is where these pages decide what they are looking at, and it applies
-two filters, not one: the domains the reader picked, and — always — the checks
-`v_cde_coverage` attached to a registered critical data element. The second is not a
-control. See `domain/coverage.attached_rule_ids` and the scorecard's module docstring
-for why the register, rather than the rule set, owns the denominator.
+**What these pages count.** Checks attached to a registered critical data element
+(`domain/coverage.attached_rule_ids`), with retired rules dropped — the same set the
+scorecard scores, so a table's figures and the scorecard's never disagree about which
+checks exist. The scoping is not a control; see `domain/coverage` and the scorecard's
+docstring for why the register, rather than the rule set, owns the denominator.
 
-The scoping is drawn in the filter strip rather than left implicit. A diagnostic page
-that quietly hides 14 of 34 checks is worse than one that shows fewer and says so.
+**What they measure is different from the scorecard, and says so.** A table's
+"checks passing" is a count — checks within their limit over checks that ran —
+because the question on these pages is which rules a table is breaking. The
+scorecard's figure is row-weighted. Both pages print "checks passing, not row-level
+quality" where the figure stands, so the two numbers are never read as one.
+
+Redrawn 2026-10-06 from a design mock: the inventory is clickable rows, not an
+`st.dataframe`, and the detail page is the scorecard's layout — a figure against its
+target, then a rule list beside one rule opened up.
 """
 
 from __future__ import annotations
 
 import pandas as pd
-import streamlit as st
 
 from dq_app.data import adapter
 from dq_app.domain import coverage, metrics
 from dq_app.ui import components, theme
 
+RAISED = ["pass", "breach"]
+STATUS_ORDER = {"Critical": 0, "Needs attention": 1, "Healthy": 2}
+STATUS_TONE = {"Critical": "critical", "Needs attention": "high", "Healthy": "success"}
 
-def quality_score(run: pd.DataFrame) -> float:
-    raised = run[run["status"].isin(["pass", "breach"])]
+
+def scoped_runs(runs: pd.DataFrame) -> pd.DataFrame:
+    """The runs these pages read: checks on a registered element, retired rules out.
+
+    Retired as the scorecard retires them: a retired rule's history is not a current
+    claim about the table, and without this the vulnerable-customer variance check
+    would still count against `ctct_c` on every run before 2026-10-01.
+    """
+    versions = adapter.get_rule_registry().sort_values("rule_version")
+    retired = set(versions.groupby("rule_id").tail(1).query("status == 'retired'").rule_id)
+    attached = coverage.attached_rule_ids(adapter.get_cde_coverage())
+    return runs[runs["rule_id"].isin(attached) & ~runs["rule_id"].isin(retired)]
+
+
+def checks_passing(run: pd.DataFrame) -> float | None:
+    """Checks within their limit over checks that ran. `None` when none ran."""
+    raised = run[run["status"].isin(RAISED)]
     if raised.empty:
-        return 0.0
-    return round(100.0 * len(raised[raised["status"] == "pass"]) / len(raised), 1)
-
-
-def quality_history(check_run: pd.DataFrame, table: str, window_days: int) -> list[float]:
-    scope = check_run[check_run["target_table"] == table].sort_values("run_ts")
-    if scope.empty:
-        return []
-
-    cutoff = scope["run_ts"].max() - pd.Timedelta(days=window_days)
-    rows = []
-    for _, day_runs in scope[scope["run_ts"] >= cutoff].groupby(scope["run_ts"].dt.date):
-        run_id = day_runs.loc[day_runs["run_ts"].idxmax(), "run_id"]
-        rows.append(quality_score(day_runs[day_runs["run_id"] == run_id]))
-    return rows
-
-
-def trend_label(history: list[float]) -> str:
-    if len(history) < 2:
-        return "No prior run"
-    delta = history[-1] - history[-2]
-    if abs(delta) < 0.05:
-        return "Flat"
-    return f"{delta:+.1f} pts"
+        return None
+    return 100.0 * int((raised["status"] == "pass").sum()) / len(raised)
 
 
 def status_label(run: pd.DataFrame) -> str:
@@ -58,120 +60,132 @@ def status_label(run: pd.DataFrame) -> str:
     return "Needs attention"
 
 
-def monitor_inventory(check_run: pd.DataFrame, window_days: int) -> pd.DataFrame:
-    run_id = metrics.latest_run_id(check_run)
-    if run_id is None:
-        return pd.DataFrame()
+def owner_label(group) -> str:
+    """`dq-stewards-billing` as a person would say it: Billing stewards."""
+    group = components.opt(group)
+    if not group:
+        return "No owner"
+    if str(group).startswith("dq-stewards-"):
+        return f"{str(group)[len('dq-stewards-'):].replace('-', ' ').capitalize()} stewards"
+    return str(group)
 
-    latest = check_run[check_run["run_id"] == run_id]
+
+def initials(name: str) -> str:
+    words = [w for w in name.replace("-", " ").split() if w[:1].isalpha()]
+    return "".join(w[0] for w in words[:2]).upper() or "?"
+
+
+def short_name(table: str) -> str:
+    return str(table).split(".")[-1]
+
+
+def change_words(history: list[tuple]) -> str:
+    """The last step of a history in words. Not coloured — see the scorecard."""
+    if len(history) < 2:
+        return "No prior run"
+    change = history[-1][1] - history[-2][1]
+    if abs(change) < 0.05:
+        return "No change"
+    return ("↑ " if change > 0 else "↓ ") + f"{abs(change):.1f} pts"
+
+
+def history(runs: pd.DataFrame, window_days: int, score) -> list[tuple]:
+    """(label, score) per scheduled run inside the window, oldest first.
+
+    One point per RUN rather than per day: a shadow-only measurement is never a run
+    (`metrics.latest_run_id` says why), so runs that measured no active check are
+    dropped rather than drawn as a dip.
+    """
+    raised = runs[runs["status"].isin(RAISED)]
+    if raised.empty:
+        return []
+    cutoff = raised["run_ts"].max() - pd.Timedelta(days=window_days)
+    out = []
+    for _, g in raised[raised["run_ts"] >= cutoff].groupby("run_id"):
+        value = score(g)
+        if value is not None:
+            out.append((g["run_ts"].max(), value))
+    return [(f"{ts:%-d %b}", v) for ts, v in sorted(out, key=lambda p: p[0])]
+
+
+def _mode(values: pd.Series):
+    values = values.dropna()
+    return None if values.empty else values.value_counts().index[0]
+
+
+def table_rows(scoped: pd.DataFrame, window_days: int) -> list[dict]:
+    """One dict per monitored table on the latest run, most urgent first."""
+    run_id = metrics.latest_run_id(scoped)
+    if run_id is None:
+        return []
+    latest = scoped[scoped["run_id"] == run_id]
     rows = []
     for table, g in latest.groupby("target_table", sort=False):
-        raised = g[g["status"].isin(["pass", "breach"])]
-        breaching = g[g["status"] == "breach"]
-        history = quality_history(check_run, table, window_days)
+        raised = g[g["status"].isin(RAISED)]
+        if raised.empty:
+            continue
+        breaching = raised[raised["status"] == "breach"]
+        # The value most of its checks carry: a table with one billing rule among
+        # fifteen customer ones is a customer table.
+        owner = owner_label(_mode(raised["owner_group"]))
+        hist = history(scoped[scoped["target_table"] == table], window_days, checks_passing)
         rows.append({
-            "Monitor": f"{table.split('.')[-1]} / Primary",
-            "Catalog item": table,
+            "key": table,
+            "Table": short_name(table),
+            "Domain": _mode(raised["business_domain"]) or "",
             "Status": status_label(g),
-            "Overall DQ": history[-1] if history else quality_score(g),
-            "Trend": trend_label(history),
-            "Quality over time": history,
-            "Findings": int(breaching["violation_count"].sum()),
-            "Breaching": int(len(breaching)),
-            "Rules": int(len(raised)),
+            "Checks": len(raised),
+            "Passing": int((raised["status"] == "pass").sum()),
+            "Score": checks_passing(g),
+            "History": hist,
+            "Change": change_words(hist),
+            "Breaching": len(breaching),
             "P1": int((breaching["severity"] == "P1_block").sum()),
-            "Evaluated rows": int(g.groupby("target_table")["rows_scanned"].max().sum()),
-            "Owner": ", ".join(sorted(set(g["owner_group"].dropna()))),
-            "Latest run": g["run_ts"].max(),
-            "__table": table,
+            "Findings": int(breaching["violation_count"].sum()),
+            "Rows": int(raised["rows_scanned"].max()),
+            "Owner": owner,
+            "Last run": g["run_ts"].max(),
         })
-
-    status_order = {"Critical": 0, "Needs attention": 1, "Healthy": 2}
-    out = pd.DataFrame(rows)
-    return (
-        out.assign(_status_order=out["Status"].map(status_order).fillna(9))
-        .sort_values(["_status_order", "Findings", "Monitor"], ascending=[True, False, True])
-        .drop(columns=["_status_order"])
-        .reset_index(drop=True)
-    )
+    return sorted(rows, key=lambda r: (STATUS_ORDER[r["Status"]], -r["P1"],
+                                       -r["Findings"], r["Table"]))
 
 
-def applied_rules(check_run: pd.DataFrame, table: str, registry: pd.DataFrame) -> pd.DataFrame:
-    run_id = metrics.latest_run_id(check_run)
-    if run_id is None:
-        return pd.DataFrame()
-
-    rule_name = registry.set_index("rule_id")["rule_name"].to_dict()
-    run_now = check_run[
-        (check_run["run_id"] == run_id)
-        & (check_run["target_table"] == table)
-    ]
-    hist = (
-        check_run[check_run["target_table"] == table]
-        .sort_values("run_ts").groupby("rule_id")["violation_count"].apply(list)
-    )
-
-    rows = []
-    for _, r in run_now.sort_values(["status", "violation_count"],
-                                    ascending=[True, False]).iterrows():
-        violation_pct = float(r["violation_pct"])
-        rows.append({
-            "Rule name": rule_name.get(r["rule_id"], r["rule_id"]),
-            "Status": {"breach": "Failing", "pass": "Passing"}.get(r["status"], "Shadow"),
-            "Overall DQ": max(0.0, round(100.0 - violation_pct, 2)),
-            "Findings trend": hist.get(r["rule_id"], []),
-            "Attribute": components.opt(r["target_column"]) or "table level",
-            "Findings": int(r["violation_count"]),
-            "Evaluated rows": int(r["rows_scanned"]),
-            "Rate": violation_pct,
-            "Limit": float(r["threshold_pct"]),
-            "Severity": theme.severity_text(r["severity"]),
-            "Rule id": r["rule_id"],
-        })
-    return pd.DataFrame(rows)
-
-
-def domain_filter(runs: pd.DataFrame, key_prefix: str) -> tuple[pd.DataFrame, int]:
-    """The run set a monitoring page works on: picked domains, CDE-attached checks."""
+def disputed_rules() -> set:
+    """Rules the CDE register says measure rows they should not — a scope mismatch.
+    Their breach is a fact about the rule, so no page paints their rows as bad data."""
     cde = adapter.get_cde_coverage()
-    cde_rules = coverage.attached_rule_ids(cde)
+    return {i for lst in cde["unscoped_rule_ids"] for i in components.as_list(lst)}
 
-    with st.container(key=f"{key_prefix}_filter_strip"):
-        l1, f1, l2, f2, l3, note = st.columns([0.55, 2.3, 0.55, 1.35, 0.9, 1.9])
-        with l1:
-            st.markdown('<div class="dq-strip-lab">Domains</div>', unsafe_allow_html=True)
-        with f1:
-            domains = sorted(set(metrics.domains_of(runs)))
-            picked = st.multiselect("Domain", domains, default=domains,
-                                    label_visibility="collapsed",
-                                    key=f"{key_prefix}_domains")
-        with l2:
-            st.markdown('<div class="dq-strip-lab">Period</div>', unsafe_allow_html=True)
-        with f2:
-            window = st.selectbox("Window", [7, 14, 30, 40], index=2,
-                                  format_func=lambda d: f"Last {d} days",
-                                  label_visibility="collapsed",
-                                  key=f"{key_prefix}_window")
-        with l3:
-            st.markdown(
-                '<div style="padding-top:.42rem">'
-                + theme.badge(f"{cde['cde_id'].nunique() if not cde.empty else 0} CDEs",
-                              "info", "shield")
-                + "</div>",
-                unsafe_allow_html=True,
-                help="Not a control. This page counts only checks attached to a "
-                     "registered critical data element — the register owns the "
-                     "denominator, so the figures do not move when someone writes or "
-                     "retires an unrelated rule. Checks on unregistered columns still "
-                     "run and still raise cohorts; work them from Triage.",
-            )
-        with note:
-            last_ts = runs["run_ts"].max()
-            st.markdown(
-                f'<div class="dq-strip-note">Last run {last_ts:%d %b, %H:%M}<br>'
-                f"Next expected {last_ts + pd.Timedelta(days=1):%d %b, %H:%M}</div>",
-                unsafe_allow_html=True,
-            )
 
-    in_domain = runs[metrics.domains_of(runs).isin(picked)]
-    return in_domain[in_domain["rule_id"].isin(cde_rules)], window
+def rule_rows(scoped: pd.DataFrame, table: str, registry: pd.DataFrame) -> list[dict]:
+    """Every check that ran on `table` on the latest run, failing and worst first."""
+    run_id = metrics.latest_run_id(scoped)
+    if run_id is None:
+        return []
+    name = registry.drop_duplicates("rule_id").set_index("rule_id")["rule_name"].to_dict()
+    disputed = disputed_rules()
+    now = scoped[(scoped["run_id"] == run_id) & (scoped["target_table"] == table)
+                 & scoped["status"].isin(RAISED)]
+    rows = []
+    for r in now.to_dict("records"):
+        breach = r["status"] == "breach"
+        limit = 0.0 if pd.isna(r["threshold_pct"]) else float(r["threshold_pct"])
+        rows.append({
+            "key": r["rule_id"],
+            "Rule": name.get(r["rule_id"], r["rule_id"]),
+            "Column": components.opt(r["target_column"]) or "table level",
+            "Severity": r["severity"],
+            "Breach": breach,
+            "Disputed": breach and r["rule_id"] in disputed,
+            "Rate": 100.0 - float(r["violation_pct"]),
+            "Failure": float(r["violation_pct"]),
+            "Limit": limit,
+            "Target": 100.0 - limit,
+            "Findings": int(r["violation_count"]),
+            "Rows": int(r["rows_scanned"]),
+            "run_id": r["run_id"],
+            "violation_count": int(r["violation_count"]),
+        })
+    # A disputed breach after the real ones: it is a rule to fix, not data to fix.
+    return sorted(rows, key=lambda c: (not c["Breach"], c["Disputed"], -c["Findings"],
+                                       c["Rule"]))

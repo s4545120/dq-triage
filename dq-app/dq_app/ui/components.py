@@ -699,6 +699,32 @@ def sample_rows_frame(subset: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).reindex(columns=order)
 
 
+def failed_rows(rule_id: str, row, samples: pd.DataFrame, heading: bool = True) -> None:
+    """The sampled rows behind one check's count, as columns. `row` needs `run_id`
+    and `violation_count`. A drawer gives them a heading; a labelled tab does not."""
+    if heading:
+        theme.section("The rows that failed")
+    mine = samples[(samples["rule_id"] == rule_id) & (samples["run_id"] == row["run_id"])]
+    if mine.empty:
+        mine = samples[samples["rule_id"] == rule_id]
+        if not mine.empty:
+            st.caption("No samples from this run — showing the latest captured for "
+                       "this check.")
+    if mine.empty:
+        st.caption("No rows were sampled for this check. Historical breaches carry "
+                   "counts only.")
+        return
+    st.caption(
+        f"{len(mine):,} of {int(row['violation_count']):,} captured"
+        + (" — the runner caps what it keeps per check, so this is a sample, not "
+           "the set." if len(mine) < int(row["violation_count"]) else "."),
+        help="The one accepted PII surface in this design. The element profile "
+             "stores no values at all, and this panel does not widen what the "
+             "cohort view already showed — same rows, same columns, same cap.",
+    )
+    sample_rows_view(mine)
+
+
 def sample_rows_view(subset: pd.DataFrame, limit: int = 100) -> None:
     """The sampled rows, parsed into columns. Falls back to the raw payload if it
     will not parse — a sample that cannot be shown as columns is still evidence, and

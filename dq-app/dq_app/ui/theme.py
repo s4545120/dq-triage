@@ -931,16 +931,7 @@ h1, h2, h3 {{ letter-spacing: 0; }}
    25 Jul" — starting with an orphaned separator. */
 .dq-spark {{ vertical-align: middle; display: inline-block; }}
 
-.dq-monitor-hd {{
-  display: flex; align-items: center; justify-content: space-between; gap: .75rem;
-  margin: .85rem 0 .1rem; padding-top: .15rem;
-}}
-.dq-monitor-hd > span:first-child {{
-  display: inline-flex; align-items: center; gap: .38rem;
-  font-size: .96rem; font-weight: 600; color: {NEUTRAL["text"]};
-}}
-.st-key-scorecard_monitor_inventory [data-testid="stDataFrame"],
-.st-key-monitors_inventory [data-testid="stDataFrame"] {{
+.st-key-scorecard_monitor_inventory [data-testid="stDataFrame"] {{
   border: 1px solid var(--dq-border); border-radius: 6px; overflow: hidden;
 }}
 
@@ -1101,15 +1092,13 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 /* The filter strip. One bordered band so the controls read as a set rather than
    as five unrelated widgets floating above the numbers. */
 .st-key-dq_filter_strip,
-.st-key-monitor_list_filter_strip,
-.st-key-monitor_detail_filter_strip {{
+.st-key-monitor_list_filter_strip {{
   border: 1px solid var(--dq-border); border-radius: 8px;
   background: {NEUTRAL["surface"]}; padding: var(--dq-pad-y) var(--dq-pad) .1rem;
   margin: .35rem 0 var(--dq-pad);
 }}
 .st-key-dq_filter_strip [data-testid="stVerticalBlock"],
-.st-key-monitor_list_filter_strip [data-testid="stVerticalBlock"],
-.st-key-monitor_detail_filter_strip [data-testid="stVerticalBlock"] {{ gap: .2rem; }}
+.st-key-monitor_list_filter_strip [data-testid="stVerticalBlock"] {{ gap: .2rem; }}
 .dq-strip-lab {{ font-size: var(--dq-fs-sub); font-weight: 550; color: var(--dq-text-2);
   padding-top: .48rem; white-space: nowrap; }}
 .dq-strip-note {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); text-align: right;
@@ -1757,6 +1746,7 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .st-key-dq_elpane .stTabs [role="tablist"] {{ padding: 0 1rem; }}
 .st-key-dq_elpane .stTabs [data-testid="stTabPanel"] {{ padding-top: 0; }}
 .st-key-dq_eltab_overview, .st-key-dq_eltab_rows, .st-key-dq_eltab_nochecks,
+.st-key-dq_eltab_hist,
 .st-key-dq_eltab_notriage, .st-key-dq_eltab_ract_none, .st-key-dq_eltab_rshd_none {{ padding: .8rem 1rem .6rem; gap: .55rem; }}
 .dq-elover .d {{ font-size: clamp(.74rem, .88vw, .82rem); color: var(--dq-text-2);
   margin-bottom: .2rem; }}
@@ -2057,6 +2047,189 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-sectionhd .t {{ font-size: clamp(.95rem, 1.1vw, 1.08rem); font-weight: 620;
   color: {NEUTRAL["text"]}; letter-spacing: -.01em; }}
 .dq-sectionhd .q {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); }}
+
+/* --- Tables: the inventory and one table opened up. --------------------------
+   Redrawn 2026-10-06. The detail page's two lower cards are the scorecard's
+   (`dq_elcard`, `dq_elpane`) and take their CSS from there; what is here is what the
+   two Tables pages have that the scorecard does not. */
+.st-key-monitor_list_filter_strip {{ padding: .55rem var(--dq-pad); }}
+.st-key-monitor_list_filter_strip .dq-strip-lab,
+.st-key-monitor_list_filter_strip .dq-strip-note {{ padding-top: 0; }}
+/* Streamlit's -1rem under a markdown box would leave each label 1rem below the
+   control it names, in a row centred on the controls. */
+.st-key-monitor_list_filter_strip [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+/* Wraps rather than squeezes: a label keeps its own width, a control keeps 9rem, and
+   whatever does not fit goes to the next line. Matched by what each column holds. */
+.st-key-monitor_list_filter_strip [data-testid="stHorizontalBlock"] {{
+  flex-wrap: wrap; row-gap: .4rem; }}
+.st-key-monitor_list_filter_strip [data-testid="stColumn"]:has(.dq-strip-lab) {{
+  flex: 0 0 auto !important; width: auto !important; min-width: 0; }}
+.st-key-monitor_list_filter_strip [data-testid="stColumn"]:has([data-testid="stSelectbox"]) {{
+  flex: 1 1 9rem !important; min-width: 9rem; max-width: 16rem; }}
+.st-key-monitor_list_filter_strip [data-testid="stColumn"]:has(.dq-strip-note) {{
+  flex: 10 1 12rem !important; min-width: 12rem; }}
+.dq-tm-last .dq-dot {{ width: 8px; height: 8px; margin-right: .45rem; }}
+/* Four figures in one card, divided by hairlines. One block of markup holding a grid:
+   no wrappers to equalise, and it wraps two-by-two on a narrow page. */
+.dq-tmkpi {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--dq-border); border-radius: 10px;
+  background: {NEUTRAL["surface"]}; margin-bottom: clamp(.8rem, 1.4vw, 1.2rem); }}
+.dq-tmkpi .f {{ padding: clamp(.8rem, 1.3vw, 1.15rem) clamp(.9rem, 1.6vw, 1.6rem); }}
+.dq-tmkpi .f + .f {{ border-left: 1px solid var(--dq-border); }}
+.dq-tmkpi .l {{ font-size: clamp(.76rem, .9vw, .84rem); color: var(--dq-text-2);
+  display: flex; align-items: center; }}
+.dq-tmkpi .v {{ font-size: clamp(1.5rem, 2.2vw, 2rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; margin-top: .35rem; line-height: 1.1;
+  font-variant-numeric: tabular-nums; }}
+.dq-tmkpi .v .of {{ font-size: .8em; font-weight: 450; color: var(--dq-text-3); }}
+@media (max-width: 760px) {{
+  .dq-tmkpi {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .dq-tmkpi .f:nth-child(3) {{ border-left: none; }}
+  .dq-tmkpi .f:nth-child(n+3) {{ border-top: 1px solid var(--dq-border); }}
+}}
+
+/* The table card: a keyed container, because its header holds a search field and a
+   switch and its body is clickable rows. Same construction as `dq_elcard`. */
+.st-key-dq_tmcard {{ border: 1px solid var(--dq-border); border-radius: 10px;
+  background: {NEUTRAL["surface"]}; gap: 0; padding: 0; overflow: hidden; }}
+.st-key-dq_tmcard [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.st-key-dq_tmcard > [data-testid="stLayoutWrapper"]:first-child,
+.st-key-dq_tmcard > [data-testid="stHorizontalBlock"]:first-child {{
+  padding: clamp(.8rem, 1.2vw, 1.05rem) 1rem .7rem; }}
+/* The header row wraps the same way: title, then search and switch, each with a floor. */
+.st-key-dq_tmcard [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .5rem; }}
+.st-key-dq_tmcard [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
+  flex: 1 1 13rem !important; min-width: 13rem; }}
+.st-key-dq_tmcard [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
+  flex: 1.6 1 21rem !important; min-width: min(21rem, 100%); }}
+.st-key-dq_tmcard [data-testid="stColumn"]:has([data-testid="stTextInput"]):not(:has([data-testid="stButtonGroup"])) {{
+  flex: 1 1 10rem !important; min-width: 10rem; }}
+.st-key-dq_tmcard [data-testid="stColumn"]:has([data-testid="stButtonGroup"]):not(:has([data-testid="stTextInput"])) {{
+  flex: 0 0 auto !important; width: auto !important; min-width: 0; }}
+.dq-tmcard-hd .t {{ font-size: clamp(.98rem, 1.15vw, 1.1rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; display: flex; align-items: center; gap: .5rem; }}
+.dq-tmcard-hd .q {{ font-size: clamp(.76rem, .9vw, .84rem); color: var(--dq-text-2);
+  margin-top: .2rem; }}
+.dq-count {{ font-size: .74rem; font-weight: 600; color: {ACCENT};
+  background: {ACCENT_TINT}; border-radius: 999px; padding: .05rem .5rem; }}
+.st-key-dq_tmcard .dq-rowgrid.head {{ background: {NEUTRAL["canvas"]};
+  border-top: 1px solid var(--dq-border); padding: .55rem 1rem; }}
+.st-key-dq_tmcard .st-key-dqrows_tables {{ border: none; border-radius: 0;
+  border-top: 1px solid var(--dq-border); }}
+.st-key-dqrows_tables [class*="st-key-dqrow_"] {{ border-radius: 0 !important;
+  min-height: 4.6rem; }}
+.st-key-dqrows_tables .dq-rowgrid {{ padding: .7rem 1rem; gap: .9rem; }}
+/* The status stripe: the row's urgency on its left edge, in the status tone. */
+.dq-tmname {{ border-left: 4px solid var(--dq-stripe); border-radius: 2px;
+  padding-left: .75rem; }}
+.dq-tmname .t1 {{ display: flex; align-items: center; gap: .5rem; }}
+.st-key-dqrows_tables .stack .t1.big {{ font-size: clamp(.95rem, 1.15vw, 1.1rem);
+  font-weight: 650; font-variant-numeric: tabular-nums; }}
+.st-key-dqrows_tables .dq-meter {{ margin-top: .3rem; max-width: 10rem; }}
+.st-key-dqrows_tables .dq-spark {{ width: 100%; max-width: 9rem; height: 22px; }}
+.st-key-dqrows_tables .num {{ font-size: clamp(.82rem, .98vw, .92rem); }}
+.st-key-dqrows_tables .num.lft {{ text-align: left; display: flex; align-items: center;
+  gap: .45rem; }}
+/* Below this width the trend and the owner go: the rows keep the figures someone
+   acts on, and the owner is on the detail page. The grid is set inline per row, so
+   the override has to be `!important`. */
+@media (max-width: 1180px) {{
+  .st-key-dq_tmcard .dq-rowgrid {{
+    grid-template-columns: minmax(8rem,1.4fr) minmax(6rem,1fr) minmax(5.5rem,.9fr)
+      minmax(3.5rem,.5fr) 1rem !important; }}
+  .st-key-dq_tmcard .dq-rowgrid > :nth-child(3),
+  .st-key-dq_tmcard .dq-rowgrid > :nth-child(6) {{ display: none; }}
+}}
+.dq-owner {{ display: flex; align-items: center; gap: .55rem;
+  font-size: clamp(.78rem, .92vw, .86rem); color: {NEUTRAL["text"]}; }}
+.dq-owner i {{ flex: none; width: 2rem; height: 2rem; border-radius: 50%;
+  background: {ACCENT_TINT}; color: {ACCENT}; font-style: normal; font-size: .72rem;
+  font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }}
+.st-key-dq_tmcard [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"]) {{
+  display: flex; justify-content: flex-end; }}
+.dq-tmempty {{ padding: 1rem; font-size: .84rem; color: var(--dq-text-3);
+  border-top: 1px solid var(--dq-border); }}
+.dq-tmfoot {{ display: flex; justify-content: space-between; flex-wrap: wrap;
+  gap: .3rem 1rem; padding: .6rem .1rem 0; font-size: var(--dq-fs-sub);
+  color: var(--dq-text-2); }}
+.dq-tmfoot > span {{ display: inline-flex; align-items: center; gap: .35rem; }}
+
+/* The two cards under the list. */
+.dq-tmhealth {{ margin-top: clamp(.9rem, 1.6vw, 1.5rem); }}
+.dq-tmhealth .ttl {{ justify-content: flex-start; margin-bottom: .1rem;
+  font-size: clamp(.95rem, 1.1vw, 1.05rem); }}
+.dq-tmhealth .q, .st-key-dq_tmstart .q {{ font-size: clamp(.78rem, .92vw, .86rem);
+  color: var(--dq-text-2); }}
+.st-key-dq_tmstart {{ border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["surface"]}; padding: var(--dq-pad-y) var(--dq-pad);
+  margin-top: clamp(.9rem, 1.6vw, 1.5rem); gap: .35rem; }}
+.st-key-dq_tmstart [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.st-key-dq_tmstart .t {{ font-size: clamp(.95rem, 1.1vw, 1.05rem); font-weight: 620;
+  color: {NEUTRAL["text"]}; margin-bottom: .45rem; }}
+.st-key-dq_tmstart .q b {{ color: {TONE["critical"]["fg"]}; font-weight: 550; }}
+.st-key-dq_tmstart .stButton button {{ color: {ACCENT}; padding-left: 0; }}
+
+/* The detail page's header. */
+.st-key-dq_tmcrumb {{ gap: .35rem; margin-bottom: -.4rem; }}
+.st-key-dq_tmcrumb .stButton button {{ color: var(--dq-text-2); font-size: .84rem;
+  padding: 0; min-height: 0; }}
+.st-key-dq_tmcrumb .stButton button:hover {{ color: {ACCENT}; }}
+.dq-crumb {{ font-size: .84rem; color: var(--dq-text-2); }}
+.dq-tmhead .n {{ font-size: clamp(1.4rem, 2vw, 1.75rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; display: flex; align-items: center; gap: .6rem;
+  line-height: 1.35; letter-spacing: -.01em; }}
+.dq-tmhead .fq {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .78rem; color: var(--dq-text-3); margin-top: .1rem; }}
+.dq-tmhead .m {{ font-size: .84rem; color: var(--dq-text-2); margin-top: .3rem; }}
+.dq-tmrun {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); text-align: right;
+  margin-top: -.3rem; }}
+.st-key-dq_tmctl {{ gap: .5rem; }}
+/* The header and the top two cards wrap rather than squeeze, as the lower two do. */
+[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .dq-tmhead),
+[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .dq-tmsum) {{
+  flex-wrap: wrap; row-gap: .8rem; }}
+[data-testid="stColumn"]:has(.dq-tmhead) {{ flex: 3 1 16rem !important; min-width: 16rem; }}
+[data-testid="stColumn"]:has(> [data-testid="stVerticalBlock"] .st-key-dq_tmctl) {{
+  flex: 1.5 1 16rem !important; min-width: min(16rem, 100%); }}
+[data-testid="stColumn"]:has(.dq-hero):not(:has(.dq-tmsum)) {{
+  flex: 2.2 1 24rem !important; min-width: min(24rem, 100%); }}
+[data-testid="stColumn"]:has(.dq-tmsum) {{ flex: 1 1 15rem !important;
+  min-width: min(15rem, 100%); }}
+.st-key-dq_tmctl [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+
+/* The run summary: label left, figure right, one rule per line. */
+.dq-tmsum .r {{ display: flex; justify-content: space-between; align-items: baseline;
+  padding: .55rem 0; border-bottom: 1px solid var(--dq-border);
+  font-size: clamp(.82rem, .98vw, .92rem); color: var(--dq-text-2); }}
+.dq-tmsum .r b {{ color: {NEUTRAL["text"]}; font-weight: 620;
+  font-variant-numeric: tabular-nums; }}
+.dq-tmsum .gap {{ flex: 1 1 auto; min-height: .6rem; }}
+.dq-tmsum .gap + .r {{ border-top: 1px solid var(--dq-border); border-bottom: none; }}
+.dq-tmsum .ft {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); margin-top: .4rem; }}
+
+/* The rule pane. */
+.dq-tmverdict {{ font-size: clamp(.78rem, .92vw, .86rem); color: var(--dq-text-2);
+  margin-top: .2rem; }}
+.dq-tmrates {{ display: grid; grid-template-columns: 1fr 1fr; margin-top: .6rem; }}
+.dq-tmrates > div {{ display: flex; flex-direction: column; gap: .15rem; }}
+.dq-tmrates > div + div {{ border-left: 1px solid var(--dq-border); padding-left: 1rem; }}
+.dq-tmrates span {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); }}
+.dq-tmrates b {{ font-size: clamp(1.1rem, 1.4vw, 1.3rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; font-variant-numeric: tabular-nums; }}
+.st-key-dq_tmalert {{ background: {TONE["critical"]["bg"]};
+  border: 1px solid {TONE["critical"]["bd"]}; border-radius: 8px;
+  padding: .45rem .5rem .45rem .8rem; flex-wrap: nowrap; }}
+.st-key-dq_tmalert:has(.grey) {{ background: {NEUTRAL["canvas"]};
+  border-color: var(--dq-border); }}
+.st-key-dq_tmalert [data-testid="stElementContainer"]:has(.dq-tmalert) {{ flex: 1 1 auto;
+  min-width: 0; }}
+.st-key-dq_tmalert [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.dq-tmalert {{ display: flex; align-items: center; gap: .55rem;
+  font-size: clamp(.78rem, .92vw, .86rem); color: {TONE["critical"]["fg"]}; }}
+.dq-tmalert.grey {{ color: var(--dq-text-2); }}
+.dq-tmalert > svg {{ flex: none; }}
+.st-key-dq_tmalert .stButton button {{ background: {NEUTRAL["surface"]};
+  border-color: {ACCENT}; color: {ACCENT}; white-space: nowrap; }}
 
 </style>
 """
