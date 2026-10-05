@@ -444,7 +444,9 @@ def _check_panel(rule_id: str, tagged_now: pd.DataFrame, registry: pd.DataFrame,
 
 components.page_chrome()
 
-runs = adapter.get_check_runs()
+# Scheduled runs only: a shadow-only run has no score, and as "the previous run" it
+# turned every change on this page into `nan`.
+runs = metrics.scheduled_runs(adapter.get_check_runs())
 registry = adapter.get_rule_registry_current()
 # A retired rule's runs are history, not a current claim about the data: the page
 # reads every run through today's register, so they leave the score, the trend and

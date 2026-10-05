@@ -813,3 +813,36 @@ def test_promoting_asks_first_and_writes_only_on_confirm():
     written = at.session_state["_pending_rule_versions"]
     assert len(written) == 1
     assert written[0]["rule_id"] == rule_id and written[0]["status"] == "active"
+
+
+def test_a_shadow_only_run_is_not_the_scorecards_previous_run(monkeypatch):
+    """The onboarding job writes shadow-only runs -- every verdict `skipped`, no score.
+    One landed between two scheduled runs in the workspace and became "the previous
+    run", so the headline and every element read `nan pts since last run`."""
+    import re
+
+    import pandas as pd
+
+    from dq_app.data import adapter
+
+    runs = adapter.get_check_runs()
+    last = runs["run_ts"].max()
+    latest = runs[runs["run_ts"] == last]
+
+    def shadow(run_id, ts):
+        s = latest.copy()
+        s["run_id"], s["run_ts"], s["status"] = run_id, ts, "skipped"
+        s["result_id"] = s["result_id"].astype(str) + "-" + run_id
+        return s
+
+    with_shadow = pd.concat([runs,
+                             shadow("shadow-before", last - pd.Timedelta(hours=1)),
+                             shadow("shadow-after", last + pd.Timedelta(hours=1))],
+                            ignore_index=True)
+    monkeypatch.setattr(adapter, "get_check_runs", lambda: with_shadow)
+
+    at = _run(SCORECARD)
+    assert not re.search(r"\bnan\b", _text(at), re.I)
+    run_pick = next(s for s in at.selectbox if s.label == "Run")
+    assert not {"shadow-before", "shadow-after"} & set(run_pick.options)
+    assert run_pick.value == latest["run_id"].iloc[0]

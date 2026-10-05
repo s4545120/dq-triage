@@ -62,16 +62,26 @@ def domains_of(runs: pd.DataFrame) -> pd.Series:
     return runs["business_domain"].fillna(UNASSIGNED)
 
 
-def latest_run_id(check_run: pd.DataFrame):
-    """The latest run that measured an active check.
+def scheduled_runs(check_run: pd.DataFrame) -> pd.DataFrame:
+    """Every row of every run that measured an active check; shadow-only runs dropped.
 
     A shadow-only run -- the onboarding job measures new shadow checks on one table the
-    moment they exist -- records nothing but `skipped` verdicts. Taken as "the latest
-    run" it would make every page show only that table, with nothing raised.
+    moment they exist -- records nothing but `skipped` verdicts and has no score. Kept
+    in a run list it became "the previous run", and every change since it read `nan`.
+    A scheduled run's own shadow rows stay: only whole runs are dropped.
     """
     if check_run.empty:
+        return check_run
+    live = check_run.loc[check_run["status"] != "skipped", "run_id"].unique()
+    return check_run[check_run["run_id"].isin(live)]
+
+
+def latest_run_id(check_run: pd.DataFrame):
+    """The latest run that measured an active check (see `scheduled_runs`). Taken from
+    a shadow-only run, every page would show only that table, with nothing raised."""
+    if check_run.empty:
         return None
-    live = check_run[check_run["status"] != "skipped"]
+    live = scheduled_runs(check_run)
     pool = live if len(live) else check_run
     return pool.loc[pool["run_ts"].idxmax(), "run_id"]
 

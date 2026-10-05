@@ -251,4 +251,5 @@ def test_a_shadow_only_run_is_never_the_latest_run():
     ])
     assert metrics.latest_run_id(runs) == "daily"
     assert metrics.latest_run_id(runs[runs["run_id"] == "shadow"]) == "shadow"  # nothing else
+    assert set(metrics.scheduled_runs(runs)["run_id"]) == {"daily"}
     assert list(metrics.domains_of(runs)) == ["Customer", metrics.UNASSIGNED, "Sales"]
