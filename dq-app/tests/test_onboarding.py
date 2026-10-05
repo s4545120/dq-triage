@@ -512,3 +512,55 @@ def test_without_the_waiver_the_rule_holds():
     with pytest.raises(onboarding.OnboardingRejected, match="second person"):
         onboarding.validate_review({"proposed_by": me}, me, "approved", None)
     onboarding.validate_review({"proposed_by": me}, me, "approved", None, allow_self=True)
+
+
+# --- Pause, resume, decommission ----------------------------------------------------------
+
+def test_transitions_are_pause_resume_and_a_permanent_retire():
+    assert onboarding.TRANSITIONS["selected"] == {"paused", "retired"}
+    assert onboarding.TRANSITIONS["paused"] == {"selected", "retired"}
+    assert "retired" not in onboarding.TRANSITIONS          # nothing comes back from retired
+
+
+def _manage(at, action: str, reason: str = "Source system switched off."):
+    [t for t in at.text_input if t.key == "onbt_manage_reason"][0].set_value(reason).run()
+    label = {"pause": "Pause checking", "resume": "Resume checking",
+             "decommission": "Decommission"}[action]
+    _button(at, label).click().run()
+    _confirm(at, action)
+    assert not at.exception, [e.message for e in at.exception]
+
+
+def test_pausing_keeps_the_checks_and_the_table_on_the_list(page, tmp_path):
+    d = build(tmp_path)
+    at = page(d, table=True)
+    _manage(at, "pause")
+    rows = at.session_state["_pending_monitored_tables"]
+    assert [(r["status"], r["table_version"]) for r in rows] == [("paused", 2)]
+    assert rows[0]["note"] == "Source system switched off."
+    assert "_pending_rule_versions" not in at.session_state or \
+        not at.session_state["_pending_rule_versions"], "pausing touched the checks"
+    body = _text(at)
+    assert "Paused" in body and "Resume checking" in [str(b.label) for b in at.button]
+
+
+def test_decommissioning_retires_the_table_and_every_check_on_it(page, tmp_path):
+    d = build(tmp_path)
+    at = page(d, table=True)
+    _manage(at, "decommission")
+    tables = at.session_state["_pending_monitored_tables"]
+    assert [(r["status"], r["table_version"]) for r in tables] == [("retired", 2)]
+    versions = at.session_state["_pending_rule_versions"]
+    assert sorted(v["rule_id"] for v in versions) == ["LEAD_EMAIL_FMT", "LEAD_EMAIL_NOT_NULL"]
+    assert all(v["status"] == "retired" and v["rule_version"] == 2 for v in versions)
+    assert all("Retired with its table" in v["note"] for v in versions)
+
+
+def test_a_status_change_needs_a_reason(page, tmp_path):
+    d = build(tmp_path)
+    at = page(d, table=True)
+    _button(at, "Pause checking").click().run()
+    assert "Add a reason first" in _text(at)
+    _confirm(at, "pause")
+    assert "_pending_monitored_tables" not in at.session_state or \
+        not at.session_state["_pending_monitored_tables"]

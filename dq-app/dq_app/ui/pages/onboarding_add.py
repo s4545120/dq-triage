@@ -66,7 +66,8 @@ def _size(b) -> str:
 
 
 monitored = adapter.get_monitored_tables()
-current = onboarding.current_monitored(monitored) if len(monitored) else monitored
+current = (onboarding.current_monitored(monitored, ("selected", "paused")) if len(monitored)
+           else monitored)
 selected_now = set(current["target_table"]) if len(current) else set()
 regs = adapter.get_cde_registry_current()
 label = {r["cde_id"]: r["cde_name"] for _, r in regs.iterrows()}

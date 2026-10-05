@@ -38,7 +38,8 @@ with act:
 status = adapter.get_onboarding_status()
 s = onboarding.summary(status)
 ui.kpi_row([
-    ("Selected", s["selected"], "tables in the pipeline"),
+    ("Selected", s["selected"], "tables in the pipeline"
+     + (f' · {s["paused"]} paused' if s["paused"] else "")),
     ("Waiting on you", s["waiting"],
      f'{s["waiting_bindings"]} column bindings to review' if s["waiting_bindings"]
      else "tables ready for a decision", "high" if s["waiting"] else None),

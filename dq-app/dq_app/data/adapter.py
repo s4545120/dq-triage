@@ -319,10 +319,15 @@ def select_table(target_table: str, row_key: list[str], owner_group: str,
             "partition scans.")
     existing = get_monitored_tables()
     mine = existing[existing["target_table"] == target_table] if len(existing) else existing
-    current = onboarding.current_monitored(existing)
+    current = onboarding.current_monitored(existing, ("selected", "paused"))
     if len(current) and target_table in set(current["target_table"]):
-        raise OnboardingRejected(f"{target_table} is already selected.")
-    taken = set(onboarding.current_monitored(existing)["table_code"]) if len(existing) else set()
+        st_ = current.loc[current["target_table"] == target_table, "status"].iloc[0]
+        raise OnboardingRejected(
+            f"{target_table} is already onboarded" + (" and paused — resume it on its page."
+                                                     if st_ == "paused" else "."))
+    # Codes of every table ever onboarded, retired ones too: a reused code would give a
+    # new table's checks the rule ids of a decommissioned one's.
+    taken = set(onboarding.latest_monitored(existing)["table_code"]) if len(existing) else set()
     version = int(mine["table_version"].max()) + 1 if len(mine) else 1
     code = (mine.sort_values("table_version").iloc[-1]["table_code"] if len(mine)
             else onboarding.table_code(target_table, taken))
@@ -339,6 +344,58 @@ def select_table(target_table: str, row_key: list[str], owner_group: str,
                                  "check its current state.")
     clear_cache()
     return row
+
+
+def set_table_status(target_table: str, status: str, note: str) -> dict:
+    """Pause, resume or retire a table: a new version of its config.monitored_table row.
+    Pausing and resuming leave its checks as they are; the daily run checks only
+    `selected` tables. See `decommission_table` for retiring."""
+    who = identity.current()
+    _require_platform_identity(who, "Changing a table's status", OnboardingRejected)
+    latest = onboarding.latest_monitored(get_monitored_tables())
+    row = latest[latest["target_table"] == target_table] if len(latest) else latest
+    if row.empty:
+        raise OnboardingRejected(f"{target_table} is not onboarded.")
+    cur = row.iloc[0].to_dict()
+    if status not in onboarding.TRANSITIONS.get(cur["status"], set()):
+        raise OnboardingRejected(f"{target_table} is {cur['status']}; it cannot become {status}.")
+    if not (note or "").strip():
+        raise OnboardingRejected("Say why. The reason is kept with the table's history.")
+    cur.update({"table_version": int(cur["table_version"]) + 1, "status": status,
+                "effective_from": datetime.now(), "selected_by": who.email,
+                "note": note.strip(), "row_key": list(cur["row_key"])})
+    if not _impl.write_monitored_table(cur):
+        clear_cache()
+        raise OnboardingRejected(f"{target_table} changed since you opened it. Refresh and "
+                                 "check its current state.")
+    clear_cache()
+    return cur
+
+
+def decommission_table(target_table: str, note: str) -> tuple[int, list[str]]:
+    """Retire a table and every check on it. Returns (checks retired, refusals).
+
+    The table first, so the daily run stops checking it even if a check's retirement is
+    refused; then every current check in one guarded append, as promotion does.
+    Bindings on the element register are removed by the onboarding job, which is the
+    only writer of that register. Results and Triage problems are history and stay.
+    """
+    set_table_status(target_table, "retired", note)
+    who = identity.current()
+    now = datetime.now()
+    current = get_rule_registry_current()
+    rows = []
+    for _, r in current[current["target_table"] == target_table].iterrows():
+        row = r.drop(labels=["effective_to"], errors="ignore").to_dict()
+        row.update({"rule_version": int(r["rule_version"]) + 1, "status": "retired",
+                    "effective_from": now, "created_by": who.email, "created_at": now,
+                    "note": f"Retired with its table: {note.strip()}"})
+        rows.append(row)
+    landed = _impl.append_rule_versions(rows) if rows else set()
+    refused = [f"{r['rule_id']}: changed since you opened it, so it was not retired."
+               for r in rows if r["rule_id"] not in landed]
+    clear_cache()
+    return len(landed), refused
 
 
 def suggest_binding(target_table: str, target_column: str, cde_id: str, reason: str) -> dict:

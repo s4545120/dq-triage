@@ -33,6 +33,14 @@ from dq_app.ui.components import opt
 components.page_chrome()
 ui.inject()
 
+if st.session_state.pop("_onb_back", False):    # set by a decommission just written
+    try:
+        st.switch_page("dq_app/ui/pages/onboarding.py")
+    except st.errors.StreamlitAPIException:     # the page run alone, outside the app's nav
+        st.success("Decommissioned. Its checks are retired; its columns are unbound at the "
+                   "next onboarding run.")
+        st.stop()
+
 status = adapter.get_onboarding_status()
 picked = st.session_state.get("_onb_pick")
 if status.empty or picked not in set(status["table_code"]):
@@ -44,7 +52,7 @@ if status.empty or picked not in set(status["table_code"]):
 s = status[status["table_code"] == picked].iloc[0]
 table, stage = s["target_table"], s["stage"]
 cat, sch, name = table.split(".")
-monitored = onboarding.current_monitored(adapter.get_monitored_tables())
+monitored = onboarding.current_monitored(adapter.get_monitored_tables(), ("selected", "paused"))
 m = monitored[monitored["target_table"] == table].iloc[0]
 
 registry = adapter.get_cde_registry()
@@ -373,9 +381,74 @@ if len(ev):
                     for b in sorted(bound, key=lambda b: b["target_column"]))
                 or '<div class="onb-ev">Nothing bound yet.</div>', unsafe_allow_html=True)
 
-elif not len(open_p):
+elif not len(open_p) and stage != "paused":
     with st.container(key="onbcard_wait"):
         ui.head("Nothing to decide yet")
         st.markdown(f'<div class="onb-ev">{html.escape(onboarding.STAGES[onboarding.STAGE_INDEX[stage]][2])} '
                     'This page fills in as the pipeline job runs.</div>',
                     unsafe_allow_html=True)
+
+# --- Manage the table ---------------------------------------------------------------------
+# Pause and resume are reversible and touch only the table's row. Decommission is not:
+# it retires the table and every check on it, and the onboarding job then unbinds its
+# columns. Each goes through a confirmation that says exactly that.
+paused = m["status"] == "paused"
+n_active, n_shadow = len(active), len(shadow)
+with st.container(key="onbcard_manage"):
+    ui.head("Manage table")
+    st.markdown(
+        '<div class="onb-ev">'
+        + ("<b>Paused.</b> The daily run skips it; its checks and bindings are kept. "
+           "Resume to start checking again." if paused else
+           "<b>Pause</b> stops the daily checks and keeps everything, to resume later. "
+           "<b>Decommission</b> is permanent: the table and its checks are retired.")
+        + "</div>", unsafe_allow_html=True)
+    reason_txt = st.text_input("Reason", key="onbt_manage_reason",
+                               placeholder="Why — kept with the table's history")
+    b1, b2, _ = st.columns([1, 1, 2])
+    if b1.button("Resume checking" if paused else "Pause checking", key="onbt_pause",
+                 use_container_width=True):
+        ui.ask("resume" if paused else "pause")
+    if b2.button("Decommission", key="onbt_decom", use_container_width=True):
+        ui.ask("decommission")
+
+
+def _status(to: str):
+    def _go():
+        try:
+            adapter.set_table_status(table, to, reason_txt)
+        except adapter.OnboardingRejected as exc:
+            return str(exc)
+        return None
+    return _go
+
+
+def _decommission():
+    try:
+        n, refused = adapter.decommission_table(table, reason_txt)
+    except adapter.OnboardingRejected as exc:
+        return str(exc)
+    if refused:
+        return (f"The table is retired and {n} checks with it. Not retired:\n\n"
+                + "\n\n".join(refused))
+    st.session_state.pop("_onb_pick", None)
+    st.session_state["_onb_back"] = True       # leave the page on the next run
+    return None
+
+
+why = (f'Reason: “{html.escape(reason_txt)}”<br>' if reason_txt.strip()
+       else '<b style="color:#b91c1c">Add a reason first — it is required.</b><br>')
+ui.confirm("pause", f"Pause checking {name}?",
+           why + f"The daily run skips <b>{html.escape(table)}</b> until it is resumed. Its "
+           f"{n_active} active and {n_shadow} shadow checks, its bindings and its history are "
+           "kept. Problems already in Triage stay where they are.", "Pause", _status("paused"))
+ui.confirm("resume", f"Resume checking {name}?",
+           why + f"The next daily run checks <b>{html.escape(table)}</b> again, with its "
+           f"{n_active} active checks raising problems as before.", "Resume", _status("selected"))
+ui.confirm("decommission", f"Decommission {name}?",
+           why + f"<b>This is permanent.</b> <b>{html.escape(table)}</b> is retired, and so are its "
+           f"<b>{n_active + n_shadow} checks</b> ({n_active} active, {n_shadow} shadow): each gets a "
+           "retired version signed with your name. The next onboarding run removes its "
+           "columns from the element register. Past results and problems already in Triage "
+           "are kept as history. To check it again, onboard it again.",
+           "Decommission", _decommission)

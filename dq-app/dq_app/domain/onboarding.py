@@ -52,13 +52,27 @@ def empty(columns: list[str]) -> pd.DataFrame:
     return pd.DataFrame({c: pd.Series(dtype="object") for c in columns})
 
 
-def current_monitored(monitored: pd.DataFrame) -> pd.DataFrame:
-    """Latest version of each selected table's row. Paused and retired drop out."""
+def latest_monitored(monitored: pd.DataFrame) -> pd.DataFrame:
+    """Latest version of every table's row, whatever its status."""
     if monitored.empty:
         return monitored
-    latest = (monitored.sort_values(["target_table", "table_version"])
-              .groupby("target_table", as_index=False).tail(1))
-    return latest[latest["status"] == "selected"].reset_index(drop=True)
+    return (monitored.sort_values(["target_table", "table_version"])
+            .groupby("target_table", as_index=False).tail(1).reset_index(drop=True))
+
+
+def current_monitored(monitored: pd.DataFrame,
+                      statuses: tuple[str, ...] = ("selected",)) -> pd.DataFrame:
+    """Latest version of each table's row with one of `statuses` -- by default the
+    tables being checked. Onboarding also shows `paused`; `retired` is gone."""
+    latest = latest_monitored(monitored)
+    if latest.empty:
+        return latest
+    return latest[latest["status"].isin(statuses)].reset_index(drop=True)
+
+
+# Pausing stops the checks and keeps everything; resuming starts them again;
+# decommissioning (retired) is permanent -- re-onboarding is a new selection.
+TRANSITIONS = {"selected": {"paused", "retired"}, "paused": {"selected", "retired"}}
 
 
 def bindings_on(cde_registry: pd.DataFrame, table: str) -> list[dict]:
@@ -102,7 +116,7 @@ def derive_status(monitored: pd.DataFrame, proposals: pd.DataFrame, reviews: pd.
     """One row per selected table with its counts and stage."""
     cols = ["target_table", "table_code", "owner_group", "proposals_open", "columns_bound",
             "rules_shadow", "rules_active", "runs", "last_run_ts", "stage"]
-    sel = current_monitored(monitored)
+    sel = current_monitored(monitored, ("selected", "paused"))
     if sel.empty:
         return empty(cols)
     open_p = open_proposals(proposals, reviews, cde_registry)
@@ -120,8 +134,9 @@ def derive_status(monitored: pd.DataFrame, proposals: pd.DataFrame, reviews: pd.
             runs=int(runs["run_id"].nunique()),
             last_run_ts=runs["run_ts"].max() if len(runs) else None,
         )
-        row["stage"] = stage_of(row["proposals_open"], row["columns_bound"],
-                                row["rules_shadow"], row["rules_active"], row["runs"])
+        row["stage"] = "paused" if m["status"] == "paused" else stage_of(
+            row["proposals_open"], row["columns_bound"], row["rules_shadow"],
+            row["rules_active"], row["runs"])
         out.append(row)
     return pd.DataFrame(out, columns=cols)
 
@@ -277,18 +292,19 @@ STAGE_LABEL = {
     "shadow, not yet run": "Checks not yet measured",
     "shadow, awaiting promotion": "Ready to promote",
     "active": "Active",
+    "paused": "Paused",
 }
 STAGE_TONE = {
     "awaiting discovery": "info", "bindings awaiting review": "high",
     "awaiting rule generation": "info", "shadow, not yet run": "info",
-    "shadow, awaiting promotion": "high", "active": "success",
+    "shadow, awaiting promotion": "high", "active": "success", "paused": "neutral",
 }
 # The six steps a reader sees, and which one each stage is standing on.
 STEPS = ["Selected", "Discovered", "Review bindings", "Checks in shadow", "Promote", "Active"]
 # 1-based, so it reads like the badges: "3 Review bindings". Active marks every step done.
 STEP_OF = {"awaiting discovery": 2, "bindings awaiting review": 3,
            "awaiting rule generation": 4, "shadow, not yet run": 4,
-           "shadow, awaiting promotion": 5, "active": 6}
+           "shadow, awaiting promotion": 5, "active": 6, "paused": None}
 STEP_PERSON = {3, 5}          # the steps a person takes, marked "· you" when current
 
 
@@ -296,7 +312,9 @@ def summary(status: pd.DataFrame) -> dict:
     """The four figures across the top of Onboarding."""
     if status.empty:
         return dict(selected=0, waiting=0, waiting_bindings=0, shadow=0,
-                    shadow_checks=0, active=0)
+                    shadow_checks=0, active=0, paused=0)
+    paused = int((status["stage"] == "paused").sum())
+    status = status[status["stage"] != "paused"]
     waiting = status["stage"].isin(["bindings awaiting review", "shadow, awaiting promotion"])
     shadow = status["stage"].isin(["shadow, not yet run", "shadow, awaiting promotion"])
     return dict(
@@ -306,4 +324,5 @@ def summary(status: pd.DataFrame) -> dict:
         shadow=int(shadow.sum()),
         shadow_checks=int(status.loc[shadow, "rules_shadow"].sum()),
         active=int((status["stage"] == "active").sum()),
+        paused=paused,
     )

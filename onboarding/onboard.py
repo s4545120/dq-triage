@@ -617,6 +617,47 @@ def status(conn) -> None:
                   f"{r['rows_scanned']!s:<5} {r['message'] if r['status'] == 'error' else ''}")
 
 
+def unbind_retired(conn) -> None:
+    """Remove a decommissioned table's columns from the element register.
+
+    The app retires the table and its checks; this job is the register's only writer,
+    so it drops the bindings -- one new version per element, written from the latest,
+    the same way apply adds them. Left in place, coverage would keep counting columns
+    nothing checks any more."""
+    gone = {r["target_table"] for r in run(conn, f"""
+        SELECT target_table FROM {t('config', 'v_monitored_table_current')}
+        WHERE status = 'retired'""")}
+    if not gone:
+        print("no decommissioned tables")
+        return
+    reg = t("config", "cde_registry")
+    hits = run(conn, f"""SELECT DISTINCT cde_id, target_table, target_column
+        FROM {t('config', 'v_binding_current')}
+        WHERE target_table IN ({', '.join(lit(g) for g in sorted(gone))})""")
+    by_cde: dict[str, list[str]] = {}
+    for h in hits:
+        by_cde.setdefault(h["cde_id"], []).append(f"{h['target_table'].split('.')[-1]}.{h['target_column']}")
+    cols = ("cde_id, cde_version, cde_name, business_term, data_class, definition, "
+            "expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings, "
+            "business_domain, owner_group, status, effective_from, registered_by, registered_at, "
+            "note")
+    gone_list = ", ".join(lit(g) for g in sorted(gone))
+    for cde, names in by_cde.items():
+        note = f"Unbinds {', '.join(names)}: the table was decommissioned. Nothing else changed."
+        run(conn, f"""INSERT INTO {reg} ({cols})
+SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
+       expected_signature, criticality, pii, regulatory_basis, tolerance_pct,
+       filter(bindings, b -> NOT array_contains(array({gone_list}), b.target_table)),
+       business_domain, owner_group, status, current_timestamp(), 'job:onboard-unbind',
+       current_timestamp(), {lit(note)}
+FROM   {reg}
+WHERE  cde_id = {lit(cde)}
+  AND  cde_version = (SELECT max(cde_version) FROM {reg} WHERE cde_id = {lit(cde)})""")
+        print(f"{cde}: unbound {', '.join(names)}")
+    if not by_cde:
+        print("decommissioned tables hold no bindings")
+
+
 def unmeasured_tables(conn) -> list[str]:
     """Selected tables carrying a shadow rule version that no check run has measured."""
     return [r["target_table"] for r in run(conn, f"""
@@ -658,6 +699,7 @@ def steps(conn) -> None:
     every step that needs no person, then a shadow-only measurement of anything new."""
     print("== discover"); discover(conn)
     print("\n== apply"); apply(conn)
+    print("\n== unbind decommissioned tables"); unbind_retired(conn)
     print("\n== generate"); generate(conn)
     print("\n== measure new shadow checks"); measure_shadow(conn)
 

@@ -143,6 +143,9 @@ def head(title: str, caption: str = "") -> None:
 def steps(stage: str) -> str:
     """The six step badges: done in green, the current one in indigo, the rest grey."""
     now = onboarding.STEP_OF[stage]
+    if now is None:          # paused: no step is current
+        return (f'<div class="onb-steps">{theme.badge("Paused — not checked until resumed", "neutral")}'
+                "</div>")
     out = []
     for i, label in enumerate(onboarding.STEPS, start=1):
         if i < now or now == 6:
