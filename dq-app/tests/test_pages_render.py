@@ -769,7 +769,9 @@ def test_the_queue_shows_the_new_titles():
     at = _run("dq_app/ui/pages/triage.py")
     body = _body(at)
     assert "rule flags valid rows" in body
-    assert "Neither of these is a data defect</span>" not in body
+    # The claim rides in the row's hover text, which is where it belongs; what must not
+    # come back is the claim as the TITLE.
+    assert 'class="nm">Neither of these is a data defect' not in body
 
 
 # The Rules page has its own file since its 2026-10-06 redraw: tests/test_rules_page.py.

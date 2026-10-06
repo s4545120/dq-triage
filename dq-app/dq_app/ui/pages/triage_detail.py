@@ -122,10 +122,8 @@ state = row["lifecycle_state"]
 
 # --- Header -----------------------------------------------------------------
 
-back, _ = st.columns([1, 5])
-with back:
-    if st.button("← Triage", key="_back", width="stretch"):
-        st.switch_page("dq_app/ui/pages/triage.py")
+if st.button("← Triage", key="_back", type="tertiary"):
+    st.switch_page("dq_app/ui/pages/triage.py")
 
 age = (pd.Timestamp.now() - row["raised_ts"]).days
 cde_cov = adapter.get_cde_coverage()
@@ -138,26 +136,40 @@ elements, unattached = components.cohort_elements(extra["member_rule_ids"], cde_
 # register append, which carries it to an outbound notification. One derivation, so
 # a problem cannot be called one thing on this page and another in an inbox.
 problem_title = components.problem_title(extra, elements, registry, 140)
+n_tables = len(as_list(row["affected_tables"]))
+n_down = int(extra["blast_radius_count"])
+
+
+def _fig(label: str, value: str, sub: str = "") -> str:
+    return (f'<div class="f"><div class="l">{label}</div><div class="v">{value}</div>'
+            + (f'<div class="c">{sub}</div>' if sub else "") + "</div>")
+
+
+# Title and its two badges on one line, the claim under it, then the facts as a strip
+# of figures -- the Triage queue's and the Tables page's -- rather than the nine-part
+# dotted line that used to wrap across two lines under the claim.
 st.markdown(
-    '<div class="dq-page-hd" style="margin-bottom:.2rem">'
+    '<div class="dq-page-hd dq-prob-hd">'
     f'<div class="t">{html.escape(problem_title)}'
-    "</div>"
+    f'<span class="bdg">{theme.severity_badge(row["severity"])}'
+    + theme.badge(theme.STATE_LABEL.get(state, state), theme.STATE_TONE.get(state, "neutral"))
+    + "</span></div>"
     # The title says what and what kind of wrong; the claim's first sentence under it
     # says why, in the model's words. It used to BE the title — see `claim_sentence`.
     f'<div class="dq-subclaim">'
     f'{html.escape(components.claim_sentence(extra["root_cause_hypothesis"], 220))}</div>'
-    '<div class="dq-factline">'
-    + theme.severity_badge(row["severity"])
-    + theme.badge(theme.STATE_LABEL.get(state, state), theme.STATE_TONE.get(state, "neutral"))
-    + f'<span>{html.escape(str(row["business_domain"]))}</span><i>·</i>'
-    f'<code>{html.escape(str(row["owner_group"]))}</code><i>·</i>'
-    f'<span>raised {row["raised_ts"]:%-d %b}, {age} days ago</span><i>·</i>'
-    f'<span><b>{int(row["member_count"])}</b> failing checks</span><i>·</i>'
-    f'<span><b>{int(row["total_violation_rows"]):,}</b> findings</span><i>·</i>'
-    f'<span>{len(as_list(row["affected_tables"]))} tables, '
-    f'{int(extra["blast_radius_count"])} downstream</span><i>·</i>'
-    f'<code>{html.escape(chosen[:8])}</code>'
-    "</div></div>",
+    "</div>"
+    '<div class="dq-tmkpi dq-prob-kpi">'
+    + _fig("Failing checks", str(int(row["member_count"])))
+    + _fig("Findings", f'{int(row["total_violation_rows"]):,}', "rows over their limit")
+    + _fig("Tables", str(n_tables),
+           f"{n_down} downstream" if n_down else "nothing downstream")
+    + _fig("Raised", f'{row["raised_ts"]:%-d %b}',
+           f"{age} {'day' if age == 1 else 'days'} ago")
+    + _fig("Owner", f'<span class="sm">{html.escape(str(row["business_domain"]))}</span>',
+           f'<code>{html.escape(str(row["owner_group"]))}</code> · '
+           f'<code>{html.escape(chosen[:8])}</code>')
+    + "</div>",
     unsafe_allow_html=True,
 )
 
@@ -260,8 +272,10 @@ _n_facts = len(as_list(extra.get("evidence_points")))
 _n_steps = len(as_list(extra.get("recommended_steps")))
 _n_tables = len(as_list(row["affected_tables"])) + int(extra["blast_radius_count"])
 
+# The tabs sit in a card, as every reading surface on the Monitor pages does.
+_tabcard = st.container(key="dq_probtabs")
 (diagnosis_tab, todo_tab, evidence_tab, lineage_tab, decisions_tab,
- record_tab) = st.tabs([
+ record_tab) = _tabcard.tabs([
     f"Diagnosis · {_n_facts} {'fact' if _n_facts == 1 else 'facts'}" if _n_facts
     else "Diagnosis",
     f"What to do · {_n_steps} {'step' if _n_steps == 1 else 'steps'}" if _n_steps

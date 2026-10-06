@@ -2141,29 +2141,30 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   color: {NEUTRAL["text"]}; margin-top: .35rem; line-height: 1.1;
   font-variant-numeric: tabular-nums; }}
 .dq-tmkpi .v .of {{ font-size: .8em; font-weight: 450; color: var(--dq-text-3); }}
+.dq-tmkpi .c {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); margin-top: .3rem; }}
 @media (max-width: 760px) {{
   .dq-tmkpi {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
   .dq-tmkpi .f:nth-child(3) {{ border-left: none; }}
   .dq-tmkpi .f:nth-child(n+3) {{ border-top: 1px solid var(--dq-border); }}
 }}
 
-/* The table card: a keyed container, because its header holds a search field and a
+/* The table card (and Triage's queue card, which is built the same way): a keyed container, because its header holds a search field and a
    switch and its body is clickable rows. Same construction as `dq_elcard`. */
-.st-key-dq_tmcard {{ border: 1px solid var(--dq-border); border-radius: 10px;
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) {{ border: 1px solid var(--dq-border); border-radius: 10px;
   background: {NEUTRAL["surface"]}; gap: 0; padding: 0; overflow: hidden; }}
-.st-key-dq_tmcard [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
-.st-key-dq_tmcard > [data-testid="stLayoutWrapper"]:first-child,
-.st-key-dq_tmcard > [data-testid="stHorizontalBlock"]:first-child {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) > [data-testid="stLayoutWrapper"]:first-child,
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) > [data-testid="stHorizontalBlock"]:first-child {{
   padding: clamp(.8rem, 1.2vw, 1.05rem) 1rem .7rem; }}
 /* The header row wraps the same way: title, then search and switch, each with a floor. */
-.st-key-dq_tmcard [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .5rem; }}
-.st-key-dq_tmcard [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .5rem; }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
   flex: 1 1 13rem !important; min-width: 13rem; }}
-.st-key-dq_tmcard [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
   flex: 1.6 1 21rem !important; min-width: min(21rem, 100%); }}
-.st-key-dq_tmcard [data-testid="stColumn"]:has([data-testid="stTextInput"]):not(:has([data-testid="stButtonGroup"])) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has([data-testid="stTextInput"]):not(:has([data-testid="stButtonGroup"])) {{
   flex: 1 1 10rem !important; min-width: 10rem; }}
-.st-key-dq_tmcard [data-testid="stColumn"]:has([data-testid="stButtonGroup"]):not(:has([data-testid="stTextInput"])) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has([data-testid="stButtonGroup"]):not(:has([data-testid="stTextInput"])) {{
   flex: 0 0 auto !important; width: auto !important; min-width: 0; }}
 .dq-tmcard-hd .t {{ font-size: clamp(.98rem, 1.15vw, 1.1rem); font-weight: 650;
   color: {NEUTRAL["text"]}; display: flex; align-items: center; gap: .5rem; }}
@@ -2171,9 +2172,9 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   margin-top: .2rem; }}
 .dq-count {{ font-size: .74rem; font-weight: 600; color: {ACCENT};
   background: {ACCENT_TINT}; border-radius: 999px; padding: .05rem .5rem; }}
-.st-key-dq_tmcard .dq-rowgrid.head {{ background: {NEUTRAL["canvas"]};
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) .dq-rowgrid.head {{ background: {NEUTRAL["canvas"]};
   border-top: 1px solid var(--dq-border); padding: .55rem 1rem; }}
-.st-key-dq_tmcard .st-key-dqrows_tables {{ border: none; border-radius: 0;
+:is(.st-key-dq_tmcard, .st-key-dq_tricard) .st-key-dqrows_tables {{ border: none; border-radius: 0;
   border-top: 1px solid var(--dq-border); }}
 .st-key-dqrows_tables [class*="st-key-dqrow_"] {{ border-radius: 0 !important;
   min-height: 4.6rem; }}
@@ -2227,6 +2228,78 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   color: {NEUTRAL["text"]}; margin-bottom: .45rem; }}
 .st-key-dq_tmstart .q b {{ color: {TONE["critical"]["fg"]}; font-weight: 550; }}
 .st-key-dq_tmstart .stButton button {{ color: {ACCENT}; padding-left: 0; }}
+
+/* --- Triage: the queue in the Tables page's card. Redrawn 2026-10-06. -----------
+   The shell, header and head-row rules above are shared with `dq_tmcard`; what is
+   here is the queue's rows and the grouping card under it. */
+.st-key-dq_tricard .st-key-dqrows_queue {{ border: none; border-radius: 0;
+  border-top: 1px solid var(--dq-border); }}
+.st-key-dqrows_queue [class*="st-key-dqrow_"] {{ border-radius: 0 !important;
+  min-height: 4.2rem; }}
+.st-key-dqrows_queue .dq-rowgrid {{ padding: .65rem 1rem; gap: .9rem; }}
+.st-key-dqrows_queue .dq-tmname .t1 {{ gap: .45rem; min-width: 0; }}
+.st-key-dqrows_queue .dq-tmname .t1 .nm {{ min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }}
+.st-key-dqrows_queue .dq-tmname .t1 .dq-badge {{ flex: none; }}
+.st-key-dqrows_queue .num {{ font-size: clamp(.82rem, .98vw, .92rem); }}
+/* The search and the five views share the header's right-hand side; the views keep
+   their own width and the search takes what is left. */
+.st-key-dq_tricard [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
+  flex: 1 1 14rem !important; min-width: 14rem; }}
+.st-key-dq_tricard [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
+  flex: 2.2 1 30rem !important; min-width: min(30rem, 100%); }}
+/* Narrower than this, the raised date and the owner go: the row keeps severity,
+   state and the counts, and both are on the problem's own page. */
+@media (max-width: 1180px) {{
+  .st-key-dq_tricard .dq-rowgrid {{
+    grid-template-columns: minmax(10rem,1fr) minmax(5.5rem,7.6rem) 3.2rem 4.4rem
+      1rem !important; }}
+  .st-key-dq_tricard .dq-rowgrid > :nth-child(5),
+  .st-key-dq_tricard .dq-rowgrid > :nth-child(6) {{ display: none; }}
+}}
+.st-key-dq_trigroup {{ border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["surface"]}; padding: var(--dq-pad-y) var(--dq-pad);
+  margin-top: clamp(.9rem, 1.6vw, 1.5rem); gap: .45rem; }}
+.st-key-dq_trigroup [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.st-key-dq_trigroup .t {{ font-size: clamp(.95rem, 1.1vw, 1.05rem); font-weight: 620;
+  color: {NEUTRAL["text"]}; margin-bottom: .3rem; }}
+.st-key-dq_trigroup .q {{ font-size: clamp(.78rem, .92vw, .86rem); color: var(--dq-text-2);
+  line-height: 1.5; }}
+.st-key-dq_trigroup .q b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
+.dq-trisegs {{ gap: 3px; margin: .7rem 0 .45rem; }}
+.dq-trisegs span {{ border-radius: 3px; opacity: .8; }}
+/* "Start here": the Tables page's card, with the count in the waiting amber rather
+   than its critical red -- a review owed is not a failure. */
+.st-key-dq_tristart {{ border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["surface"]}; padding: var(--dq-pad-y) var(--dq-pad);
+  margin-top: clamp(.9rem, 1.6vw, 1.5rem); gap: .35rem; }}
+.st-key-dq_tristart [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.st-key-dq_tristart .t {{ font-size: clamp(.95rem, 1.1vw, 1.05rem); font-weight: 620;
+  color: {NEUTRAL["text"]}; margin-bottom: .45rem; }}
+.st-key-dq_tristart .q {{ font-size: clamp(.78rem, .92vw, .86rem); color: var(--dq-text-2); }}
+.st-key-dq_tristart .q b {{ color: {TONE["high"]["fg"]}; font-weight: 600; }}
+.st-key-dq_tristart .stButton button {{ color: {ACCENT}; padding-left: 0; text-align: left; }}
+.st-key-dq_trigroup [data-testid="stExpander"] details {{ border: none; }}
+.st-key-dq_trigroup [data-testid="stExpander"] summary {{ padding-left: 0; }}
+
+/* --- The problem page's header and tab card. Redrawn 2026-10-06. ---------------- */
+.dq-prob-hd .t {{ display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .7rem; }}
+.dq-prob-hd .t .bdg {{ display: inline-flex; gap: .35rem; font-size: 1rem; }}
+.dq-prob-hd .dq-subclaim {{ margin: .3rem 0 0; max-width: 62rem; }}
+.dq-prob-kpi {{ grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: clamp(.7rem, 1.2vw, 1rem) 0 clamp(.6rem, 1vw, .9rem); }}
+.dq-prob-kpi .v {{ font-size: clamp(1.25rem, 1.8vw, 1.6rem); }}
+.dq-prob-kpi .v .sm {{ font-size: .72em; font-weight: 600; }}
+.dq-prob-kpi .c code {{ font-size: .95em; }}
+@media (max-width: 900px) {{
+  .dq-prob-kpi {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .dq-prob-kpi .f {{ border-left: none !important; border-top: 1px solid var(--dq-border); }}
+  .dq-prob-kpi .f:nth-child(-n+2) {{ border-top: none; }}
+  .dq-prob-kpi .f:nth-child(even) {{ border-left: 1px solid var(--dq-border) !important; }}
+}}
+.st-key-dq_probtabs {{ border: 1px solid var(--dq-border); border-radius: 10px;
+  background: {NEUTRAL["surface"]}; padding: .2rem clamp(.9rem, 1.4vw, 1.3rem)
+  clamp(.9rem, 1.4vw, 1.2rem); margin-top: clamp(.6rem, 1vw, .9rem); }}
 
 /* --- The Rules page: three cards, CDEs | Rules | one rule. Redrawn 2026-10-06. ---
    Same construction as the scorecard's lower cards: the border is on the keyed
