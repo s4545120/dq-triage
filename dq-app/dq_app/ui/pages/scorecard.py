@@ -366,8 +366,12 @@ def _check_panel(rule_id: str, tagged_now: pd.DataFrame, registry: pd.DataFrame,
 
     cohort_id = cohort_of.get(rule_id)
     if cohort_id:
-        if st.button(f"Open the problem this belongs to · {cohort_id[:8]}",
-                     key="_check_to_triage", type="primary"):
+        # Named as Triage names it, not by its id: a problem has one name on every page.
+        coh = adapter.get_cohorts().set_index("cohort_id").loc[cohort_id]
+        els, _ = components.cohort_elements(coh["member_rule_ids"], cde_cov)
+        title = components.problem_title(coh, els, registry, 70)
+        if st.button(f"Open the problem: {title}", key="_check_to_triage", type="primary",
+                     icon=":material/arrow_forward:"):
             st.session_state["selected_cohort"] = cohort_id
             st.switch_page("dq_app/ui/pages/triage_detail.py")
     else:
@@ -799,7 +803,7 @@ def _elements_and_pane() -> None:
                 # as a bug.
                 on_pick=components.pick_into("_elem_scope", clear=("_check_pick",)))
         st.markdown(
-            '<div class="dq-elfoot"><span>Bars: 0–100%<i></i>Target</span>'
+            '<div class="dq-elfoot"><span>Bars: 0–100%<b></b>Shortfall<i></i>Target</span>'
             "<span>Largest target gap first</span></div>",
             unsafe_allow_html=True)
 
