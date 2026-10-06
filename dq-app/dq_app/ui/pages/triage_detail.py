@@ -287,73 +287,63 @@ _tabcard = st.container(key="dq_probtabs")
 ])
 
 with diagnosis_tab:
-    # The block head carries the things that qualify the claim before it is read:
-    # whether it was drafted or drawn from the playbook, how sure the model says it
-    # is, and where the fix belongs. All are the model's own, and all say so — a
-    # reader who takes the hypothesis as a finding has been misled by this page, not
-    # by the model.
-    st.markdown(
-        '<div class="dq-blockhd"><b>THE CLAIM</b>'
-        + theme.badge(
-            "generated · a model claim" if row["recommendation_source"] == "generated"
-            else "from the playbook",
-            "moderate" if row["recommendation_source"] == "generated" else "neutral",
-        )
-        + theme.confidence_badge(extra.get("confidence"))
-        + theme.defect_badge(extra.get("defect_location"))
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(f"**{extra['root_cause_hypothesis']}**")
-
-    _defect = components.opt(extra.get("defect_location"))
-    if _defect in theme.DEFECT_MEANING:
-        st.caption(theme.DEFECT_MEANING[_defect],
-                   help="`defect_location` — the model's answer to whether the rows "
-                        "or the rule that judged them are wrong. It is what turns "
-                        "COH-B's 700 breaches into a registry change rather than a "
-                        "data correction.")
-
-    theme.section("What supports it")
-    # Itemised, one checkable fact at a time. Confirming a hypothesis is a
-    # fact-at-a-time job: three of four holding and the fourth not is the most useful
-    # thing this page can tell a steward, and a paragraph cannot express it. The
-    # paragraph is kept only where the itemised list is missing.
-    if _n_facts:
-        components.evidence_points_view(extra)
-    else:
+    # Two columns: the claim and the facts that would confirm it, and beside them the
+    # model's verdict on it and the other reading the same facts fit. Every word on
+    # the right is the model's own, and the cards say so — a reader who takes the
+    # hypothesis as a finding has been misled by this page, not by the model.
+    main, side = st.columns([1.8, 1], gap="large")
+    with main:
         st.markdown(
-            f'<div class="dq-because"><b>Because:</b> '
-            f'{html.escape(str(extra["evidence_summary"]))}</div>',
+            '<div class="dq-blockhd"><b>THE CLAIM</b></div>'
+            f'<div class="dq-claim">{html.escape(str(extra["root_cause_hypothesis"]))}'
+            "</div>",
             unsafe_allow_html=True,
         )
-    components.rival_view(extra)
-    components.grouping_note(extra)
-    st.caption("Confirm or discard this against the numbers in Evidence rather than "
-               "against the prose.")
+        theme.section("What supports it")
+        # Itemised, one checkable fact at a time. Confirming a hypothesis is a
+        # fact-at-a-time job: three of four holding and the fourth not is the most
+        # useful thing this page can tell a steward, and a paragraph cannot express
+        # it. The paragraph is kept only where the itemised list is missing.
+        if _n_facts:
+            components.evidence_points_view(extra)
+        else:
+            st.markdown(
+                f'<div class="dq-because"><b>Because:</b> '
+                f'{html.escape(str(extra["evidence_summary"]))}</div>',
+                unsafe_allow_html=True,
+            )
+        components.grouping_note(extra)
+    with side:
+        components.verdict_card(extra)
+        components.rival_view(extra)
+        st.caption("Confirm or discard this against the numbers in Evidence rather than "
+                   "against the prose.")
 
 with todo_tab:
     # What was done goes first once something has been: at that point it is the
     # headline, and the recommendation below it is what it is measured against.
     if opt(row["approach_type_taken"]):
         st.markdown(
-            '<div class="dq-kvline"><span class="k">What was done:</span> '
+            '<div class="dq-done">'
+            '<span class="k">What was done</span>'
             + theme.badge(theme.approach_label(row["approach_type_taken"]), "neutral")
-            + " "
             + (theme.badge("Followed the recommendation", "success", "check")
                if row["recommendation_followed"] else theme.badge("Diverged", "moderate"))
+            + theme.hint("Divergence is not a failure — it is the signal the acceptance "
+                         "metric collects. A recommendation stewards keep overriding is "
+                         "one to change.", side="right")
             + "</div>",
             unsafe_allow_html=True,
         )
-        st.caption(
-            "Divergence is not a failure — it is the signal the acceptance metric "
-            "collects. A recommendation stewards keep overriding is one to change.")
-
-    components.recommendation_view(extra, adapter.get_playbook())
-
-    # Here rather than under the claim: what was tried last time is a fact about the
-    # advice — the spec's worked failure is re-recommending what already failed.
-    components.prior_advice_note(extra)
+    main, side = st.columns([1.8, 1], gap="large")
+    with main:
+        components.recommendation_main(extra)
+        # Here rather than under the claim: what was tried last time is a fact about
+        # the advice — the spec's worked failure is re-recommending what already failed.
+        components.prior_advice_note(extra)
+        components.provenance(extra)
+    with side:
+        components.recommendation_side(extra, adapter.get_playbook())
 
 with lineage_tab:
     components.lineage_view(extra, registry)

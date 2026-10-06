@@ -1113,6 +1113,54 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   background: {NEUTRAL["canvas"]}; }}
 .dq-rival b {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
 
+/* --- Detail tabs: two columns, the reading and its side cards. 2026-10-06. -----
+   The claim and the advice are body text at reading size, not bold: a bold
+   paragraph is a wall, and the badges above it already say what kind of claim it is.
+   Facts and steps are rows divided by hairlines, one checkable unit per row. */
+.dq-claim {{ font-size: clamp(.95rem, 1.05vw, 1.02rem); line-height: 1.65;
+  color: {NEUTRAL["text"]}; border-left: 3px solid {ACCENT}; padding: .1rem 0 .1rem .9rem;
+  margin: .2rem 0 .4rem; max-width: 78ch; }}
+.dq-list.dq-facts, .dq-list.dq-steps {{ margin-top: .2rem; max-width: none; }}
+.dq-list.dq-facts li, .dq-list.dq-steps li {{ padding-top: .55rem; padding-bottom: .55rem;
+  border-bottom: 1px solid var(--dq-border); }}
+.dq-list.dq-facts li:last-child, .dq-list.dq-steps li:last-child {{ border-bottom: none; }}
+.dq-list.dq-facts li::before {{ top: 1.08rem; }}
+.dq-list.dq-steps li {{ padding-left: 2rem; }}
+.dq-list.dq-steps li::before {{ top: .58rem; width: 1.35rem; height: 1.35rem;
+  border-radius: 50%; font-size: .7rem; background: {ACCENT_TINT}; color: {ACCENT};
+  border-color: #c3c6fb; }}
+.dq-sidecard {{ border: 1px solid var(--dq-border); border-radius: 8px;
+  background: {NEUTRAL["canvas"]}; padding: .75rem .9rem; margin: .2rem 0 .7rem;
+  font-size: .84rem; line-height: 1.55; color: {NEUTRAL["text"]}; }}
+.dq-sidecard .hd {{ font-size: .68rem; font-weight: 650; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--dq-text-2); margin-bottom: .4rem;
+  display: flex; align-items: center; gap: .3rem; }}
+.dq-sidecard .row {{ display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: .3rem .6rem; padding: .3rem 0; }}
+.dq-sidecard .row + .row, .dq-sidecard .mean + .row {{ border-top: 1px solid var(--dq-border); }}
+.dq-sidecard .row .k {{ color: var(--dq-text-2); display: inline-flex; align-items: center;
+  gap: .25rem; }}
+.dq-sidecard .mean {{ font-size: .78rem; color: var(--dq-text-2); margin: .1rem 0 .35rem;
+  display: block; }}
+.dq-sidecard .dq-kv .k {{ min-width: 6.5rem; }}
+.dq-sidefigs {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem;
+  margin: .45rem 0 .35rem; }}
+.dq-sidefigs span {{ font-size: .72rem; color: var(--dq-text-3); line-height: 1.3; }}
+.dq-sidefigs b {{ display: block; font-size: 1.05rem; font-weight: 650;
+  color: {NEUTRAL["text"]}; font-variant-numeric: tabular-nums; }}
+/* The two columns wrap rather than squeeze: the side cards keep 16rem and drop
+   under the reading when the tab is too narrow for both. Matched by position, since
+   a column cannot be keyed. */
+.st-key-dq_probtabs [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .4rem; }}
+.st-key-dq_probtabs [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child:nth-last-child(2) {{
+  flex: 1.8 1 26rem !important; min-width: min(26rem, 100%); }}
+.st-key-dq_probtabs [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child:nth-child(2) {{
+  flex: 1 1 16rem !important; min-width: 16rem; }}
+.dq-done {{ display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem;
+  background: {NEUTRAL["canvas"]}; border: 1px solid var(--dq-border); border-radius: 8px;
+  padding: .5rem .75rem; margin: .1rem 0 .9rem; font-size: .82rem; }}
+.dq-done .k {{ font-weight: 600; color: {NEUTRAL["text"]}; margin-right: .2rem; }}
+
 /* --- Estate tiles: six counts of what is watched. ---------------------------
    Their own card rather than `.dq-kpi`, which is borderless and reads as loose text
    in a six-up row. Bordered, they read as one object per figure — which is what they

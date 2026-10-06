@@ -827,7 +827,47 @@ def evidence_points_view(cohort_row) -> None:
     """
     markup = itemised(cohort_row.get("evidence_points"), ordered=False)
     if markup:
-        st.markdown(markup, unsafe_allow_html=True)
+        st.markdown(markup.replace('class="dq-list dots"', 'class="dq-list dots dq-facts"'),
+                    unsafe_allow_html=True)
+
+
+def side_card(title: str, body: str, tone: str | None = None) -> None:
+    """One card in a detail tab's side column: a small heading over a short body.
+    Markup, not a container: nothing in one is clickable, and markup sizes itself."""
+    tint = (f' style="background:{theme.TONE[tone]["bg"]};'
+            f'border-color:{theme.TONE[tone]["bd"]}"' if tone else "")
+    st.markdown(f'<div class="dq-sidecard"{tint}><div class="hd">{title}</div>'
+                f'<div class="bd">{body}</div></div>', unsafe_allow_html=True)
+
+
+def verdict_card(cohort_row) -> None:
+    """The model's verdict, gathered: where the defect is and what that means for the
+    remedy, how sure it says it is, and where the advice came from. All the model's
+    own, and the heading says so."""
+    source = cohort_row["recommendation_source"]
+    defect = opt(cohort_row.get("defect_location"))
+    rows = []
+    if defect in theme.DEFECT_LABEL:
+        rows.append(
+            '<div class="row"><span class="k">Where the defect is'
+            + theme.hint("`defect_location` — the model's answer to whether the rows or "
+                         "the rule that judged them are wrong. It is what turns COH-B's "
+                         "700 breaches into a registry change rather than a data "
+                         "correction.", side="left")
+            + f'</span>{theme.defect_badge(defect)}</div>'
+            f'<div class="mean">{html.escape(theme.DEFECT_MEANING.get(defect, ""))}</div>')
+    conf = theme.confidence_badge(cohort_row.get("confidence"))
+    if conf:
+        rows.append(f'<div class="row"><span class="k">Confidence'
+                    + theme.hint("The model's own figure. Advisory: it is not an input "
+                                 "to the queue's ranking.", side="left")
+                    + f"</span>{conf}</div>")
+    rows.append(
+        '<div class="row"><span class="k">Advice from</span>'
+        + (theme.badge("generated · a model claim", "moderate") if source == "generated"
+           else theme.badge("the playbook", "neutral"))
+        + "</div>")
+    side_card("The model's verdict", "".join(rows))
 
 
 def rival_view(cohort_row) -> None:
@@ -842,11 +882,7 @@ def rival_view(cohort_row) -> None:
     rival = opt(cohort_row.get("rival_hypothesis"))
     if not rival:
         return
-    st.markdown(
-        f'<div class="dq-rival"><b>The evidence also fits:</b> {html.escape(str(rival))}'
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    side_card("The evidence also fits", html.escape(str(rival)))
 
 
 def grouping_note(cohort_row) -> None:
@@ -912,25 +948,23 @@ def prior_advice_note(cohort_row) -> None:
 # --- Recommendation ---------------------------------------------------------
 
 
-def recommendation_view(cohort_row, playbook: pd.DataFrame) -> None:
-    """The recommendation, and the playbook entry behind it where there is one.
+def recommendation_main(cohort_row) -> None:
+    """The recommendation and its steps: the left column of What to do.
 
     The playbook has no page of its own — an approach library nobody browses is
     reference material, and the spec's requirement is that the entry appear *as the
-    recommendation, with its prior-use count*, which is here.
+    recommendation, with its prior-use count*, which `recommendation_side` does.
     """
     source = cohort_row["recommendation_source"]
     st.markdown(
-        theme.badge(theme.approach_label(cohort_row["recommended_approach_type"]), "info")
-        + " "
-        + (
-            theme.badge("From playbook", "neutral")
-            if source == "playbook"
-            else theme.badge("Generated — no playbook match", "moderate", "spark")
-        ),
+        '<div class="dq-blockhd"><b>THE ADVICE</b>'
+        + theme.badge(theme.approach_label(cohort_row["recommended_approach_type"]), "info")
+        + (theme.badge("From playbook", "neutral") if source == "playbook"
+           else theme.badge("Generated — no playbook match", "moderate", "spark"))
+        + "</div>"
+        f'<div class="dq-claim">{html.escape(str(cohort_row["recommended_approach"]))}</div>',
         unsafe_allow_html=True,
     )
-    st.markdown(cohort_row["recommended_approach"])
 
     # The approach as ordered steps. Prose only — a step carrying a runnable body is
     # the first move toward an execute button, which is this project's defining
@@ -939,64 +973,67 @@ def recommendation_view(cohort_row, playbook: pd.DataFrame) -> None:
     # reads these and acts in their own pipeline.
     steps = itemised(cohort_row.get("recommended_steps"), ordered=True)
     if steps:
-        st.markdown(steps, unsafe_allow_html=True)
+        theme.section("Steps")
+        st.markdown(steps.replace('class="dq-list"', 'class="dq-list dq-steps"'),
+                    unsafe_allow_html=True)
 
+
+def recommendation_side(cohort_row, playbook: pd.DataFrame) -> None:
+    """Who acts, how success will be judged, and the playbook's track record: the
+    side column of What to do. Short, so all three are on screen beside the steps."""
     owner = opt(cohort_row.get("recommended_owner"))
     if owner:
-        st.markdown(
-            '<div class="dq-kvline"><span class="k">Who should act:</span> '
-            f'<span>{html.escape(str(owner))}</span></div>',
-            unsafe_allow_html=True,
-        )
-        if str(owner) != str(cohort_row.get("owner_group") or ""):
-            st.caption(
-                "Not the same thing as the owning group.",
-                help="`owner_group` owns the data whatever the remedy turns out to "
-                     "be. Who should act depends on where the defect is — a rule "
-                     "defect is the stewards' to fix, not the source system's.",
-            )
+        differs = str(owner) != str(cohort_row.get("owner_group") or "")
+        side_card(
+            "Who should act",
+            html.escape(str(owner))
+            + ('<div class="mean">Not the same thing as the owning group.'
+               + theme.hint("`owner_group` owns the data whatever the remedy turns out "
+                            "to be. Who should act depends on where the defect is — a "
+                            "rule defect is the stewards' to fix, not the source "
+                            "system's.", side="left") + "</div>" if differs else ""))
 
     expectation = opt(cohort_row.get("verification_expectation"))
     if expectation:
-        st.markdown(
-            f'<div class="dq-because"><b>How we will know it worked:</b> '
-            f'{html.escape(str(expectation))}</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "A prediction made in advance, not a memory.",
-            help="Closure is the check runner's to declare, and `verified` tests "
-                 "this sentence. Written after the fact it would only ever agree "
-                 "with whatever happened.",
-        )
+        side_card(
+            "How we will know it worked",
+            html.escape(str(expectation))
+            + '<div class="mean">A prediction made in advance, not a memory.'
+            + theme.hint("Closure is the check runner's to declare, and `verified` tests "
+                         "this sentence. Written after the fact it would only ever agree "
+                         "with whatever happened.", side="left") + "</div>",
+            tone="success")
 
     pb_id = opt(cohort_row.get("playbook_id"))
-    if source == "playbook" and pb_id is not None and (playbook["playbook_id"] == pb_id).any():
+    if cohort_row["recommendation_source"] == "playbook" and pb_id is not None \
+            and (playbook["playbook_id"] == pb_id).any():
         pb = playbook[playbook["playbook_id"] == pb_id].iloc[0]
-        with st.container(border=True):
-            st.markdown(f"**{pb['approach_name']}**")
-            st.markdown(f'<div class="dq-quiet">{html.escape(pb["description"])}</div>',
-                        unsafe_allow_html=True)
-            last_used = opt(pb["last_used_ts"])
-            st.markdown(
-                theme.kv("Prior uses", int(pb["prior_use_count"]))
-                + theme.kv(
-                    "Recurrence rate",
-                    f"{100 * float(pb['recurrence_rate']):.0f}% "
-                    f"({int(pb['recurrence_count'])} of {int(pb['prior_use_count']) or '—'})",
-                )
-                + theme.kv("Last used", f"{last_used:%d %b %Y}" if last_used is not None else "never")
-                + theme.kv("Typical owner", pb["typical_owner"]),
-                unsafe_allow_html=True,
-            )
-            st.caption(
-                "Non-executable by design — the playbook stores an approach and a track "
-                "record, never a runnable body."
-            )
+        last_used = opt(pb["last_used_ts"])
+        uses = int(pb["prior_use_count"])
+        side_card(
+            "From the playbook",
+            f'<b>{html.escape(str(pb["approach_name"]))}</b>'
+            '<div class="dq-sidefigs">'
+            f'<span><b>{uses}</b>prior uses</span>'
+            # No prior use means no rate, not a rate of 0%.
+            + (f'<span><b>{100 * float(pb["recurrence_rate"]):.0f}%</b>came back, '
+               f'{int(pb["recurrence_count"])} of {uses}</span>' if uses
+               else "<span><b>—</b>came back</span>")
+            + f'<span><b>{f"{last_used:%-d %b}" if last_used is not None else "never"}</b>'
+            "last used</span></div>"
+            + theme.kv("Typical owner", html.escape(str(pb["typical_owner"])))
+            + f'<div class="mean">{html.escape(str(pb["description"]))}</div>'
+            + '<div class="mean">Non-executable by design — the playbook stores an '
+            "approach and a track record, never a runnable body.</div>")
 
+
+def provenance(cohort_row) -> None:
+    """Where the advice came from, folded away: the input and the model, for anyone
+    auditing the claim rather than acting on it."""
+    pb_id = opt(cohort_row.get("playbook_id"))
     with st.expander("Provenance"):
         st.markdown(
-            theme.kv("Source", source)
+            theme.kv("Source", cohort_row["recommendation_source"])
             + theme.kv("Model endpoint", opt(cohort_row.get("model_endpoint")) or "—")
             + theme.kv("Triage job run", opt(cohort_row.get("triage_job_run_id")) or "—")
             + theme.kv("Playbook ref", pb_id or "—"),
