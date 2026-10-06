@@ -61,6 +61,7 @@ def as_list(value) -> list:
 
 def page_chrome() -> None:
     theme.inject_css()
+    adapter.warm()
     _sidebar_source()
     _sidebar_identity()
 

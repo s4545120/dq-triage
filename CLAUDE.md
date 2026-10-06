@@ -596,6 +596,18 @@ Rebuild the fixture and you must `cp out/*.parquet` over the bundle;
 `dq-app/tests/test_bundled_fixture.py` compares them byte for byte and fails if you
 forget.
 
+**Reads are fetched in parallel, and a write no longer empties the catalog cache.**
+Measured 2026-10-06: every read is a fresh warehouse connection plus a statement,
+about 2s each (1.75s of it is the connect), and the 14 shared reads one after another
+made a cold Scorecard take 22.7s, paid again after every write because `clear_cache`
+was `st.cache_data.clear()`. `adapter.warm()`, called from `components.page_chrome`,
+fills `_SHARED_READS` in one parallel wave (9–10s cold from a laptop, most of which is
+the first query's auth; the next page visited costs nothing). `clear_cache` now drops
+only those reads and `probe_table`, so the hour-long Unity Catalog listing survives a
+decision. Reusing a connection saved much less than parallelism did, because warehouse
+execution is 0.7–2s by itself, so the fresh-connection-per-statement rule stands. Add
+a cached read that pages share and it belongs in `_SHARED_READS`.
+
 **Unity Catalog hands back tz-aware timestamps and the fixture's parquet is naive.**
 `databricks_source._naive_timestamps` converts to UTC and drops the offset on every
 read, so the two sources stay interchangeable. Without it the detail page's age line

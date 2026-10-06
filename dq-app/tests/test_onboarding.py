@@ -216,7 +216,8 @@ def test_the_table_page_shows_the_stage_bindings_and_shadow_verdicts(page, tmp_p
     at = page(build(tmp_path), table=True)
     body = _text(at)
     assert "crm_lead" in body
-    assert "Ready to promote" in body and "5 Promote · you" in body
+    assert "Ready to promote" in body and "Step 5 of 6" in body
+    assert "Waiting on you: promote the checks" in body
     assert "approved by owner@example.com" in body
     assert "would breach" in body and "would pass" in body
     assert ">1</b> would breach" in body

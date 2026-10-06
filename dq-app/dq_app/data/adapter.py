@@ -37,7 +37,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 
 import pandas as pd
@@ -455,8 +458,52 @@ def review_binding(proposal_id: str, decision: str, reason: str | None = None) -
     return row
 
 
+# The reads every page shares. Against the warehouse each one is a fresh connection
+# and a statement -- about two seconds -- and a page asking for them one after another
+# took over half a minute cold, then again after every write. `warm` asks for all of
+# them at once, so a cold page costs the slowest read, not the sum.
+_SHARED_READS = (
+    get_cohorts, _base_dispositions, get_check_runs, get_violation_samples,
+    _base_rule_registry, get_playbook, get_cde_registry, get_cde_profile,
+    get_threshold_proposals, _base_threshold_reviews, _base_monitored_tables,
+    _base_binding_proposals, _base_binding_reviews, get_check_templates,
+)
+_WARM_LOCK = threading.Lock()
+_warmed_at = 0.0
+
+
+def warm() -> None:
+    """Fill the shared reads in parallel, at most once per cache lifetime.
+
+    Each read is still its own `st.cache_data` entry on its own connection, so a page
+    and a test see exactly what they saw before; this only changes when they are
+    fetched. Skipped while the last warm is younger than the cache, because a cache hit
+    still unpickles a copy of the frame."""
+    global _warmed_at
+    with _WARM_LOCK:
+        if time.monotonic() - _warmed_at < _CACHE["ttl"] - 10:
+            return
+        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+        ctx = get_script_run_ctx()
+
+        def _fill(fn):
+            if ctx is not None:
+                add_script_run_ctx(threading.current_thread(), ctx)
+            fn()
+
+        with ThreadPoolExecutor(max_workers=len(_SHARED_READS)) as pool:
+            list(pool.map(_fill, _SHARED_READS))   # list(): re-raises a failed read here
+        _warmed_at = time.monotonic()
+
+
 def clear_cache() -> None:
-    st.cache_data.clear()
+    """Drop what a write can have changed. The Unity Catalog listing is not among it --
+    no write here creates a table -- so its hour-long cache survives, and Add tables
+    does not re-list the catalog after every decision made elsewhere."""
+    global _warmed_at
+    for fn in _SHARED_READS + (probe_table,):
+        fn.clear()
+    _warmed_at = 0.0
 
 
 # --- Writes: there are two, and this is both of them -------------------------

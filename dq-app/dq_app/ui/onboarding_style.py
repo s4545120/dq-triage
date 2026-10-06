@@ -99,6 +99,64 @@ _CSS = f"""
 .onb-box.on {{ background: {theme.ACCENT}; border-color: {theme.ACCENT};
   box-shadow: inset 0 0 0 2px {N["surface"]}; }}
 
+/* The progress bar: six nodes on a track, the track filled up to the current one.
+   The line runs between the first and last node CENTRES -- each node sits in the middle
+   of a sixth of the width -- so its ends are inset by a twelfth and the fill is a share
+   of what remains. */
+.onb-prog {{ border: 1px solid {N["border"]}; border-radius: 10px; background: {N["surface"]};
+  padding: .8rem 1rem .75rem; margin: clamp(.5rem, .9vw, .8rem) 0 clamp(.6rem, 1vw, 1rem); }}
+.onb-prog .hd {{ display: flex; flex-wrap: wrap; gap: .2rem .8rem; justify-content: space-between;
+  align-items: baseline; margin-bottom: .7rem; }}
+.onb-prog .hd .t {{ font-size: .82rem; font-weight: 600; color: {N["text"]}; }}
+.onb-prog .hd .t em {{ font-style: normal; color: {CAP}; font-weight: 500; }}
+.onb-prog .hd .w {{ font-size: .75rem; color: {CAP}; display: inline-flex; gap: .4rem;
+  align-items: center; }}
+.onb-prog .hd .w.you {{ color: {theme.TONE["high"]["fg"]}; font-weight: 600; }}
+.onb-prog .hd .w.job::before {{ content: ""; width: .5rem; height: .5rem; border-radius: 50%;
+  background: {theme.ACCENT}; animation: onb-pulse 1.6s ease-in-out infinite; }}
+@keyframes onb-pulse {{ 0%, 100% {{ opacity: .25; }} 50% {{ opacity: 1; }} }}
+@media (prefers-reduced-motion: reduce) {{ .onb-prog .hd .w.job::before {{ animation: none; }} }}
+.onb-track {{ position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  list-style: none; margin: 0; padding: 0; }}
+.onb-track::before, .onb-track::after {{ content: ""; position: absolute; top: .7rem;
+  left: calc(100% / 12); height: 2px; border-radius: 2px; }}
+.onb-track::before {{ right: calc(100% / 12); background: {N["border"]}; }}
+.onb-track::after {{ width: calc((100% - 100% / 6) * var(--f)); background: {theme.ACCENT};
+  transition: width .4s ease; }}
+.onb-track li {{ position: relative; z-index: 1; display: flex; flex-direction: column;
+  align-items: center; gap: .35rem; text-align: center; margin: 0; padding: 0 .15rem; }}
+.onb-track li::marker {{ content: none; }}
+.onb-track i {{ font-style: normal; width: 1.45rem; height: 1.45rem; border-radius: 50%;
+  display: grid; place-items: center; font-size: .7rem; font-weight: 650;
+  background: {N["surface"]}; border: 1.5px solid {N["border_strong"]}; color: {CAP}; }}
+.onb-track li span {{ font-size: .74rem; line-height: 1.3; color: {CAP}; overflow-wrap: anywhere; }}
+.onb-track li.done i {{ background: {theme.ACCENT}; border-color: {theme.ACCENT}; color: #fff; }}
+.onb-track li.done span {{ color: {N["text_2"]}; }}
+.onb-track li.now i {{ border: 2px solid {theme.ACCENT}; color: {theme.ACCENT};
+  box-shadow: 0 0 0 4px {theme.ACCENT_TINT}; }}
+.onb-track li.now span {{ color: {N["text"]}; font-weight: 600; }}
+.onb-track li.now.you i {{ border-color: {theme.TONE["high"]["fg"]}; color: {theme.TONE["high"]["fg"]};
+  box-shadow: 0 0 0 4px {theme.TONE["high"]["bg"]}; }}
+.onb-track.all li i {{ background: {theme.TONE["success"]["fg"]}; border-color: {theme.TONE["success"]["fg"]}; }}
+.onb-track.all::after {{ background: {theme.TONE["success"]["fg"]}; }}
+.onb-prog.paused {{ opacity: .75; }}
+.onb-prog.paused .onb-track::after {{ background: {N["border_strong"]}; }}
+/* Below ~34rem only the current step keeps its label; the nodes still say where it is. */
+@media (max-width: 34rem) {{ .onb-track li:not(.now) span {{ display: none; }}
+  .onb-track li.now span {{ white-space: nowrap; overflow-wrap: normal; }} }}
+
+/* The same progress in a table row: six segments and the stage in words. */
+.onb-mini {{ display: flex; flex-direction: column; gap: .3rem; min-width: 0; }}
+.onb-mini .bar {{ display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; max-width: 7.5rem; }}
+.onb-mini .bar b {{ height: 5px; border-radius: 3px; background: {N["border"]}; }}
+.onb-mini .bar b.done {{ background: {theme.ACCENT}; }}
+.onb-mini .bar b.now {{ background: {theme.ACCENT}; opacity: .45; }}
+.onb-mini .bar b.now.you {{ background: {theme.TONE["high"]["fg"]}; opacity: 1; }}
+.onb-mini.all .bar b {{ background: {theme.TONE["success"]["fg"]}; }}
+.onb-mini .lb {{ font-size: .75rem; line-height: 1.2; color: {N["text_2"]}; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }}
+.onb-mini .lb.you {{ color: {theme.TONE["high"]["fg"]}; font-weight: 600; }}
+
 /* The catalog tree: plain buttons, left-aligned, the open schema tinted like a picked row. */
 [class*="st-key-onbtree_"] button {{
   justify-content: flex-start; border: none; background: transparent; box-shadow: none;
@@ -140,23 +198,63 @@ def head(title: str, caption: str = "") -> None:
                 f'<span class="c">{caption}</span></div>', unsafe_allow_html=True)
 
 
+# Who the current step is waiting on, in the words the bar's header uses.
+_WAITING = {
+    "awaiting discovery": ("job", "The discovery job proposes bindings next"),
+    "bindings awaiting review": ("you", "Waiting on you: decide each proposed binding"),
+    "awaiting rule generation": ("job", "The onboarding job writes the checks next"),
+    "shadow, not yet run": ("job", "The onboarding job measures the checks next"),
+    "shadow, awaiting promotion": ("you", "Waiting on you: promote the checks"),
+    "active": ("", "Breaches reach Triage"),
+}
+
+
+def _step_class(i: int, now: int) -> str:
+    if i < now or now == len(onboarding.STEPS):
+        return "done"
+    return "now" + (" you" if i in onboarding.STEP_PERSON else "") if i == now else ""
+
+
 def steps(stage: str) -> str:
-    """The six step badges: done in green, the current one in indigo, the rest grey."""
+    """The progress bar: six steps on a track filled to the current one, and a line
+    saying who acts next. Done steps carry a tick, a person's current step is amber."""
+    n = len(onboarding.STEPS)
     now = onboarding.STEP_OF[stage]
     if now is None:          # paused: no step is current
-        return (f'<div class="onb-steps">{theme.badge("Paused — not checked until resumed", "neutral")}'
-                "</div>")
-    out = []
+        return ('<div class="onb-prog paused"><div class="hd"><span class="t">Paused</span>'
+                '<span class="w">Not checked until resumed</span></div>'
+                f'<ol class="onb-track" style="--f:0">'
+                + "".join(f"<li><i>{i}</i><span>{html.escape(lb)}</span></li>"
+                          for i, lb in enumerate(onboarding.STEPS, start=1))
+                + "</ol></div>")
+    who, line = _WAITING.get(stage, ("", ""))
+    nodes = []
     for i, label in enumerate(onboarding.STEPS, start=1):
-        if i < now or now == 6:
-            tone, text = "success", f"{i} {label}"
-        elif i == now:
-            tone = "info"
-            text = f"{i} {label}" + (" · you" if i in onboarding.STEP_PERSON else "")
-        else:
-            tone, text = "neutral", f"{i} {label}"
-        out.append(theme.badge(html.escape(text), tone))
-    return f'<div class="onb-steps">{"".join(out)}</div>'
+        cls = _step_class(i, now)
+        mark = "✓" if cls == "done" else str(i)
+        nodes.append(f'<li class="{cls}"><i>{mark}</i><span>{html.escape(label)}</span></li>')
+    done = now == n
+    head = ("All six steps done" if done
+            else f'Step {now} of {n} <em>· {html.escape(onboarding.STEPS[now - 1])}</em>')
+    return (f'<div class="onb-prog"><div class="hd"><span class="t">{head}</span>'
+            f'<span class="w {who}">{html.escape(line)}</span></div>'
+            f'<ol class="onb-track{" all" if done else ""}" style="--f:{(now - 1) / (n - 1):.3f}">'
+            f'{"".join(nodes)}</ol></div>')
+
+
+def mini_steps(stage: str) -> str:
+    """The progress bar for a table row: six segments and the stage in words."""
+    now = onboarding.STEP_OF[stage]
+    label = html.escape(onboarding.STAGE_LABEL.get(stage, stage))
+    n = len(onboarding.STEPS)
+    if now is None:
+        segs, extra, lb = "<b></b>" * n, "", ""
+    else:
+        segs = "".join(f'<b class="{_step_class(i, now)}"></b>' for i in range(1, n + 1))
+        extra = " all" if now == n else ""
+        lb = " you" if now in onboarding.STEP_PERSON and now != n else ""
+    return (f'<span class="onb-mini{extra}"><span class="bar">{segs}</span>'
+            f'<span class="lb{lb}">{label}</span></span>')
 
 
 def stage_badge(stage: str) -> str:

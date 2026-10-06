@@ -76,13 +76,13 @@ with left, st.container(key="onbcard_rows"):
                 f'<span class="stack"><span class="name">{html.escape(m["Name"])}</span>'
                 f'<span class="t2">{html.escape(m["Where"])}</span></span>'
                 f'<span class="mono">{html.escape(m["Owner"])}</span>'
-                f'<span>{ui.stage_badge(m["Stage"])}</span>'
+                f'{ui.mini_steps(m["Stage"])}'
                 f'<span class="num">{m["Bound"]}</span>'
                 f'<span class="t2" style="font-size:.84rem">{html.escape(m["Checks"])}</span>'
                 f'<span class="mono">{html.escape(m["Last"])}</span>'
             )
 
-        components.row_head(["Table", "Owner", "Step", ("Columns", "n"), "Checks",
+        components.row_head(["Table", "Owner", "Progress", ("Columns", "n"), "Checks",
                              "Last run"], GRID)
         with st.container(key="dqrows_onb"):
             got = components.clickable_rows(rows, GRID, _cells, "onb", "Code",
