@@ -1340,6 +1340,10 @@ rows by `result_id` — and a shadow-only run never replaces a scheduled one.
 * **Decommission is permanent; pause is not.** Retiring the table stops the runner
   (it checks only `selected` tables); every check gets a retired version; the job removes
   the bindings. Results and Triage problems stay as history. Table codes are never reused.
+  **Selecting a decommissioned table again** keeps its own code, so `generate` brings each
+  retired template check back at its next version under the same id
+  (`onboard.next_version`). Until 2026-10-06 it refused every one as "id already used",
+  and `sales_customers` sat at "awaiting rule generation" in `dq_triage`.
 * **A laptop cannot write the rule register.** `adapter._require_platform_identity`
   refuses a durable promotion, adoption or onboarding write without a platform identity;
   the rule register had no CHECK constraint doing what the register's do.

@@ -24,10 +24,31 @@ def use_schema(name: str) -> None:
     global SCHEMA
     SCHEMA = name
 
+
+def use_catalog(name: str) -> None:
+    """`onboard.py --catalog`. Read at call time like the schema: callers use
+    `wh.CATALOG`, never a `from wh import CATALOG` copy taken at import."""
+    global CATALOG
+    CATALOG = name
+
+
 # Rules in the registry call the shared helpers by their resolved sandpit name. The
 # onboarding schema reuses dq_triage's functions rather than cloning them, so a
-# template instantiated here calls exactly what the registered rules call.
-FN_RESOLVED = f"{CATALOG}.{SOURCE_SCHEMA}.{PREFIX}fn_"
+# template instantiated here calls exactly what the registered rules call. None means
+# that default; `onboard.py --fn-prefix` sets it for a layout where they live elsewhere.
+FN_PREFIX: str | None = None
+
+
+def use_fn_prefix(prefix: str) -> None:
+    """`<catalog>.<schema>.<name prefix>`, as jobs/run_checks.py's --fn-prefix takes it."""
+    if prefix.count(".") != 2 or not all(prefix.split(".")):
+        raise ValueError(f"--fn-prefix wants <catalog>.<schema>.<name prefix>, got {prefix!r}")
+    global FN_PREFIX
+    FN_PREFIX = prefix
+
+
+def fn_prefix() -> str:
+    return FN_PREFIX or f"{CATALOG}.{SOURCE_SCHEMA}.{PREFIX}fn_"
 
 
 def t(group: str, name: str, schema: str | None = None) -> str:

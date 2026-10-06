@@ -68,4 +68,6 @@ tables. Pause either from Jobs & Pipelines.
 
 The same two jobs with `--schema dq_triage`: `dq-triage onboard steps` (906515649279596)
 and `dq-triage checks` (568071030107709, daily 03:00). Every step takes `--schema`;
-the default is `dq_onboard`.
+the default is `dq_onboard`. `--catalog` (default `workspace`) and `--fn-prefix` (default
+`<catalog>.dq_triage.dq_fn_`, where the shared helpers live) point the same code
+somewhere else; both are read when a name is built, as `--schema` is.

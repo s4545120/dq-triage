@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fixtures"))
 import rules  # noqa: E402
 
-from wh import FN_RESOLVED  # noqa: E402
+import wh  # noqa: E402
 
 TEMPLATE_VERSION = 1
 
@@ -42,7 +42,7 @@ class Template:
         if sql is None:
             return None
         lifted = re.sub(rf"\b{re.escape(self.source_column)}\b", "{col}", sql)
-        return lifted.replace("dq.fn.", FN_RESOLVED)
+        return lifted.replace("dq.fn.", wh.fn_prefix())
 
     @property
     def rule_expr(self) -> str:
@@ -109,9 +109,10 @@ def for_class(data_class: str) -> list[Template]:
 
 def helpers(tp: Template) -> list[str]:
     """The shared functions a template calls, by routine name (`dq_fn_is_blank_v1`)."""
-    prefix = FN_RESOLVED.rsplit(".", 1)[-1]                  # dq_fn_
+    resolved = wh.fn_prefix()
+    prefix = resolved.rsplit(".", 1)[-1]                     # dq_fn_
     body = tp.rule_expr + " " + (tp.scope_filter or "")
-    names = re.findall(rf"{re.escape(FN_RESOLVED)}(\w+)\(", body)
+    names = re.findall(rf"{re.escape(resolved)}(\w+)\(", body)
     return sorted({prefix + n for n in names})
 
 
@@ -121,8 +122,9 @@ def equivalence() -> list[str]:
     bad = []
     for tp in TEMPLATES:
         r = rules.BY_ID[tp.source_rule]
-        want = (r.rule_expr.replace("dq.fn.", FN_RESOLVED),
-                r.scope_filter.replace("dq.fn.", FN_RESOLVED) if r.scope_filter else None)
+        fn = wh.fn_prefix()
+        want = (r.rule_expr.replace("dq.fn.", fn),
+                r.scope_filter.replace("dq.fn.", fn) if r.scope_filter else None)
         if tp.instantiate(tp.source_column) != want:
             bad.append(tp.template_id)
         if "{col}" not in tp.rule_expr:

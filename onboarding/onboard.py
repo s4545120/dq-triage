@@ -49,7 +49,7 @@ import mock_lead
 import discovery
 import templates as tpl
 import wh
-from wh import CATALOG, PREFIX, SOURCE_SCHEMA, connect, in_databricks, lit, run, src, t
+from wh import PREFIX, SOURCE_SCHEMA, connect, in_databricks, lit, run, src, t
 
 HERE = _HERE
 LEAD = src("crm_lead")
@@ -97,7 +97,7 @@ def setup(conn) -> None:
     if wh.SCHEMA == SOURCE_SCHEMA:
         raise SystemExit(f"setup builds a test schema cloned from {SOURCE_SCHEMA}; "
                          f"use `--schema {SOURCE_SCHEMA} install` there")
-    S = f"{CATALOG}.{wh.SCHEMA}"
+    S = f"{wh.CATALOG}.{wh.SCHEMA}"
     stmts = [
         f"CREATE SCHEMA IF NOT EXISTS {S} COMMENT 'Onboarding test. Disposable: DROP SCHEMA "
         f"{S} CASCADE resets it. Cloned from {SOURCE_SCHEMA} on creation.'",
@@ -132,7 +132,7 @@ def install(conn) -> None:
     seeded. Idempotent. Selects nothing and writes no business table."""
     # ADD COLUMNS appends at the end, which is where sql/ddl/01 declares them.
     have = {r["column_name"] for r in run(conn, f"""
-        SELECT column_name FROM {CATALOG}.information_schema.columns
+        SELECT column_name FROM {wh.CATALOG}.information_schema.columns
         WHERE table_schema = '{wh.SCHEMA}' AND table_name = '{PREFIX}config_rule_registry'""")}
     if "template_id" not in have:
         run(conn, f"ALTER TABLE {t('config', 'rule_registry')} ADD COLUMNS ("
@@ -161,7 +161,7 @@ def install(conn) -> None:
     for f in DDL_FILES:
         _run_ddl(conn, f)
     _seed_templates(conn)
-    print(f"install done: {CATALOG}.{wh.SCHEMA}")
+    print(f"install done: {wh.CATALOG}.{wh.SCHEMA}")
 
 
 def adopt(conn) -> None:
@@ -223,7 +223,7 @@ def _run_ddl(conn, fname: str) -> None:
     sys.path.insert(0, str(HERE.parent / "sql"))
     import render
     text = render.render((HERE.parent / "sql" / "ddl" / fname).read_text(),
-                        CATALOG, wh.SCHEMA, PREFIX)
+                        wh.CATALOG, wh.SCHEMA, PREFIX)
     n = 0
     for stmt in render.statements(text):
         # ADD CONSTRAINT is not idempotent, and re-running setup must be.
@@ -442,6 +442,25 @@ RULE_COLS = ("rule_id, rule_version, rule_name, target_table, target_column, cde
              "promoted_at, note, join_sql, template_id, template_version")
 
 
+def next_version(key: tuple, rule_id: str, existing: dict, latest: dict) -> int | None:
+    """The rule_version a generated rule is written at, or None if its id is not ours.
+
+    `key` is (template_id, target_table, target_column); `existing` holds current
+    template rules by that key, `latest` every rule id's latest version, retired
+    included. A retired rule from the same template on the same column comes back as
+    its next version -- the table was decommissioned and selected again. Any other
+    holder of the id is someone else's rule and is left alone."""
+    if key in existing:
+        return existing[key]["rule_version"] + 1
+    prior = latest.get(rule_id)
+    if prior is None:
+        return 1
+    if prior["status"] == "retired" and \
+            (prior["template_id"], prior["target_table"], prior["target_column"]) == key:
+        return prior["rule_version"] + 1
+    return None
+
+
 def generate(conn) -> None:
     targets = run(conn, f"""
         SELECT b.cde_id, b.cde_name, b.data_class, b.tolerance_pct, b.target_table,
@@ -455,7 +474,7 @@ def generate(conn) -> None:
         JOIN   {t('config', 'v_cde_registry_current')} e ON e.cde_id = b.cde_id
         JOIN   {t('config', 'v_monitored_table_current')} m
                ON m.target_table = b.target_table AND m.status = 'selected'
-        -- system.information_schema spans every catalog; {CATALOG}.information_schema
+        -- system.information_schema spans every catalog; {wh.CATALOG}.information_schema
         -- covers only its own, which silently dropped every table selected from `samples`.
         JOIN   system.information_schema.columns c
                ON concat_ws('.', c.table_catalog, c.table_schema, c.table_name) = b.target_table
@@ -463,13 +482,21 @@ def generate(conn) -> None:
     existing = {(r["template_id"], r["target_table"], r["target_column"]): r for r in run(conn, f"""
         SELECT rule_id, rule_version, template_id, template_version, target_table, target_column
         FROM {t('config', 'v_rule_registry_current')} WHERE template_id IS NOT NULL""")}
-    taken = {r["rule_id"] for r in run(conn, f"SELECT DISTINCT rule_id FROM {t('config', 'rule_registry')}")}
+    # Every id ever used, retired ones too, with its latest version: the view above hides
+    # a retired rule, and a table decommissioned and selected again keeps its code, so
+    # its checks come back under the ids they retired with.
+    latest = {r["rule_id"]: r for r in run(conn, f"""
+        SELECT rule_id, rule_version, status, template_id, target_table, target_column
+        FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY rule_id ORDER BY rule_version DESC) rn
+              FROM {t('config', 'rule_registry')})
+        WHERE rn = 1""")}
     # A template may call a helper the repo declares and this workspace has not been
     # given yet. One such rule would fail the whole table, because the runner checks
     # every row-level rule on a table in one query -- so it is refused here instead.
+    fn_catalog, fn_schema, _ = wh.fn_prefix().split(".")
     deployed = {r["routine_name"] for r in run(conn, f"""
-        SELECT routine_name FROM {CATALOG}.information_schema.routines
-        WHERE routine_schema = '{SOURCE_SCHEMA}'""")}
+        SELECT routine_name FROM {fn_catalog}.information_schema.routines
+        WHERE routine_schema = '{fn_schema}'""")}
 
     # A column someone has already written rules for is left to them. Templates are
     # for columns with nothing: on dq_mock_ctct_c, generating anyway produced 25 copies of
@@ -503,8 +530,8 @@ def generate(conn) -> None:
                 scope = f"({scope}) AND ({b['expected_scope_filter']})" if scope \
                     else b["expected_scope_filter"]
             rule_id = f"{b['table_code']}_{b['target_column']}_{tp.check}"
-            version = existing[key]["rule_version"] + 1 if key in existing else 1
-            if key not in existing and rule_id in taken:
+            version = next_version(key, rule_id, existing, latest)
+            if version is None:
                 skipped.append(f"{rule_id}: id already used by a rule not from this template")
                 continue
             # The element's tolerance is the ceiling on any rule's limit; the generated
@@ -544,8 +571,8 @@ def run_checks(_conn) -> None:
     job = {"run_name": "dq-onboard: run_checks",
            "tasks": [{"task_key": "run_checks", "environment_key": "env",
                       "spark_python_task": {"python_file": remote, "parameters": [
-                          "--catalog", CATALOG, "--schema", wh.SCHEMA, "--prefix", PREFIX,
-                          "--fn-prefix", f"{CATALOG}.{SOURCE_SCHEMA}.{PREFIX}fn_"]}}],
+                          "--catalog", wh.CATALOG, "--schema", wh.SCHEMA, "--prefix", PREFIX,
+                          "--fn-prefix", wh.fn_prefix()]}}],
            "environments": [{"environment_key": "env", "spec": {"client": "3"}}]}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(job, f)
@@ -704,8 +731,8 @@ def measure_shadow(conn) -> None:
     sys.path.insert(0, str(HERE.parent / "jobs"))
     import run_checks   # noqa: PLC0415 -- the job's own runner, imported where Spark exists
     print(f"measuring shadow checks on {', '.join(tables)}")
-    rc = run_checks.main(["--catalog", CATALOG, "--schema", wh.SCHEMA, "--prefix", PREFIX,
-                          "--fn-prefix", f"{CATALOG}.{SOURCE_SCHEMA}.{PREFIX}fn_",
+    rc = run_checks.main(["--catalog", wh.CATALOG, "--schema", wh.SCHEMA, "--prefix", PREFIX,
+                          "--fn-prefix", wh.fn_prefix(),
                           "--tables", ",".join(tables), "--shadow-only"])
     if rc:
         raise SystemExit(rc)
@@ -744,9 +771,23 @@ def main() -> int:
                                      "generate", "run", "status", "pipeline", "steps"])
     ap.add_argument("--schema", default=wh.TEST_SCHEMA,
                     help=f"schema to act on (default {wh.TEST_SCHEMA}, the test schema)")
+    ap.add_argument("--catalog", default=wh.CATALOG,
+                    help=f"catalog holding that schema (default {wh.CATALOG})")
+    ap.add_argument("--fn-prefix", default=None,
+                    help="<catalog>.<schema>.<name prefix> of the shared helper functions, "
+                         f"as run_checks.py takes it (default <catalog>.{wh.SOURCE_SCHEMA}."
+                         f"{wh.PREFIX}fn_)")
     args = ap.parse_args()
     step = args.step
+    # All three before anything is built: templates resolve the function prefix when a
+    # rule expression is read, and t() reads the catalog and schema per call.
+    wh.use_catalog(args.catalog)
     wh.use_schema(args.schema)
+    if args.fn_prefix:
+        try:
+            wh.use_fn_prefix(args.fn_prefix)
+        except ValueError as exc:
+            ap.error(str(exc))
     if step in ("setup", "install"):
         miss = tpl.equivalence()
         if miss:
