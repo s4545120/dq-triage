@@ -765,6 +765,25 @@ def test_an_element_pill_opens_the_element_drawer():
     assert not any(b.key == "_elem_close" for b in at.button), "Close did not close it"
 
 
+def test_a_deferred_problem_says_when_it_is_due_back_not_a_dash():
+    """`waiting_on` has no one to name for a deferral and returns "—". The strip used
+    to print that as "Next move is —."; it names the review-by date instead."""
+    import pandas as pd
+    path = APP_DIR.parent / "fixtures" / "out" / "results.v_cohort_current.parquet"
+    if not path.exists():
+        pytest.skip("fixture not built")
+    current = pd.read_parquet(path)
+    deferred = current[(current["lifecycle_state"] == "deferred")
+                       & current["review_by_date"].notna()]
+    assert not deferred.empty, "no deferred problem with a date in the fixture"
+    r = deferred.iloc[0]
+    at = _run("dq_app/ui/pages/triage_detail.py", selected_cohort=r["cohort_id"])
+    body = _body(at)
+    assert "Next move is <b>—</b>" not in body
+    assert f"{pd.Timestamp(r['review_by_date']):%-d %b}</b>" in body
+    assert "due back for review" in body.lower()
+
+
 def test_the_queue_shows_the_new_titles():
     at = _run("dq_app/ui/pages/triage.py")
     body = _body(at)

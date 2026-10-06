@@ -234,6 +234,31 @@ tone = STRIP_TONE.get(state, "neutral")
 # flex and height override tried on those wrappers. Drawing the box myself means the
 # only element sizing it is one I wrote; taking the button out of flow means nothing
 # else can size it either.
+
+
+def _next_move(r) -> str:
+    """The strip's last sentence: whose move it is. A deferral is nobody's turn until
+    its review-by date, so `waiting_on` has no one to name and returns "—" -- right in
+    the queue's column, wrong in a sentence, where it read "Next move is —." A
+    deferral says when it is due back instead, and that it is overdue once it is; any
+    other state with no one to name says nothing rather than a dash."""
+    who = components.waiting_on(r)
+    if who != "—":
+        return f"Next move is <b>{html.escape(who)}</b>."
+    if r["lifecycle_state"] != "deferred":
+        return ""
+    when = opt(r["review_by_date"])
+    if when is None:
+        return "Parked with no review-by date: a review can pick it up at any time."
+    due = pd.Timestamp(when).normalize()
+    late = (pd.Timestamp.now().normalize() - due).days
+    if late > 0:
+        return (f"Was due back for review on <b>{due:%-d %b}</b> — "
+                f"{late} {'day' if late == 1 else 'days'} overdue.")
+    return (f"Due back for review on <b>{due:%-d %b}</b>; a review can be recorded "
+            "before then.")
+
+
 _tint = theme.TONE[tone]
 with st.container(key="dq_strip"):
     st.markdown(
@@ -245,8 +270,7 @@ with st.container(key="dq_strip"):
         '<div class="dq-strip-said">'
         f'<b>{html.escape(theme.STATE_MEANING.get(state, str(state)))}.</b> '
         + (f'{html.escape(latest_reason)} ' if latest_reason else "")
-        + (f'Next move is <b>{html.escape(components.waiting_on(row))}</b>.'
-           if allowed or state not in NOTHING_TO_DO
+        + (_next_move(row) if allowed or state not in NOTHING_TO_DO
            else html.escape(NOTHING_TO_DO[state]))
         + "</div>"
         '<div class="dq-strip-gate">'
