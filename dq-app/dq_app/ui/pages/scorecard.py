@@ -282,9 +282,8 @@ def _check_panel(rule_id: str, tagged_now: pd.DataFrame, registry: pd.DataFrame,
             f'{html.escape(str(row["target_table"]))}</span></div>',
             unsafe_allow_html=True,
         )
-    if close.button("Close", key="_check_close", width="stretch"):
-        st.session_state.pop("_check_pick", None)
-        st.rerun()
+    close.button("Close", key="_check_close", width="stretch",
+                 on_click=lambda: st.session_state.pop("_check_pick", None))
 
     bad_rows = int(row["violation_count"])
     # Figures across the panel, prose under them — not figures in a narrow column
@@ -645,401 +644,406 @@ PRIORITY = 5
 LIST_BODY = 412
 TAB_BODY = 352
 
-tagged_now = _tagged(in_domain, registry, latest_run_id)
-ran_now = tagged_now[tagged_now["status"].isin(["pass", "breach"])]
-ran_ids = set(ran_now["rule_id"])
-failing_ids = set(ran_now[ran_now["status"] == "breach"]["rule_id"])
-all_cohorts = adapter.get_cohorts()
-cohort_of = metrics.cohort_for_rules(all_cohorts, set(tagged_now["rule_id"]))
-monitored_tables = sorted(in_domain["target_table"].dropna().unique())
-unattached_ids = ran_ids - set(cde_rules)
-# Rules the register says measure rows they should not. Their breach is a fact about
-# the rule, so their rows are never painted as bad data.
-disputed_ids = {i for lst in cde_cov["unscoped_rule_ids"] for i in components.as_list(lst)}
 
-_run_rows = in_domain[in_domain["run_id"] == latest_run_id]
-el_scores = _element_scores(cde_cov, _run_rows)
-el_before = (_element_scores(cde_cov, in_domain[in_domain["run_id"] == prior["run_id"]])
-             if prior is not None else {})
-rules_of = {cid: {i for lst in g["rule_ids"] for i in components.as_list(lst)}
-            for cid, g in cde_cov.groupby("cde_id")}
-gaps_of = {cid: set(g["coverage_gap"]) for cid, g in cde_cov.groupby("cde_id")}
-columns_of = {cid: [f"{str(r.target_table).split('.')[-1]}.{r.target_column}"
-                    for r in g.itertuples()]
-              for cid, g in cde_cov.groupby("cde_id")}
-
-el_rows = []
-for _, r in _elements.iterrows():
-    cid = r["cde_id"]
-    el_score, target = el_scores.get(cid), el_target.get(cid)
-    is_assessed = targets.assessed(gaps_of[cid], el_score, target)
-    met = is_assessed and targets.meets(el_score, target)
-    coverage_word = theme.COVERAGE_GAP_LABEL.get(r["coverage_gap"], r["coverage_gap"])
-    if not is_assessed:
-        # Why there is no verdict, in the register's own word for it. A missing score
-        # is a dash, never a zero: nothing watching an element is a gap in the
-        # register, and zero percent would report it as a data defect.
-        line = (f"No check ran · {coverage_word}" if el_score is None else
-                f"Not assessed · {coverage_word}" if target is not None else
-                f"No target declared · {coverage_word}")
-    elif met:
-        line = f"Meets target · {_target_text(target)}"
-    else:
-        line = (f"{_pts(targets.shortfall(el_score, target))} below target · "
-                f"{_target_text(target)}")
-    el_rows.append({
-        "key": cid, "Element": r["cde_name"], "Criticality": r["criticality"],
-        "Kind": theme.data_class_label(r["data_class"]), "Coverage": coverage_word,
-        "Score": el_score, "Target": target, "Assessed": is_assessed, "Met": met,
-        "Line": line, "Change": _change_words(el_score, el_before.get(cid)),
-        "Colour": UNASSESSED if not is_assessed else MET if met else BELOW,
-        "_order": ((0, -targets.shortfall(el_score, target), r["cde_name"])
-                   if is_assessed else
-                   (1, _crit_rank.get(r["criticality"], 9),
-                    101.0 if el_score is None else el_score, r["cde_name"])),
-    })
-el_rows.sort(key=lambda row: row["_order"])
-n_below = sum(row["Assessed"] and not row["Met"] for row in el_rows)
-n_met = sum(row["Met"] for row in el_rows)
-
-# Conditional, and normally absent: every rule names its element. It stays for a
-# registry that predates that rule or a run that carried a check whose element has
-# since been retired.
-extra_rows = []
-if unattached_ids:
-    extra_rows.append({
-        "key": NONE_SCOPE, "Element": UNATTACHED, "Criticality": None, "Kind": "",
-        "Coverage": "", "Score": None, "Target": None, "Assessed": False, "Met": False,
-        "Line": f"{len(unattached_ids & failing_ids)} of {len(unattached_ids)} failing "
-                "· not scored",
-        "Change": "", "Colour": UNASSESSED,
-    })
-
-scope = st.session_state.get("_elem_scope")
-if scope not in {row["key"] for row in el_rows + extra_rows}:
-    scope = el_rows[0]["key"]
+# Everything below is one fragment: picking an element, opening a check, switching a
+# tab or the Priority / All toggle redraws these two cards and the drawers, not the
+# filters, the headline or the coverage card above, none of which reads a selection
+# made here. Nothing in it may call `st.rerun()` -- that is a full-page run again --
+# so every selection is an `on_click` (`components.pick_into`). A filter changed above
+# is a full run, and the fragment is drawn afresh inside it.
 
 
-def _el_cells(row) -> str:
-    dot = ""
-    if row["Criticality"]:
-        tone = theme.CRITICALITY_TONE.get(row["Criticality"], "neutral")
-        dot = f'<i class="dq-eldot" style="background:{theme.TONE[tone]["fg"]}"></i>'
-    # Red for a score under its target and for nothing else. A met target and an
-    # unassessed score both print in ink; the bar and the line under it tell them
-    # apart.
-    figure_colour = BELOW if row["Colour"] == BELOW else (
-        theme.NEUTRAL["text"] if row["Assessed"] else theme.NEUTRAL["text_2"])
-    return _row_markup(
-        row["Element"], "—" if row["Score"] is None else _pct(row["Score"]),
-        figure_colour, theme.target_bar(row["Score"], row["Target"], row["Colour"]),
-        row["Line"], row["Change"], dot)
+@st.fragment
+def _elements_and_pane() -> None:
+    tagged_now = _tagged(in_domain, registry, latest_run_id)
+    ran_now = tagged_now[tagged_now["status"].isin(["pass", "breach"])]
+    ran_ids = set(ran_now["rule_id"])
+    failing_ids = set(ran_now[ran_now["status"] == "breach"]["rule_id"])
+    all_cohorts = adapter.get_cohorts()
+    cohort_of = metrics.cohort_for_rules(all_cohorts, set(tagged_now["rule_id"]))
+    monitored_tables = sorted(in_domain["target_table"].dropna().unique())
+    unattached_ids = ran_ids - set(cde_rules)
+    # Rules the register says measure rows they should not. Their breach is a fact about
+    # the rule, so their rows are never painted as bad data.
+    disputed_ids = {i for lst in cde_cov["unscoped_rule_ids"] for i in components.as_list(lst)}
 
+    _run_rows = in_domain[in_domain["run_id"] == latest_run_id]
+    el_scores = _element_scores(cde_cov, _run_rows)
+    el_before = (_element_scores(cde_cov, in_domain[in_domain["run_id"] == prior["run_id"]])
+                 if prior is not None else {})
+    rules_of = {cid: {i for lst in g["rule_ids"] for i in components.as_list(lst)}
+                for cid, g in cde_cov.groupby("cde_id")}
+    gaps_of = {cid: set(g["coverage_gap"]) for cid, g in cde_cov.groupby("cde_id")}
+    columns_of = {cid: [f"{str(r.target_table).split('.')[-1]}.{r.target_column}"
+                        for r in g.itertuples()]
+                  for cid, g in cde_cov.groupby("cde_id")}
 
-def _el_tip(row) -> list:
-    if not row["Criticality"]:
-        return [row["Element"], row["Line"]]
-    cols = columns_of.get(row["key"], [])
-    return [row["Element"],
-            f"{str(row['Criticality']).capitalize()} criticality · {row['Kind']} · "
-            f"{row['Coverage']}",
-            (" · ".join(cols), "mono") if cols else None]
-
-
-# Keyed so theme.py can let the two cards wrap: side by side on a narrow page they
-# cut every element and check name to a few letters.
-with st.container(key="dq_elsplit"):
-    left, right = st.columns([1, 1.5], gap="medium")
-
-with left, st.container(key="dq_elcard"):
-    st.markdown(
-        '<div class="dq-elcard-hd"><div class="t">Critical data elements'
-        + theme.hint(
-            "A score is read against its target only where something validates the "
-            "element's values and no rule on it contradicts the register's scope. "
-            "An element nothing validates can score 100% on a presence check, and a "
-            "scope mismatch scores low because of the rule, not the data — both "
-            "keep their figure, in grey, and are counted as unassessed.", side="right")
-        + "</div>"
-        f'<div class="q">{n_below} below target · {n_met} meeting target · '
-        f"{len(el_rows) - n_below - n_met} unassessed</div></div>",
-        unsafe_allow_html=True,
-    )
-    # Five by default: the list is sorted so that the top of it is the answer to
-    # "where do I look first", and twenty rows of mostly-fine is how that answer
-    # gets scrolled past. Everything is one click away, and counted on the label.
-    st.session_state.setdefault("_elist_show", "priority")
-    n_priority = min(PRIORITY, len(el_rows))
-    show = st.segmented_control(
-        "Elements shown", ["priority", "all"], key="_elist_show",
-        label_visibility="collapsed",
-        format_func=lambda v: (f"Priority {n_priority}" if v == "priority"
-                               else f"All {len(el_rows)}"))
-    listed = el_rows + extra_rows if show == "all" else el_rows[:n_priority]
-    # Five rows high in both modes: `All` scrolls inside the same box `Priority`
-    # fills, so switching between them does not move the card's floor — or the
-    # floor of the card beside it.
-    with st.container(height=LIST_BODY if len(listed) > n_priority else "content",
-                      key="dqrows_elist"):
-        got = components.clickable_rows(
-            listed, ROW_GRID, _el_cells, "el", "key",
-            lambda row: f"Show {row['Element']}", picked=scope, tip=_el_tip)
-    if got:
-        st.session_state["_elem_scope"] = got
-        # A check picked under the old element is not in the new one's breakdown, and
-        # a drawer left open over a list that no longer shows its check reads as a bug.
-        st.session_state.pop("_check_pick", None)
-        st.rerun()
-    st.markdown(
-        '<div class="dq-elfoot"><span>Bars: 0–100%<i></i>Target</span>'
-        "<span>Largest target gap first</span></div>",
-        unsafe_allow_html=True)
-
-# --- The right card: one element against its target, and its checks ------------
-
-sel = next(row for row in el_rows + extra_rows if row["key"] == scope)
-scope_rules = unattached_ids if scope == NONE_SCOPE else rules_of.get(scope, set())
-picked_rule = st.session_state.get("_check_pick")
-
-
-def _check_rows(rule_ids: set) -> list[dict]:
-    """Every check that ran on these rules, failing first and worst first within
-    that. Passing checks are listed too: an element's score is all of its checks, and
-    a breakdown showing only the failures cannot be added back up to it."""
-    past = in_domain[["rule_id", "run_ts", "status"]]
-    rows = []
-    for r in ran_now[ran_now["rule_id"].isin(rule_ids)].itertuples():
-        breach = r.status == "breach"
-        rows.append({
-            "Rule id": r.rule_id, "Check": r.rule_name, "Dimension": r.Dimension,
-            "Where": _where(r, monitored_tables),
-            "Rate": 100.0 - float(r.violation_pct),
-            "Target": None if pd.isna(r.threshold_pct) else 100.0 - float(r.threshold_pct),
-            "Bad": int(r.violation_count), "Of": int(r.rows_scanned),
-            "Breach": breach, "Disputed": breach and r.rule_id in disputed_ids,
-            "Since": _failing_since(past, r.rule_id) if breach else None,
+    el_rows = []
+    for _, r in _elements.iterrows():
+        cid = r["cde_id"]
+        el_score, target = el_scores.get(cid), el_target.get(cid)
+        is_assessed = targets.assessed(gaps_of[cid], el_score, target)
+        met = is_assessed and targets.meets(el_score, target)
+        coverage_word = theme.COVERAGE_GAP_LABEL.get(r["coverage_gap"], r["coverage_gap"])
+        if not is_assessed:
+            # Why there is no verdict, in the register's own word for it. A missing score
+            # is a dash, never a zero: nothing watching an element is a gap in the
+            # register, and zero percent would report it as a data defect.
+            line = (f"No check ran · {coverage_word}" if el_score is None else
+                    f"Not assessed · {coverage_word}" if target is not None else
+                    f"No target declared · {coverage_word}")
+        elif met:
+            line = f"Meets target · {_target_text(target)}"
+        else:
+            line = (f"{_pts(targets.shortfall(el_score, target))} below target · "
+                    f"{_target_text(target)}")
+        el_rows.append({
+            "key": cid, "Element": r["cde_name"], "Criticality": r["criticality"],
+            "Kind": theme.data_class_label(r["data_class"]), "Coverage": coverage_word,
+            "Score": el_score, "Target": target, "Assessed": is_assessed, "Met": met,
+            "Line": line, "Change": _change_words(el_score, el_before.get(cid)),
+            "Colour": UNASSESSED if not is_assessed else MET if met else BELOW,
+            "_order": ((0, -targets.shortfall(el_score, target), r["cde_name"])
+                       if is_assessed else
+                       (1, _crit_rank.get(r["criticality"], 9),
+                        101.0 if el_score is None else el_score, r["cde_name"])),
         })
-    return sorted(rows, key=lambda c: (not c["Breach"], -c["Bad"], c["Check"]))
+    el_rows.sort(key=lambda row: row["_order"])
+    n_below = sum(row["Assessed"] and not row["Met"] for row in el_rows)
+    n_met = sum(row["Met"] for row in el_rows)
 
-
-def _check_cells(row) -> str:
-    colour = (UNASSESSED if row["Disputed"] else BELOW if row["Breach"] else MET)
-    figure = (f'{_pct(row["Rate"])}'
-              + (f'<span class="of"> / {_target_text(row["Target"])}</span>'
-                 if row["Target"] is not None else ""))
-    return _row_markup(
-        row["Check"], figure,
-        BELOW if colour == BELOW else theme.NEUTRAL["text"],
-        theme.target_bar(row["Rate"], row["Target"], colour),
-        f"{row['Bad']:,} / {row['Of']:,} failing rows"
-        + (f" · since {row['Since']}" if row["Since"] else ""),
-        "Rule scope disputed" if row["Disputed"] else
-        "Below target" if row["Breach"] else "Meets target", compact=True)
-
-
-def _check_tip(row) -> list:
-    spec = DIMENSIONS.get(row["Dimension"])
-    return [row["Check"], (row["Where"], "mono"),
-            f"{row['Dimension']} — {spec['short']}" if spec else row["Dimension"]]
-
-
-def _problem_rows(rule_ids: set) -> list[dict]:
-    """The problems carrying these rules' failing checks — this page's way into
-    Triage for one element. One row per problem, however many of the element's
-    checks it holds, titled by `components.problem_title` so a problem has the same
-    name here as on the queue and on its own page."""
-    mine = {}
-    for rule_id in sorted(rule_ids & failing_ids):
-        if rule_id in cohort_of:
-            mine.setdefault(cohort_of[rule_id], []).append(rule_id)
-    state_of = current.set_index("cohort_id")
-    rows = []
-    for cohort_id, held in mine.items():
-        cohort = all_cohorts[all_cohorts["cohort_id"] == cohort_id].iloc[0]
-        elements, _ = components.cohort_elements(cohort["member_rule_ids"], cde_cov)
-        state = state_of.loc[cohort_id] if cohort_id in state_of.index else None
-        waiting = components.waiting_on(state) if state is not None else "\u2014"
-        rows.append({
-            "cohort_id": cohort_id,
-            "Problem": components.problem_title(cohort, elements, registry),
-            "State": None if state is None else state["lifecycle_state"],
-            "Line": f"{len(held)} of this element's failing "
-                    f"{'check' if len(held) == 1 else 'checks'}"
-                    + (f" · waiting on {waiting}" if waiting != "\u2014" else ""),
-            "Raised": cohort["raised_ts"],
+    # Conditional, and normally absent: every rule names its element. It stays for a
+    # registry that predates that rule or a run that carried a check whose element has
+    # since been retired.
+    extra_rows = []
+    if unattached_ids:
+        extra_rows.append({
+            "key": NONE_SCOPE, "Element": UNATTACHED, "Criticality": None, "Kind": "",
+            "Coverage": "", "Score": None, "Target": None, "Assessed": False, "Met": False,
+            "Line": f"{len(unattached_ids & failing_ids)} of {len(unattached_ids)} failing "
+                    "· not scored",
+            "Change": "", "Colour": UNASSESSED,
         })
-    return sorted(rows, key=lambda row: row["Raised"], reverse=True)
+
+    scope = st.session_state.get("_elem_scope")
+    if scope not in {row["key"] for row in el_rows + extra_rows}:
+        scope = el_rows[0]["key"]
 
 
-def _problem_cells(row) -> str:
-    return (
-        '<span class="stack">'
-        f'<span class="t1 wrap">{html.escape(str(row["Problem"]))}</span>'
-        f'<span class="t2 sans">{html.escape(row["Line"])}</span></span>'
-        + (f'<span>{theme.state_badge(row["State"])}</span>' if row["State"] else "<span></span>")
-        + f'<span class="opn">{theme.icon("arrow_right", 15)}</span>'
-    )
+    def _el_cells(row) -> str:
+        dot = ""
+        if row["Criticality"]:
+            tone = theme.CRITICALITY_TONE.get(row["Criticality"], "neutral")
+            dot = f'<i class="dq-eldot" style="background:{theme.TONE[tone]["fg"]}"></i>'
+        # Red for a score under its target and for nothing else. A met target and an
+        # unassessed score both print in ink; the bar and the line under it tell them
+        # apart.
+        figure_colour = BELOW if row["Colour"] == BELOW else (
+            theme.NEUTRAL["text"] if row["Assessed"] else theme.NEUTRAL["text_2"])
+        return _row_markup(
+            row["Element"], "—" if row["Score"] is None else _pct(row["Score"]),
+            figure_colour, theme.target_bar(row["Score"], row["Target"], row["Colour"]),
+            row["Line"], row["Change"], dot)
 
 
-checks = _check_rows(scope_rules)
-problems = _problem_rows(scope_rules)
+    def _el_tip(row) -> list:
+        if not row["Criticality"]:
+            return [row["Element"], row["Line"]]
+        cols = columns_of.get(row["key"], [])
+        return [row["Element"],
+                f"{str(row['Criticality']).capitalize()} criticality · {row['Kind']} · "
+                f"{row['Coverage']}",
+                (" · ".join(cols), "mono") if cols else None]
 
-with right, st.container(key="dq_elpane"):
-    if scope == NONE_SCOPE:
-        badges = theme.badge("not scored", "neutral")
-        where, hist, note = f"{len(unattached_ids)} checks", [], \
-            "Not counted in the quality score."
-    else:
-        er = _elements[_elements["cde_id"] == scope].iloc[0]
-        badges = (theme.criticality_badge(er["criticality"])
-                  + theme.badge(theme.data_class_label(er["data_class"]), "neutral")
-                  + theme.coverage_badge(er["coverage_gap"])
-                  + (theme.badge("PII", "high", "shield") if er["pii"] else ""))
-        cols = columns_of.get(scope, [])
-        where = " · ".join(cols[:3]) + (f" + {len(cols) - 3} more" if len(cols) > 3 else "")
-        hist = _in_window(_run_index(in_domain[in_domain["rule_id"].isin(scope_rules)])) \
-            if scope_rules else []
-        bad = sum(c["Bad"] for c in checks)
-        failing = sum(c["Breach"] for c in checks)
-        if not sel["Assessed"]:
-            # The register's own account of why this score carries no verdict.
-            note = theme.COVERAGE_GAP_MEANING.get(er["coverage_gap"], "")
-        elif sel["Met"]:
-            note = (f"<b>Meets its {_pct(sel['Target'])} target.</b> "
-                    + (f"{bad:,} {'row still fails' if bad == 1 else 'rows still fail'} "
-                       "a check; passing the threshold does not mean zero defects."
-                       if bad else "No row failed a check on this run."))
+
+    # Keyed so theme.py can let the two cards wrap: side by side on a narrow page they
+    # cut every element and check name to a few letters.
+    with st.container(key="dq_elsplit"):
+        left, right = st.columns([1, 1.5], gap="medium")
+
+    with left, st.container(key="dq_elcard"):
+        st.markdown(
+            '<div class="dq-elcard-hd"><div class="t">Critical data elements'
+            + theme.hint(
+                "A score is read against its target only where something validates the "
+                "element's values and no rule on it contradicts the register's scope. "
+                "An element nothing validates can score 100% on a presence check, and a "
+                "scope mismatch scores low because of the rule, not the data — both "
+                "keep their figure, in grey, and are counted as unassessed.", side="right")
+            + "</div>"
+            f'<div class="q">{n_below} below target · {n_met} meeting target · '
+            f"{len(el_rows) - n_below - n_met} unassessed</div></div>",
+            unsafe_allow_html=True,
+        )
+        # Five by default: the list is sorted so that the top of it is the answer to
+        # "where do I look first", and twenty rows of mostly-fine is how that answer
+        # gets scrolled past. Everything is one click away, and counted on the label.
+        st.session_state.setdefault("_elist_show", "priority")
+        n_priority = min(PRIORITY, len(el_rows))
+        show = st.segmented_control(
+            "Elements shown", ["priority", "all"], key="_elist_show",
+            label_visibility="collapsed",
+            format_func=lambda v: (f"Priority {n_priority}" if v == "priority"
+                                   else f"All {len(el_rows)}"))
+        listed = el_rows + extra_rows if show == "all" else el_rows[:n_priority]
+        # Five rows high in both modes: `All` scrolls inside the same box `Priority`
+        # fills, so switching between them does not move the card's floor — or the
+        # floor of the card beside it.
+        with st.container(height=LIST_BODY if len(listed) > n_priority else "content",
+                          key="dqrows_elist"):
+            components.clickable_rows(
+                listed, ROW_GRID, _el_cells, "el", "key",
+                lambda row: f"Show {row['Element']}", picked=scope, tip=_el_tip,
+                # A check picked under the old element is not in the new one's breakdown,
+                # and a drawer left open over a list that no longer shows its check reads
+                # as a bug.
+                on_pick=components.pick_into("_elem_scope", clear=("_check_pick",)))
+        st.markdown(
+            '<div class="dq-elfoot"><span>Bars: 0–100%<i></i>Target</span>'
+            "<span>Largest target gap first</span></div>",
+            unsafe_allow_html=True)
+
+    # --- The right card: one element against its target, and its checks ------------
+
+    sel = next(row for row in el_rows + extra_rows if row["key"] == scope)
+    scope_rules = unattached_ids if scope == NONE_SCOPE else rules_of.get(scope, set())
+    picked_rule = st.session_state.get("_check_pick")
+
+
+    def _check_rows(rule_ids: set) -> list[dict]:
+        """Every check that ran on these rules, failing first and worst first within
+        that. Passing checks are listed too: an element's score is all of its checks, and
+        a breakdown showing only the failures cannot be added back up to it."""
+        past = in_domain[["rule_id", "run_ts", "status"]]
+        rows = []
+        for r in ran_now[ran_now["rule_id"].isin(rule_ids)].itertuples():
+            breach = r.status == "breach"
+            rows.append({
+                "Rule id": r.rule_id, "Check": r.rule_name, "Dimension": r.Dimension,
+                "Where": _where(r, monitored_tables),
+                "Rate": 100.0 - float(r.violation_pct),
+                "Target": None if pd.isna(r.threshold_pct) else 100.0 - float(r.threshold_pct),
+                "Bad": int(r.violation_count), "Of": int(r.rows_scanned),
+                "Breach": breach, "Disputed": breach and r.rule_id in disputed_ids,
+                "Since": _failing_since(past, r.rule_id) if breach else None,
+            })
+        return sorted(rows, key=lambda c: (not c["Breach"], -c["Bad"], c["Check"]))
+
+
+    def _check_cells(row) -> str:
+        colour = (UNASSESSED if row["Disputed"] else BELOW if row["Breach"] else MET)
+        figure = (f'{_pct(row["Rate"])}'
+                  + (f'<span class="of"> / {_target_text(row["Target"])}</span>'
+                     if row["Target"] is not None else ""))
+        return _row_markup(
+            row["Check"], figure,
+            BELOW if colour == BELOW else theme.NEUTRAL["text"],
+            theme.target_bar(row["Rate"], row["Target"], colour),
+            f"{row['Bad']:,} / {row['Of']:,} failing rows"
+            + (f" · since {row['Since']}" if row["Since"] else ""),
+            "Rule scope disputed" if row["Disputed"] else
+            "Below target" if row["Breach"] else "Meets target", compact=True)
+
+
+    def _check_tip(row) -> list:
+        spec = DIMENSIONS.get(row["Dimension"])
+        return [row["Check"], (row["Where"], "mono"),
+                f"{row['Dimension']} — {spec['short']}" if spec else row["Dimension"]]
+
+
+    def _problem_rows(rule_ids: set) -> list[dict]:
+        """The problems carrying these rules' failing checks — this page's way into
+        Triage for one element. One row per problem, however many of the element's
+        checks it holds, titled by `components.problem_title` so a problem has the same
+        name here as on the queue and on its own page."""
+        mine = {}
+        for rule_id in sorted(rule_ids & failing_ids):
+            if rule_id in cohort_of:
+                mine.setdefault(cohort_of[rule_id], []).append(rule_id)
+        state_of = current.set_index("cohort_id")
+        rows = []
+        for cohort_id, held in mine.items():
+            cohort = all_cohorts[all_cohorts["cohort_id"] == cohort_id].iloc[0]
+            elements, _ = components.cohort_elements(cohort["member_rule_ids"], cde_cov)
+            state = state_of.loc[cohort_id] if cohort_id in state_of.index else None
+            waiting = components.waiting_on(state) if state is not None else "\u2014"
+            rows.append({
+                "cohort_id": cohort_id,
+                "Problem": components.problem_title(cohort, elements, registry),
+                "State": None if state is None else state["lifecycle_state"],
+                "Line": f"{len(held)} of this element's failing "
+                        f"{'check' if len(held) == 1 else 'checks'}"
+                        + (f" · waiting on {waiting}" if waiting != "\u2014" else ""),
+                "Raised": cohort["raised_ts"],
+            })
+        return sorted(rows, key=lambda row: row["Raised"], reverse=True)
+
+
+    def _problem_cells(row) -> str:
+        return (
+            '<span class="stack">'
+            f'<span class="t1 wrap">{html.escape(str(row["Problem"]))}</span>'
+            f'<span class="t2 sans">{html.escape(row["Line"])}</span></span>'
+            + (f'<span>{theme.state_badge(row["State"])}</span>' if row["State"] else "<span></span>")
+            + f'<span class="opn">{theme.icon("arrow_right", 15)}</span>'
+        )
+
+
+    checks = _check_rows(scope_rules)
+    problems = _problem_rows(scope_rules)
+
+    with right, st.container(key="dq_elpane"):
+        if scope == NONE_SCOPE:
+            badges = theme.badge("not scored", "neutral")
+            where, hist, note = f"{len(unattached_ids)} checks", [], \
+                "Not counted in the quality score."
         else:
-            # Failures, not rows: one row can fail more than one check, and
-            # `check_run` keeps a count per check and no keys to de-duplicate on.
-            note = (f"<b>{_pts(targets.shortfall(sel['Score'], sel['Target']))} below "
-                    f"its {_pct(sel['Target'])} target.</b> {bad:,} failures across "
-                    f"{failing} of {len(checks)} checks.")
+            er = _elements[_elements["cde_id"] == scope].iloc[0]
+            badges = (theme.criticality_badge(er["criticality"])
+                      + theme.badge(theme.data_class_label(er["data_class"]), "neutral")
+                      + theme.coverage_badge(er["coverage_gap"])
+                      + (theme.badge("PII", "high", "shield") if er["pii"] else ""))
+            cols = columns_of.get(scope, [])
+            where = " · ".join(cols[:3]) + (f" + {len(cols) - 3} more" if len(cols) > 3 else "")
+            hist = _in_window(_run_index(in_domain[in_domain["rule_id"].isin(scope_rules)])) \
+                if scope_rules else []
+            bad = sum(c["Bad"] for c in checks)
+            failing = sum(c["Breach"] for c in checks)
+            if not sel["Assessed"]:
+                # The register's own account of why this score carries no verdict.
+                note = theme.COVERAGE_GAP_MEANING.get(er["coverage_gap"], "")
+            elif sel["Met"]:
+                note = (f"<b>Meets its {_pct(sel['Target'])} target.</b> "
+                        + (f"{bad:,} {'row still fails' if bad == 1 else 'rows still fail'} "
+                           "a check; passing the threshold does not mean zero defects."
+                           if bad else "No row failed a check on this run."))
+            else:
+                # Failures, not rows: one row can fail more than one check, and
+                # `check_run` keeps a count per check and no keys to de-duplicate on.
+                note = (f"<b>{_pts(targets.shortfall(sel['Score'], sel['Target']))} below "
+                        f"its {_pct(sel['Target'])} target.</b> {bad:,} failures across "
+                        f"{failing} of {len(checks)} checks.")
 
-    verdict = ("" if sel["Target"] is None else
-               f'<span>Target {_target_text(sel["Target"])}</span>'
-               + ('<span>Not assessed</span>' if not sel["Assessed"] else
-                  '<span>Meets target</span>' if sel["Met"] else
-                  f'<span class="dq-below">'
-                  f'{_pts(targets.shortfall(sel["Score"], sel["Target"]))} below</span>'))
-    change = _change_words(hist[-1][1], hist[-2][1]) if len(hist) > 1 else ""
-    # The target is drawn only where the score is assessed against it. A dashed line
-    # forty-nine points above a scope mismatch's series is "below target" said with a
-    # ruler, and the header has just declined to say it in words.
-    drawn_target = sel["Target"] if sel["Assessed"] else None
+        verdict = ("" if sel["Target"] is None else
+                   f'<span>Target {_target_text(sel["Target"])}</span>'
+                   + ('<span>Not assessed</span>' if not sel["Assessed"] else
+                      '<span>Meets target</span>' if sel["Met"] else
+                      f'<span class="dq-below">'
+                      f'{_pts(targets.shortfall(sel["Score"], sel["Target"]))} below</span>'))
+        change = _change_words(hist[-1][1], hist[-2][1]) if len(hist) > 1 else ""
+        # The target is drawn only where the score is assessed against it. A dashed line
+        # forty-nine points above a scope mismatch's series is "below target" said with a
+        # ruler, and the header has just declined to say it in words.
+        drawn_target = sel["Target"] if sel["Assessed"] else None
 
-    # Above the tabs, on all four: which element, and its figure against its target.
-    st.markdown(
-        '<div class="dq-elhd"><div class="k">Selected element</div>'
-        f'<div class="n">{html.escape(sel["Element"])}</div>'
-        f'<div class="b">{badges}</div>'
-        f'<div class="w">{html.escape(where)}</div>'
-        + ('<div class="sr">'
-           f'<span class="s" style="color:'
-           f'{BELOW if sel["Colour"] == BELOW else theme.NEUTRAL["text"]}">'
-           f'{_pct(sel["Score"])}</span>{verdict}</div>'
-           if sel["Score"] is not None else
-           '<div class="sr"><span class="s">\u2014</span><span>No check ran</span></div>')
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+        # Above the tabs, on all four: which element, and its figure against its target.
+        st.markdown(
+            '<div class="dq-elhd"><div class="k">Selected element</div>'
+            f'<div class="n">{html.escape(sel["Element"])}</div>'
+            f'<div class="b">{badges}</div>'
+            f'<div class="w">{html.escape(where)}</div>'
+            + ('<div class="sr">'
+               f'<span class="s" style="color:'
+               f'{BELOW if sel["Colour"] == BELOW else theme.NEUTRAL["text"]}">'
+               f'{_pct(sel["Score"])}</span>{verdict}</div>'
+               if sel["Score"] is not None else
+               '<div class="sr"><span class="s">\u2014</span><span>No check ran</span></div>')
+            + "</div>",
+            unsafe_allow_html=True,
+        )
 
-    # Four tabs, each labelled with what is behind it, so the card is one height
-    # whatever the element holds. Until 2026-10-01 these were stacked, and an element
-    # with nine checks ran the card to three times the height of the list beside it.
-    samples = adapter.get_violation_samples()
-    with_rows = [c for c in checks if c["Bad"]]
-    captured = int(((samples["rule_id"].isin({c["Rule id"] for c in with_rows}))
-                    & (samples["run_id"] == latest_run_id)).sum())
-    tab_overview, tab_checks, tab_rows, tab_triage = st.tabs([
-        "Overview",
-        f"Checks · {len(checks)}" if checks else "Checks",
-        f"Sample rows · {captured:,}" if captured else "Sample rows",
-        f"Triage · {len(problems)}" if problems else "Triage",
-    ])
+        # Four tabs, each labelled with what is behind it, so the card is one height
+        # whatever the element holds. Until 2026-10-01 these were stacked, and an element
+        # with nine checks ran the card to three times the height of the list beside it.
+        samples = adapter.get_violation_samples()
+        with_rows = [c for c in checks if c["Bad"]]
+        captured = int(((samples["rule_id"].isin({c["Rule id"] for c in with_rows}))
+                        & (samples["run_id"] == latest_run_id)).sum())
+        tab_overview, tab_checks, tab_rows, tab_triage = st.tabs([
+            "Overview",
+            f"Checks · {len(checks)}" if checks else "Checks",
+            f"Sample rows · {captured:,}" if captured else "Sample rows",
+            f"Triage · {len(problems)}" if problems else "Triage",
+        ])
 
-    with tab_overview, st.container(height=TAB_BODY, border=False, key="dq_eltab_overview"):
-        if len(hist) > 1 or note:
-            st.markdown(
-                '<div class="dq-elover">'
-                + (f'<div class="d">{change} since last run</div>' if change else "")
-                + ('<div><span class="dq-lg"><i></i>30-day trend'
-                   + ('<i class="dash"></i>Target' if drawn_target is not None else "")
-                   + "</span></div>" + _chart(hist, drawn_target, 580, 140)
-                   if len(hist) > 1 else "")
-                + (f'<div class="dq-elnote">{note}</div>' if note else "")
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-        if scope != NONE_SCOPE:
-            if st.button("Every binding and what checks it", key="_el_details",
-                         icon=":material/open_in_new:", type="tertiary"):
-                st.session_state["_cde_pick"] = scope
-                st.rerun()
+        with tab_overview, st.container(height=TAB_BODY, border=False, key="dq_eltab_overview"):
+            if len(hist) > 1 or note:
+                st.markdown(
+                    '<div class="dq-elover">'
+                    + (f'<div class="d">{change} since last run</div>' if change else "")
+                    + ('<div><span class="dq-lg"><i></i>30-day trend'
+                       + ('<i class="dash"></i>Target' if drawn_target is not None else "")
+                       + "</span></div>" + _chart(hist, drawn_target, 580, 140)
+                       if len(hist) > 1 else "")
+                    + (f'<div class="dq-elnote">{note}</div>' if note else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+            if scope != NONE_SCOPE:
+                st.button("Every binding and what checks it", key="_el_details",
+                          icon=":material/open_in_new:", type="tertiary",
+                          on_click=lambda: st.session_state.update(_cde_pick=scope))
 
-    with tab_checks:
-        if checks:
-            with st.container(height=TAB_BODY, border=False, key="dqrows_checks"):
-                got = components.clickable_rows(
-                    checks, ROW_GRID, _check_cells, "ck", "Rule id",
-                    lambda row: f"Open {row['Check']}", picked=picked_rule,
-                    tip=_check_tip)
-            # A rerun rather than reading `got` straight through: the row markup is
-            # written before the click is known, so the selected row's tint needs
-            # one more pass.
-            if got:
-                st.session_state["_check_pick"] = got
-                st.rerun()
-        else:
-            with st.container(height=TAB_BODY, border=False, key="dq_eltab_nochecks"):
-                st.caption("No active check ran on this element on the run shown.")
+        with tab_checks:
+            if checks:
+                with st.container(height=TAB_BODY, border=False, key="dqrows_checks"):
+                    components.clickable_rows(
+                        checks, ROW_GRID, _check_cells, "ck", "Rule id",
+                        lambda row: f"Open {row['Check']}", picked=picked_rule,
+                        tip=_check_tip, on_pick=components.pick_into("_check_pick"))
+            else:
+                with st.container(height=TAB_BODY, border=False, key="dq_eltab_nochecks"):
+                    st.caption("No active check ran on this element on the run shown.")
 
-    # The rows behind the counts, one check at a time: each check's sample has its
-    # own columns, and stacking nine tables is what the detail page stopped doing.
-    # The same rows, the same columns and the same cap as the check drawer — this
-    # tab does not widen the one PII surface, it gives it a second door.
-    with tab_rows, st.container(height=TAB_BODY, border=False, key="dq_eltab_rows"):
-        if not with_rows:
-            st.caption("No row failed a check on this element on the run shown.")
-        else:
-            by_id = {c["Rule id"]: c for c in with_rows}
-            shown_check = st.selectbox(
-                "Check", list(by_id), key=f"_rows_check_{scope}",
-                format_func=lambda i: f"{by_id[i]['Check']} · {by_id[i]['Bad']:,} failing")
-            _failed_rows(shown_check,
-                         tagged_now[tagged_now["rule_id"] == shown_check].iloc[0],
-                         samples, heading=False)
+        # The rows behind the counts, one check at a time: each check's sample has its
+        # own columns, and stacking nine tables is what the detail page stopped doing.
+        # The same rows, the same columns and the same cap as the check drawer — this
+        # tab does not widen the one PII surface, it gives it a second door.
+        with tab_rows, st.container(height=TAB_BODY, border=False, key="dq_eltab_rows"):
+            if not with_rows:
+                st.caption("No row failed a check on this element on the run shown.")
+            else:
+                by_id = {c["Rule id"]: c for c in with_rows}
+                shown_check = st.selectbox(
+                    "Check", list(by_id), key=f"_rows_check_{scope}",
+                    format_func=lambda i: f"{by_id[i]['Check']} · {by_id[i]['Bad']:,} failing")
+                _failed_rows(shown_check,
+                             tagged_now[tagged_now["rule_id"] == shown_check].iloc[0],
+                             samples, heading=False)
 
-    # A row here is a link, not a selection — it leaves the page — so it takes no
-    # `picked`.
-    with tab_triage:
-        if problems:
-            with st.container(height=TAB_BODY, border=False, key="dqrows_problems"):
-                got = components.clickable_rows(
-                    problems, "minmax(0,1fr) auto auto", _problem_cells, "pb",
-                    "cohort_id", lambda row: f"Open {row['Problem']} in Triage")
-            if got:
-                st.session_state["selected_cohort"] = got
-                st.switch_page("dq_app/ui/pages/triage_detail.py")
-        else:
-            with st.container(height=TAB_BODY, border=False, key="dq_eltab_notriage"):
-                st.caption(
-                    "No problem has been raised for this element's failing checks yet."
-                    if scope_rules & failing_ids else
-                    "Nothing on this element is failing, so there is no problem to open.")
+        # A row here is a link, not a selection — it leaves the page — so it takes no
+        # `picked`.
+        with tab_triage:
+            if problems:
+                with st.container(height=TAB_BODY, border=False, key="dqrows_problems"):
+                    got = components.clickable_rows(
+                        problems, "minmax(0,1fr) auto auto", _problem_cells, "pb",
+                        "cohort_id", lambda row: f"Open {row['Problem']} in Triage")
+                if got:
+                    st.session_state["selected_cohort"] = got
+                    st.switch_page("dq_app/ui/pages/triage_detail.py")
+            else:
+                with st.container(height=TAB_BODY, border=False, key="dq_eltab_notriage"):
+                    st.caption(
+                        "No problem has been raised for this element's failing checks yet."
+                        if scope_rules & failing_ids else
+                        "Nothing on this element is failing, so there is no problem to open.")
 
 
-# Held in session rather than read straight off the click, so the panel survives a
-# rerun the list did not cause — and so a link, or a test, can open a check without
-# clicking one. Any check that ran opens, whichever element is picked, so a test or a
-# link that names a check does not first have to pick its element.
-if picked_rule in ran_ids:
-    with st.container(key="dq_check_drawer"):
-        _check_panel(picked_rule, tagged_now, registry, samples, cde_cov, cohort_of,
-                     in_domain[["rule_id", "run_ts", "violation_count", "status"]])
-# The element drawer, and only when no check drawer is open — two fixed panels at the
-# same edge would stack on top of each other.
-elif st.session_state.get("_cde_pick"):
-    with st.container(key="dq_element_drawer"):
-        components.element_panel(cde_cov, registry, st.session_state["_cde_pick"],
-                                 pick_key="_cde_pick")
+    # Held in session rather than read straight off the click, so the panel survives a
+    # rerun the list did not cause — and so a link, or a test, can open a check without
+    # clicking one. Any check that ran opens, whichever element is picked, so a test or a
+    # link that names a check does not first have to pick its element.
+    if picked_rule in ran_ids:
+        with st.container(key="dq_check_drawer"):
+            _check_panel(picked_rule, tagged_now, registry, samples, cde_cov, cohort_of,
+                         in_domain[["rule_id", "run_ts", "violation_count", "status"]])
+    # The element drawer, and only when no check drawer is open — two fixed panels at the
+    # same edge would stack on top of each other.
+    elif st.session_state.get("_cde_pick"):
+        with st.container(key="dq_element_drawer"):
+            components.element_panel(cde_cov, registry, st.session_state["_cde_pick"],
+                                     pick_key="_cde_pick")
+
+
+_elements_and_pane()

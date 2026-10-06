@@ -608,6 +608,19 @@ decision. Reusing a connection saved much less than parallelism did, because war
 execution is 0.7–2s by itself, so the fresh-connection-per-statement rule stands. Add
 a cached read that pages share and it belongs in `_SHARED_READS`.
 
+**A click redraws its own card, not the page.** Two changes, 2026-10-06, measured on
+the local fixture: a row pick is an `on_click` (`clickable_rows(on_pick=
+components.pick_into(...))`), not "read the return value, set state, `st.rerun()`",
+which ran the page twice per click; and the master–detail halves are `@st.fragment`s —
+the Scorecard's element list, pane and drawers, the Rules page's three cards, the Tables
+detail's rule list and pane, and the problem page's Evidence tab. Scorecard 610 →
+360 ms per pick, Tables detail 590 → 305, Evidence 515 → 290, Rules 470 → 330. **Inside
+a fragment, a selection must be a callback**: `st.rerun()` there is a full-page run and
+undoes the point. A write is the exception and wants the full run, since what it changed
+is folded outside the fragment — the promotion dialog keeps its `st.rerun()` for that.
+Code above a fragment must not read a selection made inside one, or it shows the old
+one until the next full run.
+
 **Unity Catalog hands back tz-aware timestamps and the fixture's parquet is naive.**
 `databricks_source._naive_timestamps` converts to UTC and drops the offset on every
 read, so the two sources stay interchangeable. Without it the detail page's age line

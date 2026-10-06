@@ -162,189 +162,198 @@ summary.markdown(
     unsafe_allow_html=True,
 )
 
-# --- Applied rules, and the one picked -------------------------------------------
 
-# The list page's "Review critical rules" asks for the breaching view; a widget's key
-# cannot be set from another page, so it leaves a note and this applies it once.
-if st.session_state.pop("_tm_rule_filter_saved", None) == "breaching":
-    st.session_state["_tm_rule_filter"] = "breaching"
-st.session_state.setdefault("_tm_rule_filter", "breaching" if breaching else "all")
+# The rule list and the pane beside it are one fragment: picking a rule, the
+# Breaching / All toggle, the search and the tabs redraw these two cards and not the
+# header, the window control or the figures above, none of which reads a selection
+# made here. The window control is outside, so changing it is a full run.
 
-with st.container(key="dq_elsplit"):
-    left, right = st.columns([1, 1.3], gap="medium")
 
-with left, st.container(key="dq_elcard"):
-    st.markdown(
-        f'<div class="dq-elcard-hd"><div class="t">Applied rules ({len(rules)})</div></div>',
-        unsafe_allow_html=True)
-    which = st.segmented_control(
-        "Rules shown", ["breaching", "all"], key="_tm_rule_filter",
-        label_visibility="collapsed",
-        format_func=lambda v: f"Breaching {len(breaching)}" if v == "breaching"
-        else f"All {len(rules)}") or "all"
-    term = st.text_input("Search rules", placeholder="Search rules or attributes",
-                         label_visibility="collapsed", icon=":material/search:",
-                         key=f"_tm_rule_search_{selected}").strip().lower()
-    listed = breaching if which == "breaching" else rules
-    if term:
-        listed = [r for r in listed
-                  if term in f"{r['Rule']} {r['Column']} {r['key']}".lower()]
+@st.fragment
+def _rules_and_pane() -> None:
+    # --- Applied rules, and the one picked -------------------------------------------
 
-    pick = st.session_state.get("_tm_rule_pick")
-    if pick not in {r["key"] for r in rules}:
-        pick = (listed or rules)[0]["key"] if (listed or rules) else None
+    # The list page's "Review critical rules" asks for the breaching view; a widget's key
+    # cannot be set from another page, so it leaves a note and this applies it once.
+    if st.session_state.pop("_tm_rule_filter_saved", None) == "breaching":
+        st.session_state["_tm_rule_filter"] = "breaching"
+    st.session_state.setdefault("_tm_rule_filter", "breaching" if breaching else "all")
 
-    def _colour(r) -> str:
-        return UNASSESSED if r["Disputed"] else BELOW if r["Breach"] else MET
+    with st.container(key="dq_elsplit"):
+        left, right = st.columns([1, 1.3], gap="medium")
 
-    def _cells(r) -> str:
-        colour = _colour(r)
-        return (
-            '<span class="dq-el">'
-            f'<span class="l1"><span class="nm">{html.escape(r["Rule"])}</span>'
-            f'<span class="sc" style="color:{BELOW if colour == BELOW else theme.NEUTRAL["text"]}">'
-            f'{_pct(r["Rate"])}</span></span>'
-            + theme.target_bar(r["Rate"], r["Target"], colour)
-            + '<span class="l2">'
-            f'<span>{html.escape(r["Column"])} · {theme.severity_text(r["Severity"])}</span>'
-            f'<span>{r["Findings"]:,} findings · Limit {_pct(r["Limit"])}</span>'
-            "</span></span>"
-        )
-
-    def _tip(r) -> list:
-        return [r["Rule"], (r["key"], "mono"),
-                "Rule scope disputed by the CDE register" if r["Disputed"] else
-                "Over its limit" if r["Breach"] else "Within its limit"]
-
-    if listed:
-        with st.container(height=LIST_BODY if len(listed) > 5 else "content",
-                          key="dqrows_elist"):
-            got = components.clickable_rows(listed, "minmax(0,1fr)", _cells, "tr", "key",
-                                            lambda r: f"Show {r['Rule']}", picked=pick,
-                                            tip=_tip)
-        if got:
-            st.session_state["_tm_rule_pick"] = got
-            st.rerun()
-    else:
-        st.markdown('<div class="dq-tmempty">No rule matches.</div>',
-                    unsafe_allow_html=True)
-    st.markdown(
-        '<div class="dq-elfoot">'
-        f"<span>Showing {len(listed)} of "
-        f"{len(breaching) if which == 'breaching' else len(rules)}"
-        f"{' breaching' if which == 'breaching' else ''} rules</span>"
-        "<span>Bars: pass rate<i></i>Limit</span></div>",
-        unsafe_allow_html=True)
-
-sel = next((r for r in rules if r["key"] == pick), None)
-
-with right, st.container(key="dq_elpane"):
-    if sel is None:
-        st.caption("No active rule ran on this table on the latest run.")
-        st.stop()
-
-    reg = registry[registry["rule_id"] == sel["key"]]
-    reg = reg.iloc[0] if not reg.empty else None
-    colour = _colour(sel)
-    shortfall = sel["Target"] - sel["Rate"]
-    state = ("Disputed scope", "neutral") if sel["Disputed"] else \
-        ("Failing", "critical") if sel["Breach"] else ("Passing", "success")
-    verdict = (f"Target {_pct(sel['Target'])}"
-               + (" · not assessed: the rule's scope is disputed" if sel["Disputed"] else
-                  f' · <span class="dq-below">{_pts(shortfall)} below</span>'
-                  if sel["Breach"] else " · within its limit"))
-    st.markdown(
-        '<div class="dq-elhd"><div class="k">Selected rule</div>'
-        f'<div class="n">{html.escape(sel["Rule"])}</div>'
-        f'<div class="b">{theme.badge(state[0], state[1])}'
-        f'{theme.severity_badge(sel["Severity"])}</div>'
-        f'<div class="w">{html.escape(sel["Column"])} · {html.escape(sel["key"])}</div>'
-        '<div class="sr">'
-        f'<span class="s" style="color:{BELOW if colour == BELOW else theme.NEUTRAL["text"]}">'
-        f'{_pct(sel["Rate"])}</span><span>Pass rate</span></div>'
-        f'<div class="dq-tmverdict">{verdict}</div></div>',
-        unsafe_allow_html=True,
-    )
-
-    samples = adapter.get_violation_samples()
-    captured = int(((samples["rule_id"] == sel["key"])
-                    & (samples["run_id"] == sel["run_id"])).sum())
-    labels = ["Overview",
-              f"Sample rows · {captured:,}" if captured else "Sample rows",
-              "History"]
-    tab_key = f"_tm_tab_{sel['key']}"
-
-    def _to_rows(label=labels[1], key=tab_key) -> None:
-        st.session_state[key] = label
-
-    tab_over, tab_rows, tab_hist = st.tabs(labels, key=tab_key, on_change="rerun")
-    rule_runs = mine[(mine["rule_id"] == sel["key"]) & mine["status"].isin(monitoring.RAISED)]
-
-    with tab_over, st.container(height=TAB_BODY, border=False, key="dq_eltab_overview"):
-        hist = monitoring.history(rule_runs, window,
-                                  lambda g: 100.0 - float(g["violation_pct"].iloc[0]))
+    with left, st.container(key="dq_elcard"):
         st.markdown(
-            '<div class="dq-elover">'
-            '<div><span class="dq-lg"><i></i>Pass rate'
-            + ('<i class="dash"></i>Limit' if not sel["Disputed"] else "")
-            + "</span></div>"
-            + theme.target_chart(hist, None if sel["Disputed"] else sel["Target"], 580, 140)
-            + '<div class="dq-tmrates">'
-            f'<div><span>Failure rate</span><b>{_pct(sel["Failure"])}</b></div>'
-            f'<div><span>Allowed failure rate</span><b>{_pct(sel["Limit"])}</b></div>'
-            "</div></div>",
+            f'<div class="dq-elcard-hd"><div class="t">Applied rules ({len(rules)})</div></div>',
+            unsafe_allow_html=True)
+        which = st.segmented_control(
+            "Rules shown", ["breaching", "all"], key="_tm_rule_filter",
+            label_visibility="collapsed",
+            format_func=lambda v: f"Breaching {len(breaching)}" if v == "breaching"
+            else f"All {len(rules)}") or "all"
+        term = st.text_input("Search rules", placeholder="Search rules or attributes",
+                             label_visibility="collapsed", icon=":material/search:",
+                             key=f"_tm_rule_search_{selected}").strip().lower()
+        listed = breaching if which == "breaching" else rules
+        if term:
+            listed = [r for r in listed
+                      if term in f"{r['Rule']} {r['Column']} {r['key']}".lower()]
+
+        pick = st.session_state.get("_tm_rule_pick")
+        if pick not in {r["key"] for r in rules}:
+            pick = (listed or rules)[0]["key"] if (listed or rules) else None
+
+        def _colour(r) -> str:
+            return UNASSESSED if r["Disputed"] else BELOW if r["Breach"] else MET
+
+        def _cells(r) -> str:
+            colour = _colour(r)
+            return (
+                '<span class="dq-el">'
+                f'<span class="l1"><span class="nm">{html.escape(r["Rule"])}</span>'
+                f'<span class="sc" style="color:{BELOW if colour == BELOW else theme.NEUTRAL["text"]}">'
+                f'{_pct(r["Rate"])}</span></span>'
+                + theme.target_bar(r["Rate"], r["Target"], colour)
+                + '<span class="l2">'
+                f'<span>{html.escape(r["Column"])} · {theme.severity_text(r["Severity"])}</span>'
+                f'<span>{r["Findings"]:,} findings · Limit {_pct(r["Limit"])}</span>'
+                "</span></span>"
+            )
+
+        def _tip(r) -> list:
+            return [r["Rule"], (r["key"], "mono"),
+                    "Rule scope disputed by the CDE register" if r["Disputed"] else
+                    "Over its limit" if r["Breach"] else "Within its limit"]
+
+        if listed:
+            with st.container(height=LIST_BODY if len(listed) > 5 else "content",
+                              key="dqrows_elist"):
+                components.clickable_rows(listed, "minmax(0,1fr)", _cells, "tr", "key",
+                                          lambda r: f"Show {r['Rule']}", picked=pick, tip=_tip,
+                                          on_pick=components.pick_into("_tm_rule_pick"))
+        else:
+            st.markdown('<div class="dq-tmempty">No rule matches.</div>',
+                        unsafe_allow_html=True)
+        st.markdown(
+            '<div class="dq-elfoot">'
+            f"<span>Showing {len(listed)} of "
+            f"{len(breaching) if which == 'breaching' else len(rules)}"
+            f"{' breaching' if which == 'breaching' else ''} rules</span>"
+            "<span>Bars: pass rate<i></i>Limit</span></div>",
+            unsafe_allow_html=True)
+
+    sel = next((r for r in rules if r["key"] == pick), None)
+
+    with right, st.container(key="dq_elpane"):
+        if sel is None:
+            st.caption("No active rule ran on this table on the latest run.")
+            st.stop()
+
+        reg = registry[registry["rule_id"] == sel["key"]]
+        reg = reg.iloc[0] if not reg.empty else None
+        colour = _colour(sel)
+        shortfall = sel["Target"] - sel["Rate"]
+        state = ("Disputed scope", "neutral") if sel["Disputed"] else \
+            ("Failing", "critical") if sel["Breach"] else ("Passing", "success")
+        verdict = (f"Target {_pct(sel['Target'])}"
+                   + (" · not assessed: the rule's scope is disputed" if sel["Disputed"] else
+                      f' · <span class="dq-below">{_pts(shortfall)} below</span>'
+                      if sel["Breach"] else " · within its limit"))
+        st.markdown(
+            '<div class="dq-elhd"><div class="k">Selected rule</div>'
+            f'<div class="n">{html.escape(sel["Rule"])}</div>'
+            f'<div class="b">{theme.badge(state[0], state[1])}'
+            f'{theme.severity_badge(sel["Severity"])}</div>'
+            f'<div class="w">{html.escape(sel["Column"])} · {html.escape(sel["key"])}</div>'
+            '<div class="sr">'
+            f'<span class="s" style="color:{BELOW if colour == BELOW else theme.NEUTRAL["text"]}">'
+            f'{_pct(sel["Rate"])}</span><span>Pass rate</span></div>'
+            f'<div class="dq-tmverdict">{verdict}</div></div>',
             unsafe_allow_html=True,
         )
-        if sel["Findings"]:
-            with st.container(key="dq_tmalert", horizontal=True,
-                              vertical_alignment="center"):
-                st.markdown(
-                    f'<div class="dq-tmalert{" grey" if sel["Disputed"] else ""}">'
-                    + theme.icon("alert", 15)
-                    + f'<span>{sel["Findings"]:,} of {sel["Rows"]:,} evaluated rows fail '
-                    "this rule."
-                    + (" The CDE register says the rule measures rows it should not."
-                       if sel["Disputed"] else "")
-                    + "</span></div>",
-                    unsafe_allow_html=True)
-                st.button("Investigate rows", key="_tm_investigate",
-                          icon=":material/arrow_forward:", icon_position="right",
-                          on_click=_to_rows)
-        else:
-            st.caption("No row failed this rule on the latest run.")
 
-        cohort_id = metrics.cohort_for_rules(adapter.get_cohorts(), [sel["key"]]).get(sel["key"])
-        if sel["Breach"] and cohort_id:
-            if st.button(f"Open the problem it belongs to · {cohort_id[:8]}",
-                         type="tertiary", key="_tm_to_triage",
-                         icon=":material/open_in_new:"):
-                st.session_state["selected_cohort"] = cohort_id
-                st.switch_page("dq_app/ui/pages/triage_detail.py")
+        samples = adapter.get_violation_samples()
+        captured = int(((samples["rule_id"] == sel["key"])
+                        & (samples["run_id"] == sel["run_id"])).sum())
+        labels = ["Overview",
+                  f"Sample rows · {captured:,}" if captured else "Sample rows",
+                  "History"]
+        tab_key = f"_tm_tab_{sel['key']}"
 
-    with tab_rows, st.container(height=TAB_BODY, border=False, key="dq_eltab_rows"):
-        if sel["Findings"]:
-            components.failed_rows(sel["key"], sel, samples, heading=False)
-        else:
-            st.caption("No row failed this rule on the latest run.")
+        def _to_rows(label=labels[1], key=tab_key) -> None:
+            st.session_state[key] = label
 
-    with tab_hist, st.container(height=TAB_BODY, border=False, key="dq_eltab_hist"):
-        if reg is not None:
-            st.markdown(f'<div class="dq-expr">{html.escape(str(reg["rule_expr"]))}</div>'
-                        + (f'<div class="dq-expr scope">scoped to '
-                           f'{html.escape(str(reg["scope_filter"]))}</div>'
-                           if components.opt(reg["scope_filter"]) else ""),
+        tab_over, tab_rows, tab_hist = st.tabs(labels, key=tab_key, on_change="rerun")
+        rule_runs = mine[(mine["rule_id"] == sel["key"]) & mine["status"].isin(monitoring.RAISED)]
+
+        with tab_over, st.container(height=TAB_BODY, border=False, key="dq_eltab_overview"):
+            hist = monitoring.history(rule_runs, window,
+                                      lambda g: 100.0 - float(g["violation_pct"].iloc[0]))
+            st.markdown(
+                '<div class="dq-elover">'
+                '<div><span class="dq-lg"><i></i>Pass rate'
+                + ('<i class="dash"></i>Limit' if not sel["Disputed"] else "")
+                + "</span></div>"
+                + theme.target_chart(hist, None if sel["Disputed"] else sel["Target"], 580, 140)
+                + '<div class="dq-tmrates">'
+                f'<div><span>Failure rate</span><b>{_pct(sel["Failure"])}</b></div>'
+                f'<div><span>Allowed failure rate</span><b>{_pct(sel["Limit"])}</b></div>'
+                "</div></div>",
+                unsafe_allow_html=True,
+            )
+            if sel["Findings"]:
+                with st.container(key="dq_tmalert", horizontal=True,
+                                  vertical_alignment="center"):
+                    st.markdown(
+                        f'<div class="dq-tmalert{" grey" if sel["Disputed"] else ""}">'
+                        + theme.icon("alert", 15)
+                        + f'<span>{sel["Findings"]:,} of {sel["Rows"]:,} evaluated rows fail '
+                        "this rule."
+                        + (" The CDE register says the rule measures rows it should not."
+                           if sel["Disputed"] else "")
+                        + "</span></div>",
                         unsafe_allow_html=True)
-        past = (rule_runs.sort_values("run_ts", ascending=False)
-                .assign(**{"Run": lambda d: d["run_ts"],
-                           "Result": lambda d: d["status"].map(
-                               {"breach": "Over limit", "pass": "Within limit"}),
-                           "Findings": lambda d: d["violation_count"].astype(int),
-                           "Pass rate": lambda d: 100.0 - d["violation_pct"].astype(float),
-                           "Limit": lambda d: d["threshold_pct"].astype(float)})
-                [["Run", "Result", "Findings", "Pass rate", "Limit"]])
-        st.dataframe(past, hide_index=True, width="stretch",
-                     column_config={
-                         "Run": st.column_config.DatetimeColumn(format="D MMM, HH:mm"),
-                         "Pass rate": st.column_config.NumberColumn(format="%.1f%%"),
-                         "Limit": st.column_config.NumberColumn(format="%.1f%%"),
-                     })
+                    st.button("Investigate rows", key="_tm_investigate",
+                              icon=":material/arrow_forward:", icon_position="right",
+                              on_click=_to_rows)
+            else:
+                st.caption("No row failed this rule on the latest run.")
+
+            cohort_id = metrics.cohort_for_rules(adapter.get_cohorts(), [sel["key"]]).get(sel["key"])
+            if sel["Breach"] and cohort_id:
+                if st.button(f"Open the problem it belongs to · {cohort_id[:8]}",
+                             type="tertiary", key="_tm_to_triage",
+                             icon=":material/open_in_new:"):
+                    st.session_state["selected_cohort"] = cohort_id
+                    st.switch_page("dq_app/ui/pages/triage_detail.py")
+
+        with tab_rows, st.container(height=TAB_BODY, border=False, key="dq_eltab_rows"):
+            if sel["Findings"]:
+                components.failed_rows(sel["key"], sel, samples, heading=False)
+            else:
+                st.caption("No row failed this rule on the latest run.")
+
+        with tab_hist, st.container(height=TAB_BODY, border=False, key="dq_eltab_hist"):
+            if reg is not None:
+                st.markdown(f'<div class="dq-expr">{html.escape(str(reg["rule_expr"]))}</div>'
+                            + (f'<div class="dq-expr scope">scoped to '
+                               f'{html.escape(str(reg["scope_filter"]))}</div>'
+                               if components.opt(reg["scope_filter"]) else ""),
+                            unsafe_allow_html=True)
+            past = (rule_runs.sort_values("run_ts", ascending=False)
+                    .assign(**{"Run": lambda d: d["run_ts"],
+                               "Result": lambda d: d["status"].map(
+                                   {"breach": "Over limit", "pass": "Within limit"}),
+                               "Findings": lambda d: d["violation_count"].astype(int),
+                               "Pass rate": lambda d: 100.0 - d["violation_pct"].astype(float),
+                               "Limit": lambda d: d["threshold_pct"].astype(float)})
+                    [["Run", "Result", "Findings", "Pass rate", "Limit"]])
+            st.dataframe(past, hide_index=True, width="stretch",
+                         column_config={
+                             "Run": st.column_config.DatetimeColumn(format="D MMM, HH:mm"),
+                             "Pass rate": st.column_config.NumberColumn(format="%.1f%%"),
+                             "Limit": st.column_config.NumberColumn(format="%.1f%%"),
+                         })
+
+
+_rules_and_pane()

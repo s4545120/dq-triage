@@ -44,7 +44,7 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter
-from dq_app.domain import lifecycle
+from dq_app.domain import lifecycle, metrics
 from dq_app.ui import components, theme
 from dq_app.ui.components import as_list, opt
 
@@ -347,11 +347,15 @@ with lineage_tab:
                help="Two problems with equal violation counts are not equally urgent if "
                     "one feeds billing and the other feeds a dormant mart.")
 
-with evidence_tab:
-    runs = adapter.get_check_runs()
+# A fragment: picking a check redraws this tab's table and its rows, not the header,
+# the strip or the other five tabs, none of which reads `_member_pick`.
+@st.fragment
+def _evidence() -> None:
+    # One run a day, and never a shadow-only one (`metrics.scheduled_runs`).
+    runs = metrics.scheduled_runs(adapter.get_check_runs())
     members = as_list(extra["member_rule_ids"])
     reg = registry.set_index("rule_id")
-    latest_run = runs.loc[runs["run_ts"].idxmax(), "run_id"]
+    latest_run = metrics.latest_run_id(runs)
     now = runs[(runs["run_id"] == latest_run) & (runs["rule_id"].isin(members))].set_index("rule_id")
 
     mem_rows = []
@@ -402,12 +406,10 @@ with evidence_tab:
     components.row_head(
         ["Check", "Where", "Sev", ("Bad rows", "n"), ("Of", "n"), "First seen"], MEM_GRID)
     with st.container(key="dqrows_members"):
-        got = components.clickable_rows(
+        components.clickable_rows(
             mem_rows, MEM_GRID, _mem_cells, "mem", "Rule id",
-            lambda m: f"Show the rows that failed {m['Check']}", picked=picked_member)
-    if got:
-        st.session_state["_member_pick"] = got
-        st.rerun()
+            lambda m: f"Show the rows that failed {m['Check']}", picked=picked_member,
+            on_pick=components.pick_into("_member_pick"))
 
     # The rows behind the check selected above. One panel, not nine stacked expanders.
     samples = adapter.get_violation_samples()
@@ -428,6 +430,10 @@ with evidence_tab:
                  "rows at a time instead of every check's stacked down the page.",
         )
         components.sample_rows_view(newest)
+
+
+with evidence_tab:
+    _evidence()
 
 with decisions_tab:
     left, right = st.columns([3, 2])

@@ -141,8 +141,20 @@ def row_head(heads: list, grid: str) -> None:
     )
 
 
+def pick_into(key: str, clear: tuple[str, ...] = (), also: dict | None = None):
+    """An `on_pick` for `clickable_rows`: store the row's id under `key`, drop the
+    session keys in `clear`, set the ones in `also`."""
+    def _pick(row_id):
+        st.session_state[key] = row_id
+        for k in clear:
+            st.session_state.pop(k, None)
+        for k, v in (also or {}).items():
+            st.session_state[k] = v
+    return _pick
+
+
 def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
-                   label, picked=None, tip=None) -> str | None:
+                   label, picked=None, tip=None, on_pick=None) -> str | None:
     """A block of whole-row click targets. Returns the id clicked, or None.
 
     `key` is a short name unique to this table on this page — it prefixes the
@@ -161,6 +173,11 @@ def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
     under the open popover, the popover never hears the pointer leave, and the bubble
     stays on screen over whatever the reader moves to next. `:hover` is the browser's
     own state and cannot be left behind.
+
+    `on_pick`, where given, is called with the row's id as the button's `on_click` --
+    before the script runs -- so a selection costs one run, not two. Reading the
+    return value instead and calling `st.rerun()` ran the whole page twice per click:
+    once to learn of the click, once more to tint the row it chose.
     """
     got = None
     for row in rows:
@@ -172,7 +189,8 @@ def clickable_rows(rows: list[dict], grid: str, cells, key: str, id_key: str,
                 + (_row_tip(tip(row)) if tip else ""),
                 unsafe_allow_html=True,
             )
-            if st.button(label(row), key=f"_open_dqrow_{key}_{row_id}"):
+            if st.button(label(row), key=f"_open_dqrow_{key}_{row_id}", on_click=on_pick,
+                         args=(row_id,) if on_pick else None):
                 got = row_id
     return got
 

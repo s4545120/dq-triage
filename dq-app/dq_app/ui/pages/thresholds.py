@@ -110,12 +110,10 @@ if picked not in set(view["proposal_id"]):
 components.row_head(
     ["Check", "Element", ("Now", "n"), ("Proposed", "n"), "Basis", "State", "Reviewer"], GRID)
 with st.container(key="dqrows_thr"):
-    got = components.clickable_rows(
+    components.clickable_rows(
         rows, GRID, _cells, "thr", "Proposal id",
-        lambda m: f"Open the proposal on {m['Check']}", picked=picked)
-if got:
-    st.session_state["_thr_pick"] = got
-    st.rerun()
+        lambda m: f"Open the proposal on {m['Check']}", picked=picked,
+        on_pick=components.pick_into("_thr_pick"))
 
 st.caption(
     "Every rule the threshold job has advised on, latest proposal first. Bold is a "

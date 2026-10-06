@@ -352,11 +352,9 @@ with mid, st.container(key="onbcard_rows_tables"):
         components.row_head(["", "Table", ("Size", "n"), ("Cols", "n"), "Tags", "Daily check"],
                             GRID)
         with st.container(key="dqrows_add"):
-            got = components.clickable_rows(rows, GRID, _cells, "add", "Id",
-                                            lambda m: f"Choose {m['Fqn']}", picked=picked)
-        if got:
-            st.session_state["_add_pick"] = got
-            st.rerun()
+            components.clickable_rows(rows, GRID, _cells, "add", "Id",
+                                      lambda m: f"Choose {m['Fqn']}", picked=picked,
+                                      on_pick=components.pick_into("_add_pick"))
         st.markdown(
             '<div class="onb-cap" style="padding:.6rem 0 .5rem">Check time is estimated from '
             'size: about 15 s per 1.5 GB on the smallest warehouse. Tables above the cost '
