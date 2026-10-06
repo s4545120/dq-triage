@@ -25,6 +25,10 @@ MONITORED_COLUMNS = [
     "target_table", "table_version", "table_code", "row_key", "owner_group",
     "business_domain", "schedule_group", "scan_mode", "status", "effective_from",
     "selected_by", "note",
+    # The slice, domain/slices.py. Spelled out rather than imported: fixtures/verify.py
+    # reads this list as a literal and diffs it against the DDL.
+    "slice_filter", "slice_spec", "slice_version", "slice_change",
+    "slice_proposed_filter", "slice_proposed_spec", "slice_proposed_by",
 ]
 PROPOSAL_COLUMNS = [
     "proposal_id", "proposed_at", "target_table", "target_column", "cde_id", "method",

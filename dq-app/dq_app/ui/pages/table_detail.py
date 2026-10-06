@@ -27,7 +27,7 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter
-from dq_app.domain import metrics
+from dq_app.domain import metrics, slices
 from dq_app.ui import components, monitoring, theme
 
 LIST = "dq_app/ui/pages/tables.py"
@@ -119,6 +119,13 @@ bad = raised[raised["status"] == "breach"]
 cols_checked = raised["target_column"].dropna().nunique()
 cols_failing = bad["target_column"].dropna().nunique()
 
+# The population the latest run drew from, when the run recorded it, and any run in the
+# window where the table's slice changed -- a step in the line there is a different set
+# of rows, not data moving.
+pop = slices.run_population(now, selected)
+since = mine["run_ts"].min() if len(mine) else None
+moved = [ts for ts in slices.slice_breaks(mine, selected) if since is None or ts >= since]
+
 hero, summary = st.columns([2.2, 1], gap="medium")
 hero.markdown(
     '<div class="dq-card dq-hero">'
@@ -138,6 +145,8 @@ hero.markdown(
        + (f", {len(disputed)} of them a rule the CDE register disputes." if disputed
           else ".")
        if breaching else "<b>Every rule</b> is within its configured limit.")
+    + (f" The table's slice changed on {pd.Timestamp(moved[-1]):%-d %b}: runs before it "
+       "checked a different set of rows." if moved else "")
     + "</div></div>",
     unsafe_allow_html=True,
 )
@@ -155,6 +164,9 @@ summary.markdown(
     + "</div>"
     + _kv("Findings", f'{t["Findings"]:,}')
     + _kv("Rows evaluated", f'{t["Rows"]:,}')
+    + (_kv("Rows in its slice", f'{pop["slice_rows"]:,} of {pop["table_rows"]:,}')
+       if pop and pop["slice_version"] is not None and pop["table_rows"] is not None
+       and pop["slice_rows"] is not None else "")
     + _kv("Columns affected", f"{cols_failing} of {cols_checked}")
     + '<div class="gap"></div>'
     + _kv("P1 failures", str(p1), BELOW if p1 else None)

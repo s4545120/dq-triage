@@ -6,10 +6,10 @@
 -- it reads.
 --
 -- RUN ONCE. ALTER TABLE ... ADD CONSTRAINT is not idempotent: a second pass
--- fails with "constraint already exists" on every one of the 55. If this stops
+-- fails with "constraint already exists" on every one of the 62. If this stops
 -- partway, fix the one statement and continue from that banner — do not restart.
 --
--- Expected when complete: 14 tables, 10 views, 7 functions, 55 CHECK constraints.
+-- Expected when complete: 14 tables, 10 views, 7 functions, 62 CHECK constraints.
 -- Verify with sql/VERIFY.md steps 3-8. Step 9 (grants) is not available here.
 -- =====================================================================
 
@@ -243,7 +243,13 @@ CREATE TABLE IF NOT EXISTS workspace.dq_triage.dq_results_check_run (
   scope_fingerprint STRING             COMMENT 'pins the comparison scope for verification — see header note. Write NULL until the hashing rule is decided',
   message           STRING             COMMENT 'human-readable, e.g. "81 of 1000 rows have no @ in EML_ID, limit 0.0%"',
   duration_sec      DOUBLE             COMMENT 'wall time for this check',
-  dbu_estimate      DOUBLE             COMMENT 'rough cost attribution, used to argue about rule economics'
+  dbu_estimate      DOUBLE             COMMENT 'rough cost attribution, used to argue about rule economics',
+  -- THE SLICE THE VERDICT RAN UNDER (2026-10-06). The runner applies a table's slice at
+  -- run time, so the rule row alone no longer says what was measured; these do. Declared
+  -- last because ADD COLUMNS puts them there. NULL on every run before slices existed.
+  slice_version     INT                COMMENT 'config.monitored_table.slice_version in force for the target (driving) table at run time. NULL: the whole table',
+  table_rows        BIGINT             COMMENT 'rows in the target table at run time, before the slice',
+  slice_rows        BIGINT             COMMENT 'rows in the slice -- the population every check on the table drew from. Equal to table_rows when unsliced. A slice that grows to hide failures shows as this falling'
 )
 USING DELTA
 CLUSTER BY (run_ts, rule_id)
@@ -1782,7 +1788,20 @@ CREATE TABLE IF NOT EXISTS workspace.dq_triage.dq_config_monitored_table (
   status          STRING        NOT NULL COMMENT 'selected | paused | retired. The check runner checks only selected tables. retired is permanent: re-onboarding is a new selection. How far a selected table has got is DERIVED, see v_onboarding_status',
   effective_from  TIMESTAMP     NOT NULL COMMENT 'when this version took effect',
   selected_by     STRING                 COMMENT 'who authored THIS version: the selector, or whoever paused, resumed or decommissioned it -- platform identity when the app wrote it',
-  note            STRING                 COMMENT 'why. Required when a table is paused or retired'
+  note            STRING                 COMMENT 'why. Required when a table is paused or retired',
+  -- THE SLICE (2026-10-06). Which rows of the table are the population being checked at
+  -- all; a rule's scope_filter then says which of those it applies to, and the runner
+  -- ANDs the two. Built by the app from a structured spec, never typed as SQL. Every
+  -- version carries the slice IN FORCE and any PENDING proposal, so the latest version
+  -- is the whole state. Declared last: ADD COLUMNS puts them here on a table that
+  -- predates them. dq_app/domain/slices.py is the one definition of how they move.
+  slice_filter          STRING           COMMENT 'the predicate in force, ANDed onto every check on the table by the runner. NULL is the whole table',
+  slice_spec            STRING           COMMENT 'the structured slice slice_filter was rendered from, as JSON: conditions on this table, and optionally membership in another',
+  slice_version         INT              COMMENT 'the table_version the slice in force took effect at; stamped on every check_run row as slice_version. NULL if the table was never sliced',
+  slice_change          STRING           COMMENT 'what THIS version did to the slice: set (one person, while no check on the table is active) | proposed | approved | rejected. NULL for a version that left it alone',
+  slice_proposed_filter STRING           COMMENT 'a change waiting for a second person: the predicate exactly as it will run. NULL with a proposed spec means "remove the slice"',
+  slice_proposed_spec   STRING           COMMENT 'the proposed slice as JSON. Kept on the approving or rejecting version as the record of what was decided',
+  slice_proposed_by     STRING           COMMENT 'who proposed it. A second person approves; rejecting your own is withdrawing it'
 )
 USING DELTA
 CLUSTER BY (target_table)
@@ -1856,6 +1875,44 @@ ALTER TABLE workspace.dq_triage.dq_config_monitored_table
 ALTER TABLE workspace.dq_triage.dq_config_monitored_table
   ADD CONSTRAINT monitored_table_stop_has_reason
   CHECK (status = 'selected' OR (note IS NOT NULL AND trim(note) <> ''));
+
+-- The slice. The second-approver rule CAN be a row constraint here, unlike a binding's,
+-- because the approving version carries the proposer beside the approver.
+ALTER TABLE workspace.dq_triage.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_change_enum
+  CHECK (slice_change IS NULL OR slice_change IN ('set', 'proposed', 'approved', 'rejected'));
+
+ALTER TABLE workspace.dq_triage.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_has_spec
+  CHECK ((slice_filter IS NULL) = (slice_spec IS NULL)
+         AND (slice_filter IS NULL OR slice_version IS NOT NULL)
+         AND (slice_proposed_filter IS NULL OR slice_proposed_spec IS NOT NULL)
+         AND ((slice_proposed_spec IS NULL) = (slice_proposed_by IS NULL)));
+
+ALTER TABLE workspace.dq_triage.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_takes_effect_here
+  CHECK (coalesce(slice_change, '') NOT IN ('set', 'approved') OR slice_version = table_version);
+
+ALTER TABLE workspace.dq_triage.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_proposal_signed
+  CHECK (coalesce(slice_change, '') NOT IN ('proposed', 'approved', 'rejected')
+         OR slice_proposed_by IS NOT NULL);
+
+ALTER TABLE workspace.dq_triage.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_proposal_by_author
+  CHECK (coalesce(slice_change, '') <> 'proposed'
+         OR (lower(selected_by) = lower(slice_proposed_by) AND trim(coalesce(note, '')) <> ''));
+
+ALTER TABLE workspace.dq_triage.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_second_approver
+  CHECK (coalesce(slice_change, '') <> 'approved'
+         OR ((lower(selected_by) <> lower(slice_proposed_by)
+              OR coalesce(note, '') LIKE '[second approver waived]%')
+             AND slice_filter <=> slice_proposed_filter));
+
+ALTER TABLE workspace.dq_triage.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_rejection_has_reason
+  CHECK (coalesce(slice_change, '') <> 'rejected' OR trim(coalesce(note, '')) <> '');
 
 ALTER TABLE workspace.dq_triage.dq_config_check_template
   ADD CONSTRAINT check_template_version_positive

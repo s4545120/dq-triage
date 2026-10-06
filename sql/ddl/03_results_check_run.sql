@@ -38,7 +38,13 @@ CREATE TABLE IF NOT EXISTS {catalog}.results.check_run (
   scope_fingerprint STRING             COMMENT 'pins the comparison scope for verification — see header note. Write NULL until the hashing rule is decided',
   message           STRING             COMMENT 'human-readable, e.g. "81 of 1000 rows have no @ in EML_ID, limit 0.0%"',
   duration_sec      DOUBLE             COMMENT 'wall time for this check',
-  dbu_estimate      DOUBLE             COMMENT 'rough cost attribution, used to argue about rule economics'
+  dbu_estimate      DOUBLE             COMMENT 'rough cost attribution, used to argue about rule economics',
+  -- THE SLICE THE VERDICT RAN UNDER (2026-10-06). The runner applies a table's slice at
+  -- run time, so the rule row alone no longer says what was measured; these do. Declared
+  -- last because ADD COLUMNS puts them there. NULL on every run before slices existed.
+  slice_version     INT                COMMENT 'config.monitored_table.slice_version in force for the target (driving) table at run time. NULL: the whole table',
+  table_rows        BIGINT             COMMENT 'rows in the target table at run time, before the slice',
+  slice_rows        BIGINT             COMMENT 'rows in the slice -- the population every check on the table drew from. Equal to table_rows when unsliced. A slice that grows to hide failures shows as this falling'
 )
 USING DELTA
 CLUSTER BY (run_ts, rule_id)

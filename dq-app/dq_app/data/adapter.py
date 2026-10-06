@@ -48,7 +48,7 @@ import streamlit as st
 
 from dq_app.data import identity
 from dq_app.data import notify as _notify_transport
-from dq_app.domain import coverage, lifecycle, onboarding, thresholds
+from dq_app.domain import coverage, lifecycle, onboarding, slices, thresholds
 
 APP_VERSION = "dq-triage-app/1.0.0"
 
@@ -342,6 +342,10 @@ def select_table(target_table: str, row_key: list[str], owner_group: str,
         "status": "selected", "effective_from": datetime.now(), "selected_by": who.email,
         "note": note,
     }
+    if has_slice_columns():
+        # A selection starts unsliced, re-onboarding included: a slice is set on the
+        # table's page, where the rows it keeps can be counted first.
+        row.update({c: None for c in slices.SLICE_COLUMNS})
     if not _impl.write_monitored_table(row):
         clear_cache()
         raise OnboardingRejected(f"{target_table} changed since you opened it. Refresh and "
@@ -368,6 +372,8 @@ def set_table_status(target_table: str, status: str, note: str) -> dict:
     cur.update({"table_version": int(cur["table_version"]) + 1, "status": status,
                 "effective_from": datetime.now(), "selected_by": who.email,
                 "note": note.strip(), "row_key": list(cur["row_key"])})
+    if has_slice_columns():
+        cur.update(slices.carry_forward(cur))
     if not _impl.write_monitored_table(cur):
         clear_cache()
         raise OnboardingRejected(f"{target_table} changed since you opened it. Refresh and "
@@ -400,6 +406,132 @@ def decommission_table(target_table: str, note: str) -> tuple[int, list[str]]:
                for r in rows if r["rule_id"] not in landed]
     clear_cache()
     return len(landed), refused
+
+
+# --- The slice ---------------------------------------------------------------------------
+# A table's slice is a new version of its config.monitored_table row: the existing write,
+# no new grant. One person sets it while nothing on the table is active; after that a
+# change is a proposal a second person decides. domain/slices.py has the rules.
+
+SliceRejected = slices.SliceRejected
+
+
+def has_slice_columns() -> bool:
+    """Whether this catalog's monitored_table has the slice columns. A schema that
+    predates them takes `onboard.py install`; until then no slice can be written."""
+    return "slice_filter" in _base_monitored_tables().columns
+
+
+def _column_types(fqn: str) -> dict[str, str]:
+    cols = get_catalog_columns(fqn)
+    return dict(zip(cols["column_name"], cols["data_type"])) if len(cols) else {}
+
+
+def build_slice(target_table: str, spec: dict) -> dict:
+    """Render `spec` against the table's real columns and count what it keeps.
+    {'filter', 'spec', 'table_rows', 'slice_rows'}. Raises SliceRejected on a spec that
+    cannot be built, or a predicate the warehouse will not run -- counting is the test,
+    because an analysis error raises on execution where EXPLAIN only prints it."""
+    spec = slices.normalise(spec)
+    member = spec.get("member_of")
+    filt = slices.render(spec, _column_types(target_table),
+                         _column_types(member["table"]) if member and member["table"] else None)
+    try:
+        table_rows, slice_rows = _impl.slice_population(target_table, filt)
+    except Exception as exc:  # noqa: BLE001 -- the warehouse's reason, shown to the person
+        raise SliceRejected(f"The warehouse would not run this slice: "
+                            f"{str(exc).splitlines()[0][:300]}") from None
+    if slice_rows == 0 and filt:
+        raise SliceRejected("This slice keeps no rows: every check on the table would skip.")
+    return {"filter": filt, "spec": None if slices.is_whole_table(spec) else spec,
+            "table_rows": table_rows, "slice_rows": slice_rows}
+
+
+def _latest_row(target_table: str) -> dict:
+    latest = onboarding.latest_monitored(get_monitored_tables())
+    row = latest[latest["target_table"] == target_table] if len(latest) else latest
+    if row.empty:
+        raise SliceRejected(f"{target_table} is not onboarded.")
+    cur = row.iloc[0].to_dict()
+    if cur["status"] == "retired":
+        raise SliceRejected(f"{target_table} is decommissioned.")
+    return cur
+
+
+def _active_checks(target_table: str) -> int:
+    cur = get_rule_registry_current()
+    return int(((cur["target_table"] == target_table) & (cur["status"] == "active")).sum())
+
+
+def _write_slice_version(cur: dict, target_table: str) -> dict:
+    if not _impl.write_monitored_table(cur):
+        clear_cache()
+        raise SliceRejected(f"{target_table} changed since you opened it. Refresh and "
+                            "check its current state.")
+    clear_cache()
+    return cur
+
+
+def set_slice(target_table: str, spec: dict, note: str) -> dict:
+    """Set the slice (no active check on the table) or propose it (one or more). The
+    written row; its `slice_change` says which."""
+    who = identity.current()
+    _require_platform_identity(who, "Changing a table's slice", SliceRejected)
+    if not has_slice_columns():
+        raise SliceRejected("This catalog's monitored_table has no slice columns yet. "
+                            "Run `onboard.py install` on it first.")
+    cur = _latest_row(target_table)
+    if slices.pending(cur):
+        raise SliceRejected("A slice change is already waiting for a second person. "
+                            "Decide or withdraw it first.")
+    built = build_slice(target_table, spec)
+    now = slices.in_force(cur)
+    if (built["filter"] or None) == (now["filter"] or None):
+        raise SliceRejected("That is the slice already in force.")
+    propose = slices.needs_second_person(_active_checks(target_table))
+    if propose and not (note or "").strip():
+        raise SliceRejected("Say why. A second person reads it before approving.")
+    version = int(cur["table_version"]) + 1
+    cur.update(slices.carry_forward(cur))
+    cur.update({"table_version": version, "effective_from": datetime.now(),
+                "selected_by": who.email, "note": (note or "").strip() or None,
+                "row_key": list(cur["row_key"])})
+    spec_json = None if built["spec"] is None else slices.dumps(built["spec"])
+    if propose:
+        cur.update(slice_change="proposed", slice_proposed_filter=built["filter"],
+                   slice_proposed_spec=slices.dumps(built["spec"] or {}),
+                   slice_proposed_by=who.email)
+    else:
+        cur.update(slice_change="set", slice_filter=built["filter"], slice_spec=spec_json,
+                   slice_version=version)
+    return _write_slice_version(cur, target_table)
+
+
+def decide_slice(target_table: str, decision: str, reason: str | None = None) -> dict:
+    """Approve or reject the pending slice proposal. Approving puts exactly the reviewed
+    predicate in force; rejecting your own is withdrawing it."""
+    who = identity.current()
+    _require_platform_identity(who, "Deciding a slice", SliceRejected)
+    cur = _latest_row(target_table)
+    p = slices.pending(cur)
+    if not p:
+        raise SliceRejected("There is no slice change waiting on this table.")
+    waived = self_approval_waived()
+    slices.validate_decision(p["by"], who.email, decision, reason, allow_self=waived)
+    reason = (reason or "").strip() or None
+    if (waived and decision == "approved"
+            and str(p["by"]).lower() == str(who.email).lower()):
+        reason = f"{slices.WAIVER_MARK} {reason or ''}".strip()
+    version = int(cur["table_version"]) + 1
+    spec_json = cur.get("slice_proposed_spec")
+    cur.update({"table_version": version, "effective_from": datetime.now(),
+                "selected_by": who.email, "note": reason, "slice_change": decision,
+                "row_key": list(cur["row_key"])})
+    if decision == "approved":
+        whole = slices.is_whole_table(slices.loads(spec_json))
+        cur.update(slice_filter=p["filter"], slice_spec=None if whole else spec_json,
+                   slice_version=version)
+    return _write_slice_version(cur, target_table)
 
 
 def suggest_binding(target_table: str, target_column: str, cde_id: str, reason: str) -> dict:

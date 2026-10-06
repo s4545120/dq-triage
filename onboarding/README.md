@@ -23,6 +23,10 @@ the app write against that DDL.
 | Run again; breaches now count | job | `onboard.py run` |
 | Where the table has got to | — | `onboard.py status` |
 
+**Slices** (2026-10-06) are set in the app, on the table's onboarding page, never here.
+`install` adds their seven `monitored_table` and three `check_run` columns to a schema
+that predates them; `run_checks.py` applies a selected table's slice to every check.
+
 Run from this folder with `../.venv/bin/python`.
 
 ## What it adds

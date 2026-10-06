@@ -61,7 +61,18 @@ LEAD = src("crm_lead")
 # and a positional INSERT would load a reordered table without an error.
 MONITORED_COLS = ("target_table, table_version, table_code, row_key, owner_group, "
                   "business_domain, schedule_group, scan_mode, status, effective_from, "
-                  "selected_by, note")
+                  "selected_by, note, slice_filter, slice_spec, slice_version, slice_change, "
+                  "slice_proposed_filter, slice_proposed_spec, slice_proposed_by")
+# A table this job selects starts unsliced: a slice is a person's choice, made in the app.
+NO_SLICE = "NULL, NULL, NULL, NULL, NULL, NULL, NULL"
+# What `install` adds to a schema whose tables predate the slice, in the DDL's order.
+_SLICE_ADDS = {
+    "config.monitored_table": [
+        "slice_filter STRING", "slice_spec STRING", "slice_version INT", "slice_change STRING",
+        "slice_proposed_filter STRING", "slice_proposed_spec STRING",
+        "slice_proposed_by STRING"],
+    "results.check_run": ["slice_version INT", "table_rows BIGINT", "slice_rows BIGINT"],
+}
 TEMPLATE_COLS = ("template_id, template_version, data_class, check_code, title, input_type, "
                  "rule_type, rule_expr, scope_filter, severity, source_rule, created_by, "
                  "created_at")
@@ -130,6 +141,20 @@ def install(conn) -> None:
                f"rule_registry_template_versioned "
                f"CHECK ((template_id IS NULL) = (template_version IS NULL))")
 
+    # The slice (2026-10-06): seven columns on monitored_table, three on check_run, all
+    # at the end where sql/ddl/15 and 03 declare them. Before the DDL below, which
+    # re-creates v_monitored_table_current -- a view freezes its column list, so it has to
+    # be re-created AFTER the table gains columns -- and adds the slice constraints, which
+    # name these columns. On a fresh schema 15 creates the table with them and this skips.
+    for table, cols in _SLICE_ADDS.items():
+        name = f"{PREFIX}{table.replace('.', '_')}"
+        have = {r["column_name"] for r in run(conn, f"""
+            SELECT column_name FROM {wh.CATALOG}.information_schema.columns
+            WHERE table_schema = '{wh.SCHEMA}' AND table_name = '{name}'""")}
+        missing = [c for c in cols if c.split()[0] not in have]
+        if have and missing:
+            run(conn, f"ALTER TABLE {t(*table.split('.'))} ADD COLUMNS ({', '.join(missing)})")
+
     # Everything else is the repo's DDL, rendered for this schema exactly as
     # sql/render.py renders it. No CREATE TABLE lives in this file: a second one is a
     # second shape, and the prototype's had drifted.
@@ -174,7 +199,8 @@ SELECT {lit(tbl)}, 1, {lit(code)}, array({', '.join(lit(k) for k in key)}),
        {lit(r['owner_group'])}, {lit(r['business_domain'])}, 'daily_0300', 'full', 'selected',
        current_timestamp(), current_user(),
        'Checked before onboarding existed; selected so the daily check run keeps checking it '
-       'once other tables are onboarded.'
+       'once other tables are onboarded.',
+       {NO_SLICE}
 WHERE NOT EXISTS (SELECT 1 FROM {t('config', 'monitored_table')} WHERE target_table = {lit(tbl)})""")
         print(f"adopt: selected {tbl} as {code}, row key {key}")
 
@@ -249,7 +275,8 @@ def _select(conn) -> None:
     run(conn, f"""INSERT INTO {t('config', 'monitored_table')} ({MONITORED_COLS}) VALUES (
   {lit(m['target_table'])}, 1, {lit(m['table_code'])}, {keys}, {lit(m['owner_group'])},
   {lit(m['business_domain'])}, {lit(m['schedule_group'])}, {lit(m['scan_mode'])}, 'selected',
-  current_timestamp(), current_user(), 'Onboarding test: mock CRM lead extract.')""")
+  current_timestamp(), current_user(), 'Onboarding test: mock CRM lead extract.',
+  {NO_SLICE})""")
     print(f"selected: {LEAD}")
 
 

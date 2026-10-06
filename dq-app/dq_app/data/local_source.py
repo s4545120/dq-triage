@@ -243,6 +243,12 @@ def table_probe(fqn: str) -> dict:
     return {"size_bytes": None, "readable": False}
 
 
+def slice_population(fqn: str, slice_filter: str | None) -> tuple[None, None]:
+    """The fixture carries no source rows, so a slice cannot be counted locally. The
+    page says so rather than inventing a figure."""
+    return None, None
+
+
 def _append_pending(kind: str, row: dict) -> bool:
     st.session_state.setdefault(_PENDING_ONB[kind], []).append(row)
     return True

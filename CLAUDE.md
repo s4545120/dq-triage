@@ -1416,6 +1416,75 @@ job triggering, no execute button. `config.playbook` deliberately has no `fix_bo
 `fix_sql`, `job_id` or `notebook_path` — a body column is the first step to an execute
 button. If someone asks for one, that is a scope change to escalate, not a schema change.
 
+## Data slices — 2026-10-06
+
+**A slice is which rows of a monitored table are checked at all**; a rule's
+`scope_filter` is still which of those it applies to, and the runner ANDs the two. It
+came from Ataccama's "data slices" and from the "DQ Queries", every one of which was
+scoped by `migration_scope_flag = 1` — a flag kept in **another table**, which is why a
+slice can be membership ("rows whose key appears in T where …") and not only conditions.
+COH-B is untouched: a slice does not give a rule the scope it is missing, and
+`v_cde_coverage`'s scope_mismatch still fires.
+
+* **Where it lives.** Seven columns at the end of `config.monitored_table`
+  (`slice_filter`, `slice_spec`, `slice_version`, `slice_change`, `slice_proposed_*`).
+  Every version carries the slice IN FORCE and any PENDING proposal, so the latest version
+  is the whole state and the runner's latest-version read needs no fold.
+  `domain/slices.carry_forward` is the one definition of what a pause or resume copies.
+  It is the existing monitored_table write: **no new grant, still six**.
+* **Structured, never SQL.** `domain/slices.render` builds the predicate from column /
+  operator / values against the table's real columns (`get_catalog_columns`): identifiers
+  are backticked and literals typed and escaped. "Count rows" executes it (not EXPLAIN — an
+  analysis error is plan text there) and shows what it keeps before anything is offered.
+* **Applied at run time, stamped on every verdict.** `jobs/run_checks.relation()` swaps the
+  table for `(SELECT * FROM t WHERE slice)` in every shape. Row-level rules batch over it,
+  and the slice is not ANDed into each `count_if`, because Spark allows an IN-subquery
+  only in a filter. In a join **only the driving table** is sliced. `check_run` gains
+  `slice_version`, `table_rows`, `slice_rows`, all NULL on every run before 2026-10-06.
+  `scope_fingerprint` is left alone: still the open question.
+* **A slice can hide defects, so: one person while no check on the table is active,
+  a second person after.** A change is then `proposed` and someone else approves it;
+  the author can only withdraw it. The rule is a row CHECK
+  (`monitored_table_slice_second_approver`) as well as the adapter's, which a binding's
+  cannot be, because the approving version carries the proposer beside the approver.
+  The `DQ_ONBOARD_ALLOW_SELF_APPROVAL` waiver applies and marks the note the same way.
+  Every run records rows in table vs rows in slice, and the Tables detail page says when
+  the slice changed inside its window.
+* **Where people set it**: the Slice card on a table's onboarding page
+  (`ui/slice_card.py`), not Add tables. Selection writes an unsliced row, and the card
+  can count rows, which Add tables cannot do for twenty tables at once.
+
+**State.** DDL, fixture, runner, app and 27 tests (`tests/test_slices.py`) are done;
+`verify.py` exits 0. Against `workspace.dq_triage` the checks were **read-only**. A
+membership slice kept 499 of 1000 subscriptions, every batched and single shape ran
+sliced, and the seven slice constraints passed 13 of 13 good and bad rows evaluated as
+SELECTs. **Applied to `dq_onboard` on 2026-10-06; not to `dq_triage`.** There,
+`onboard.py install` added the columns (guarded on `information_schema`) and the seven
+constraints, and re-created the views. `dq_mock_subs_c` then got a slice through
+`proposed` (v2) and a waived, marked `approved` (v3), and the live table refused an
+unmarked self-approval between them. A one-off job (run `927354386293920`; the runner
+uploaded to `/Users/…/dq-slices-test/`, **not** the shared `dq-onboard-jobs` copy every
+scheduled job runs, `dq_triage`'s included) wrote 16 verdicts stamped `slice_version 3`,
+`1000 / 499`. All 125 sampled rows were POSTPAID.
+
+**What the test showed about COH-B.** Under a postpaid slice `SUBS_PRIM_ACCT_NOT_ZERO`
+goes from 500 violations to **0** and passes, and `SUBS_IMEI_NOT_NULL` from 200 to 100.
+Nothing is wrong: the prepaid rows the rule wrongly flags are outside the population. But
+it is exactly how a slice makes a breach disappear from the run. `v_cde_coverage` still
+reports both rules as `scope_mismatch`, because coverage reads the rule and the binding,
+not the slice. So the register keeps saying what the run no longer shows. Keep it that
+way.
+
+**Until the shared code copy is updated,** `dq_onboard`'s daily `dq-checks` ignores the
+slice: its next run checks `dq_mock_subs_c` whole, with `slice_version` NULL, and the
+Tables page will mark that as a change of population. Two
+orders matter. In each schema, install **before** the app that writes slices is
+deployed: `select_table` writes slice columns once `has_slice_columns()` says they
+exist, and older code ignores them. The jobs' copy of `run_checks.py` can go before or
+after; it treats missing columns as unsliced. **Not built**: discovery's value-pattern
+match still reads the whole table, and the Scorecard's element trend does not mark a
+slice change (an element can span tables, so "the slice changed" has no single date there).
+
 **A notification is triggered by a decision, never by a threshold.** A check falling
 past its limit surfaces a candidate in the app and sends nothing; what sends is
 `reviewed` + `decision = 'accepted'` by an `obo_user`, which is a named human saying

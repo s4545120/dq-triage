@@ -371,7 +371,12 @@ def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, 
                         captured_ts=run_ts,
                     ))
 
-    return pd.DataFrame(runs), pd.DataFrame(samples), {"index": index, "run_ids": run_ids}
+    frame = pd.DataFrame(runs)
+    # Every fixture run predates data slices (2026-10-06): no slice, and no population
+    # recorded. Typed so the parquet carries integers, not an all-null column.
+    for c in ("slice_version", "table_rows", "slice_rows"):
+        frame[c] = pd.Series(pd.NA, index=frame.index, dtype="Int64")
+    return frame, pd.DataFrame(samples), {"index": index, "run_ids": run_ids}
 
 
 # ---------------------------------------------------------------------------

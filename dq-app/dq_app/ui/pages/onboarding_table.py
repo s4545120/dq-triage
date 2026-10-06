@@ -26,7 +26,7 @@ import streamlit as st
 
 from dq_app.data import adapter, identity
 from dq_app.domain import onboarding
-from dq_app.ui import components, theme
+from dq_app.ui import components, slice_card, theme
 from dq_app.ui import onboarding_style as ui
 from dq_app.ui.components import opt
 
@@ -437,6 +437,9 @@ elif not len(open_p) and stage != "paused":
         st.markdown(f'<div class="onb-ev">{html.escape(onboarding.STAGES[onboarding.STAGE_INDEX[stage]][2])} '
                     'This page fills in as the pipeline job runs.</div>',
                     unsafe_allow_html=True)
+
+# --- The slice --------------------------------------------------------------------------
+slice_card.draw(table, m.to_dict(), len(active), col_type, adapter.get_check_runs())
 
 # --- Manage the table ---------------------------------------------------------------------
 # Pause and resume are reversible and touch only the table's row. Decommission is not:

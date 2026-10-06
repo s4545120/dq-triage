@@ -461,6 +461,16 @@ def catalog_columns(fqn: str | None = None) -> pd.DataFrame:
         params)
 
 
+def slice_population(fqn: str, slice_filter: str | None) -> tuple[int, int]:
+    """(rows in the table, rows in the slice). Executed, not EXPLAINed: a bad column
+    raises here, where EXPLAIN would print it as plan text and succeed."""
+    ident = _ident(fqn)
+    where = f" WHERE {slice_filter}" if slice_filter else ""
+    d = _q(f"SELECT (SELECT count(*) FROM {ident}) AS table_rows, "
+           f"(SELECT count(*) FROM {ident}{where}) AS slice_rows")
+    return int(d.iloc[0]["table_rows"]), int(d.iloc[0]["slice_rows"])
+
+
 def table_probe(fqn: str) -> dict:
     """Size, and whether this principal can read it. Two cheap statements: DESCRIBE
     DETAIL reads the Delta log, and a LIMIT 0 select plans without scanning."""
