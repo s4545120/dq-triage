@@ -803,7 +803,7 @@ def _elements_and_pane() -> None:
                 # as a bug.
                 on_pick=components.pick_into("_elem_scope", clear=("_check_pick",)))
         st.markdown(
-            '<div class="dq-elfoot"><span>Bars: 0–100%<b></b>Shortfall<i></i>Target</span>'
+            '<div class="dq-elfoot"><span>Bars: 0–100%<i></i>Target</span>'
             "<span>Largest target gap first</span></div>",
             unsafe_allow_html=True)
 

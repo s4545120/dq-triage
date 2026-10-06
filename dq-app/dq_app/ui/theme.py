@@ -807,25 +807,14 @@ def target_bar(score: float | None, target: float | None, colour: str) -> str:
     Always on the full scale, never zoomed to the interesting end: twenty of these
     stack in a list and are read against each other, and a bar whose axis starts at
     95 makes 97% look like a third.
-
-    Below target, the score is drawn quiet and the gap from it to the tick is drawn in
-    `colour` (2026-10-06). Filled solid in the warning colour, every bar on a page of
-    94–99% scores was the same nearly-full red line: alarming, and saying nothing. The
-    shortfall is what differs between them, so it is what carries the colour. An
-    unassessed score (`colour` is the grey) keeps one grey fill: it has no shortfall
-    to show.
     """
     fill = 0.0 if score is None else max(0.0, min(100.0, float(score)))
-    tick, gap = "", ""
+    tick = ""
     if target is not None:
         at = max(0.0, min(100.0, float(target)))
         tick = f'<i style="left:min({at:.2f}%, calc(100% - 2px))"></i>'
-        if score is not None and fill < at and colour != NEUTRAL["text_3"]:
-            gap = (f'<b style="left:{fill:.2f}%;width:{at - fill:.2f}%;'
-                   f'background:{colour}"></b>')
-    base = NEUTRAL["border_strong"] if gap else colour
     return (f'<span class="dq-tbar"><span style="width:{fill:.2f}%;'
-            f'background:{base}"></span>{gap}{tick}</span>')
+            f'background:{colour}"></span>{tick}</span>')
 
 
 def area_chart(points: list[tuple], y_lo: float = 0.0, y_hi: float = 100.0) -> str:
@@ -1868,8 +1857,6 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-tbar {{ position: relative; display: block; height: 6px; border-radius: 3px;
   background: #eef0f3; margin: .12rem 0; }}
 .dq-tbar > span {{ display: block; height: 100%; border-radius: 3px; min-width: 2px; }}
-.dq-elfoot b {{ display: inline-block; width: .9rem; height: 6px; border-radius: 3px;
-  margin: 0 .3rem 0 .8rem; background: {TONE["critical"]["fg"]}; vertical-align: .05rem; }}
 .dq-tbar > i {{ position: absolute; top: -3px; width: 2px; height: 12px;
   border-radius: 1px; background: {NEUTRAL["text"]}; }}
 /* Three lines, so the row is taller than the two-line `.stack` rows — and the height
@@ -1892,10 +1879,6 @@ h1, h2, h3 {{ letter-spacing: 0; }}
    above the tabs, so it is on screen whichever of them is open. */
 .dq-elhd {{ padding: .9rem 1rem .5rem; }}
 .dq-elhd .k {{ font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
-/* The shortfall: from the score to the target tick, in the row's colour. At least
-   3px, so half a point below still shows. */
-.dq-tbar > b {{ position: absolute; top: 0; height: 100%; min-width: 3px;
-  border-radius: 0 3px 3px 0; }}
   color: var(--dq-text-3); font-weight: 600; }}
 .dq-elhd .n {{ font-size: clamp(.92rem, 1.08vw, 1.02rem); font-weight: 620;
   color: {NEUTRAL["text"]}; margin-top: .3rem; }}
