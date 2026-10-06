@@ -1059,6 +1059,27 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 }}
 .stMain [data-stale="true"] {{ opacity: .82 !important;
   transition: opacity .25s ease .4s !important; }}
+/* A new page rises in, top block first. Keyed to the page's TOP-LEVEL blocks on
+   purpose, measured: a page switch mounts every one of them fresh, while a row pick,
+   a tab or a fragment rerun keeps all of them — so this fires on navigation and
+   never on a click inside a page. Animating every element container instead would
+   blink half the pane on each pick, since a fragment remounts what it redraws.
+   `backwards` fill and no `forwards`: the transform must be gone once it ends, or
+   every fixed-position drawer below would be positioned against this block. A
+   drawer opened by a full rerun IS a new top-level block, so the three are excluded
+   by name: they slide in on their own, and this would place them in the page flow
+   until it ended. */
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] >
+  :not(:has(.st-key-dq_check_drawer, .st-key-dq_element_drawer, .st-key-dq_decide_drawer)) {{
+  animation: dq-page-in .22s cubic-bezier(.22, .61, .36, 1) backwards; }}
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :nth-child(2) {{ animation-delay: .03s; }}
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :nth-child(3) {{ animation-delay: .06s; }}
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :nth-child(4) {{ animation-delay: .09s; }}
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > :nth-child(n+5) {{ animation-delay: .12s; }}
+@keyframes dq-page-in {{
+  from {{ opacity: 0; transform: translateY(6px); }}
+  to {{ opacity: 1; transform: none; }}
+}}
 /* The running man and Stop say what the bar says. Hidden only while running, so
    anything else the widget has to report still shows. */
 [data-test-script-state="running"] [data-testid="stStatusWidget"] {{ visibility: hidden; }}
@@ -1067,6 +1088,7 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   [data-testid="stApp"][data-test-script-state="running"]::after {{ animation: none;
     background: {ACCENT}; opacity: .55; }}
   .stMain [data-stale="true"] {{ transition: none !important; }}
+  [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > * {{ animation: none; }}
   [class*="st-key-dqnav_"]::before,
   [class*="st-key-dqnav_"] [data-testid="stPageLink-NavLink"] {{ transition: none; }}
 }}

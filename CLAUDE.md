@@ -645,7 +645,13 @@ Streamlit's own attributes: if an upgrade renames them the app falls back to the
 default fade rather than breaking. The sidebar links sit in `dqnav_<page>`
 containers and `app.py` writes one rule per run lighting the current one — a
 drill-down lights its parent (`PARENT`), which Streamlit's own highlight cannot. All of
-it stops moving under `prefers-reduced-motion`. Testing it in a hidden browser tab
+it stops moving under `prefers-reduced-motion`. A new page rises in (`dq-page-in`) on
+the page's TOP-LEVEL blocks only: measured, a page switch mounts all of them fresh
+and a pick, tab or fragment rerun keeps all of them, whereas a fragment remounts
+about half the element containers it redraws — animate those and every pick blinks.
+The three drawers are excluded by name, because a drawer opened by a full rerun is a
+new top-level block and the animation's transform would pull it out of `fixed`.
+Testing it in a hidden browser tab
 shows every transition frozen at its start; that is the tab, not the CSS.
 
 **Unity Catalog hands back tz-aware timestamps and the fixture's parquet is naive.**
