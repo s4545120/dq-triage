@@ -1,0 +1,105 @@
+# The two scheduled/triggered jobs, as a Databricks Asset Bundle -- DRAFT, never deployed.
+#
+# Replaces jobs that today run as a person, from files copied by hand into
+# /Workspace/Users/lijinrui46@gmail.com/dq-onboard-jobs. Here the code comes from git, the
+# jobs run as a service principal, and a failure mails someone. resources/README.md has
+# the cutover, which matters: two copies of the steps job on one trigger would both write.
+#
+#   databricks bundle validate -t triage
+#   databricks bundle deploy   -t triage
+#
+# The app (dq-app/) is NOT in this bundle: it deploys on its own, see production/README.md.
+
+bundle:
+  name: dq-jobs
+
+include:
+  - resources/*.yml
+
+# Only what the two jobs execute. onboard.py imports its siblings and, through
+# templates.py, fixtures/rules.py; `steps` imports jobs/run_checks.py. `setup` and
+# `install` also need sql/, and run from a laptop -- never from a job -- so it stays out.
+sync:
+  paths:
+    - onboarding
+    - jobs
+    - fixtures
+  exclude:
+    - fixtures/out/**
+    - "**/test_*.py"
+    - "**/__pycache__/**"
+    - "**/.pytest_cache/**"
+
+variables:
+  catalog:
+    description: Catalog holding the dq tables.
+    default: workspace
+  schema:
+    description: Schema the jobs act on (the sandpit layout puts everything in one).
+  prefix:
+    description: Table-name prefix of the sandpit layout.
+    default: dq_
+  fn_prefix:
+    description: Resolved prefix of the shared UC helper functions (rule_expr's dq.fn.).
+    default: workspace.dq_triage.dq_fn_
+  job_sp:
+    description: >-
+      Application id of the service principal both jobs run as. Its own identity, NOT
+      the app's (fa379f33-...): the app's grants are the six appends and nothing more.
+      resources/grants_job_sp.sql is what it needs.
+  alert_email:
+    description: Who hears about a failed or slow run. A group mailbox, not a person.
+  root:
+    description: >-
+      Where the code lands. The deployer's home, NOT /Workspace/Shared: a shared folder
+      is writable by every user, which is the hand-edited-code risk this bundle exists to
+      remove. Deploy as the job principal (from CI) and this is the principal's home.
+    default: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+  steps_trigger:
+    description: PAUSED or UNPAUSED. Deploy PAUSED for the cutover, see resources/README.md.
+    default: PAUSED
+  checks_schedule:
+    description: PAUSED or UNPAUSED for the daily check run.
+    default: PAUSED
+
+targets:
+  # The personal workspace's real schema -- what the hand-made jobs 906515649279596 and
+  # 568071030107709 do today.
+  triage:
+    default: true
+    mode: production
+    workspace:
+      host: https://dbc-19c77b90-423e.cloud.databricks.com
+      root_path: ${var.root}
+    run_as:
+      service_principal_name: ${var.job_sp}
+    variables:
+      schema: dq_triage
+
+  # The disposable test schema -- 172834918560011 and 851061192655949 today.
+  onboard:
+    mode: production
+    workspace:
+      host: https://dbc-19c77b90-423e.cloud.databricks.com
+      root_path: ${var.root}
+    run_as:
+      service_principal_name: ${var.job_sp}
+    variables:
+      schema: dq_onboard
+
+  # A company workspace. Every value is a placeholder; fill them in before the first
+  # validate. Both jobs take --catalog and --fn-prefix, but the two-schema layout
+  # (dq.config / dq.results) is not something they support -- wh.py and run_checks.py
+  # both build sandpit names (<schema>.dq_<group>_<table>) -- so production means one
+  # schema in this layout until that changes.
+  # prod:
+  #   mode: production
+  #   workspace:
+  #     host: https://<company-workspace>
+  #     root_path: ${var.root}
+  #   run_as:
+  #     service_principal_name: ${var.job_sp}
+  #   variables:
+  #     catalog: <catalog>
+  #     schema: <schema>
+  #     fn_prefix: <catalog>.<schema>.dq_fn_

@@ -1,0 +1,133 @@
+# Both jobs, parameterised by target. Settings copied from the live hand-made jobs on
+# 2026-10-06; what changed is marked CHANGED.
+
+resources:
+  jobs:
+    onboard_steps:
+      name: dq ${var.schema} onboard steps
+      description: >-
+        Event-triggered onboarding in ${var.catalog}.${var.schema}: when a table is
+        submitted (monitored_table) or bindings are decided (binding_review), discover
+        bindings, apply approved ones, unbind decommissioned or excluded columns, generate
+        shadow checks and measure only new shadow checks. Writes nothing that raises a
+        problem: active results come from the daily checks job.
+
+      # The app starts no job; this watches the two tables only the app writes. The job
+      # itself never writes either one, so it cannot trigger itself.
+      trigger:
+        pause_status: ${var.steps_trigger}
+        table_update:
+          condition: ANY_UPDATED
+          table_names:
+            - ${var.catalog}.${var.schema}.${var.prefix}config_monitored_table
+            - ${var.catalog}.${var.schema}.${var.prefix}config_binding_review
+          min_time_between_triggers_seconds: 60
+          wait_after_last_change_seconds: 61
+
+      # One at a time, the rest queued: two concurrent discovers would each append the
+      # same proposal, and appendOnly means the duplicate could never be removed.
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+
+      # CHANGED: was 0 (no limit). Runs take 1-2.5 min on the 1000-row mocks; a run past
+      # 30 min is a large table being scanned, and it holds the queue while it does.
+      timeout_seconds: 1800
+      health:
+        rules:
+          - metric: RUN_DURATION_SECONDS
+            op: GREATER_THAN
+            value: 600
+
+      # CHANGED: was empty. A failed apply leaves approved bindings unapplied and the app
+      # still showing "waiting", so a failure has to reach someone.
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
+        on_duration_warning_threshold_exceeded:
+          - ${var.alert_email}
+      notification_settings:
+        no_alert_for_skipped_runs: true
+        no_alert_for_canceled_runs: true
+
+      environments:
+        - environment_key: env
+          spec:
+            client: "3"
+
+      tasks:
+        - task_key: steps
+          environment_key: env
+          spark_python_task:
+            python_file: ../onboarding/onboard.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--schema"
+              - "${var.schema}"
+              - "--fn-prefix"
+              - "${var.fn_prefix}"
+              - "steps"
+          # Deliberately no retries. Every step is idempotent so a retry would be safe,
+          # but a step that failed once on a constraint will fail again, and the alert
+          # should come from the first failure, not the third.
+          max_retries: 0
+
+    checks:
+      name: dq ${var.schema} checks
+      description: >-
+        Daily check run on every selected table in ${var.catalog}.${var.schema}. The only
+        job whose results for ACTIVE checks reach Triage -- the onboard steps job measures
+        shadow checks only.
+
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: Australia/Sydney
+        pause_status: ${var.checks_schedule}
+
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+
+      # CHANGED: was 0. About a minute on the mocks today; the limit is for a real
+      # estate, and wants re-measuring once one is onboarded.
+      timeout_seconds: 7200
+      health:
+        rules:
+          - metric: RUN_DURATION_SECONDS
+            op: GREATER_THAN
+            value: 3600
+
+      # CHANGED: was empty. A day with no check run is a day Triage silently goes stale.
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
+        on_duration_warning_threshold_exceeded:
+          - ${var.alert_email}
+      notification_settings:
+        no_alert_for_skipped_runs: true
+        no_alert_for_canceled_runs: true
+
+      environments:
+        - environment_key: env
+          spec:
+            client: "3"
+
+      tasks:
+        - task_key: run_checks
+          environment_key: env
+          spark_python_task:
+            python_file: ../jobs/run_checks.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--schema"
+              - "${var.schema}"
+              - "--prefix"
+              - "${var.prefix}"
+              - "--fn-prefix"
+              - "${var.fn_prefix}"
+          # One retry: a check run that fails at 03:00 on a transient warehouse error
+          # would otherwise leave the whole day without a run.
+          max_retries: 1
+          min_retry_interval_millis: 600000

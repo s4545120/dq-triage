@@ -56,6 +56,7 @@ labelled as that decision: running the file as written takes it.
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16; scorecard redrawn around targets 2026-10-01. Runs on the fixture **and** against Unity Catalog; deployed as the Databricks App `dq-triage`. |
 | `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard`** (`onboard.py setup`) **and to `dq_triage`** (`onboard.py --schema dq_triage install`, 2026-10-06, with `01`'s two template columns). |
 | `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app carries the Onboarding pages since 2026-10-06 (deployment `01f1c110…`). See *Onboarding in dq_triage*. |
+| `databricks.yml` + `resources/` | **Draft, never deployed** (2026-10-06). The two jobs above as a bundle: run as a job service principal (not yet created), code from git, failure email, timeouts. `resources/README.md` has the cutover — bind to the existing job ids, never deploy beside them. `onboard.py` takes `--catalog` and `--fn-prefix` since the same day (call-time in `wh`, like `--schema`); still one schema in the sandpit layout, so no `prod` target yet. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
 
 **There is a real workspace and it is LOADED — which is not the same as having been
@@ -1419,13 +1420,6 @@ app's user-authorization scope); `CTCT_BRTH_PLAUSIBLE`'s `year(BRTH_TS)` fails o
 number-typed key columns get no checks until templates accept them; and the precomputed
 catalog inventory that would judge readability by the check job's identity.
 
-## Invariants — things that look like bugs and are not
-
-**Execution is the defining non-goal.** No `UPDATE`/`MERGE`/`DELETE` on business data, no
-job triggering, no execute button. `config.playbook` deliberately has no `fix_body`,
-`fix_sql`, `job_id` or `notebook_path` — a body column is the first step to an execute
-button. If someone asks for one, that is a scope change to escalate, not a schema change.
-
 ## Data slices — 2026-10-06
 
 **A slice is which rows of a monitored table are checked at all**; a rule's
@@ -1494,6 +1488,13 @@ exist, and older code ignores them. The jobs' copy of `run_checks.py` can go bef
 after; it treats missing columns as unsliced. **Not built**: discovery's value-pattern
 match still reads the whole table, and the Scorecard's element trend does not mark a
 slice change (an element can span tables, so "the slice changed" has no single date there).
+
+## Invariants — things that look like bugs and are not
+
+**Execution is the defining non-goal.** No `UPDATE`/`MERGE`/`DELETE` on business data, no
+job triggering, no execute button. `config.playbook` deliberately has no `fix_body`,
+`fix_sql`, `job_id` or `notebook_path` — a body column is the first step to an execute
+button. If someone asks for one, that is a scope change to escalate, not a schema change.
 
 **A notification is triggered by a decision, never by a threshold.** A check falling
 past its limit surfaces a candidate in the app and sends nothing; what sends is
