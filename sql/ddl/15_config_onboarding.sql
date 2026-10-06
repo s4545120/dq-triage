@@ -20,7 +20,10 @@
 -- APPEND-ONLY, ALL FOUR, LIKE THE REGISTER. Pausing or decommissioning a table is a new
 -- monitored_table version; changing a template is a new template_version; a changed
 -- mind about a binding is not representable as an edit, so a decision is final and the
--- next proposal for that column is a new row.
+-- next proposal for that column is a new row. The one exception is EXCLUSION AT
+-- PROMOTION: a person taking back an approved binding at the last look appends a second
+-- review, `rejected`, reason starting "[excluded at promotion]". The latest review is
+-- the decision everywhere; the onboarding job then unbinds the column.
 --
 -- THE CHECKS BELOW ARE WHERE THE RULES LIVE LAST. The app and the job each refuse what
 -- these refuse, earlier and with a better message; a third writer that skipped both
@@ -85,7 +88,7 @@ TBLPROPERTIES (delta.appendOnly = true);
 
 CREATE TABLE IF NOT EXISTS {catalog}.config.binding_review (
   proposal_id STRING    NOT NULL COMMENT 'the proposal decided',
-  decision    STRING    NOT NULL COMMENT 'approved | rejected. One decision per proposal; a rejected column is not proposed again unless it is tagged since',
+  decision    STRING    NOT NULL COMMENT 'approved | rejected. One decision per proposal, except a rejection appended at promotion to take back an approved binding (reason starts "[excluded at promotion]"); the latest is the decision. A rejected column is not proposed again unless it is tagged since',
   reviewed_by STRING    NOT NULL COMMENT 'the deciding person''s platform identity',
   reviewed_at TIMESTAMP NOT NULL COMMENT 'when',
   reason      STRING             COMMENT 'required for a rejection. A self-approval made where the second-approver rule is waived starts "[second approver waived]"'

@@ -66,7 +66,8 @@ def _write(d: Path, name: str, df: pd.DataFrame) -> None:
     df.to_parquet(d / f"{name}.parquet", index=False)
 
 
-def build(tmp: Path, *, open_proposal: bool = False, measured: bool = True) -> Path:
+def build(tmp: Path, *, open_proposal: bool = False, measured: bool = True,
+          second_column: bool = False) -> Path:
     if not FIXTURE_DIR.is_dir():
         pytest.skip("fixture not built")
     out = tmp / "out"
@@ -88,7 +89,19 @@ def build(tmp: Path, *, open_proposal: bool = False, measured: bool = True) -> P
         target_table=LEAD, target_column="EMAIL", populated_when=None,
         expected_scope_filter=None, binding_status="bound",
         discovered_by="value_signature", confidence=0.974)]
-    _write(out, "config.cde_registry", pd.concat([cde, pd.DataFrame([latest])],
+    extra_cde = []
+    if second_column:
+        # HOME_PHONE bound to the landline element through an approved proposal: the
+        # column a test excludes at promotion.
+        land = cde[cde["cde_id"] == "CDE_CUST_LANDLINE"].sort_values("cde_version").iloc[-1].to_dict()
+        land["cde_version"] = int(land["cde_version"]) + 1
+        land["effective_from"] = RUN_TS
+        land["bindings"] = list(land["bindings"]) + [dict(
+            target_table=LEAD, target_column="HOME_PHONE", populated_when=None,
+            expected_scope_filter=None, binding_status="bound",
+            discovered_by="name_match", confidence=0.6)]
+        extra_cde.append(land)
+    _write(out, "config.cde_registry", pd.concat([cde, pd.DataFrame([latest] + extra_cde)],
                                                    ignore_index=True))
 
     props = [dict(proposal_id="p-email", proposed_at=RUN_TS, target_table=LEAD,
@@ -101,6 +114,13 @@ def build(tmp: Path, *, open_proposal: bool = False, measured: bool = True) -> P
                           target_column="HOME_PHONE", cde_id="CDE_CUST_LANDLINE",
                           method="value_signature", confidence=0.993, evidence="99.3%",
                           proposed_by="job"))
+    if second_column:
+        props.append(dict(proposal_id="p-home", proposed_at=RUN_TS, target_table=LEAD,
+                          target_column="HOME_PHONE", cde_id="CDE_CUST_LANDLINE",
+                          method="name_match", confidence=0.6, evidence="column name",
+                          proposed_by="job:onboard-discover"))
+        revs.append(dict(proposal_id="p-home", decision="approved",
+                         reviewed_by="owner@example.com", reviewed_at=RUN_TS, reason=None))
     _write(out, "config.binding_proposal", pd.DataFrame(props))
     _write(out, "config.binding_review", pd.DataFrame(revs))
 
@@ -108,11 +128,17 @@ def build(tmp: Path, *, open_proposal: bool = False, measured: bool = True) -> P
     reg = _read(out, "config.rule_registry")
     base = reg[reg["rule_id"] == "CTCT_EML_FMT"].sort_values("rule_version").iloc[-1].to_dict()
     rules = []
-    for rid, name in [("LEAD_EMAIL_FMT", "Customer email address is a well-formed address"),
-                      ("LEAD_EMAIL_NOT_NULL", "Customer email address is present")]:
+    checks = [("LEAD_EMAIL_FMT", "Customer email address is a well-formed address", "EMAIL",
+               "CDE_CUST_EMAIL"),
+              ("LEAD_EMAIL_NOT_NULL", "Customer email address is present", "EMAIL",
+               "CDE_CUST_EMAIL")]
+    if second_column:
+        checks.append(("LEAD_HOME_PHONE_FMT", "Landline is a valid number", "HOME_PHONE",
+                       "CDE_CUST_LANDLINE"))
+    for rid, name, col, cde_id in checks:
         r = dict(base)
         r.update(rule_id=rid, rule_version=1, rule_name=name, target_table=LEAD,
-                 target_column="EMAIL", status="shadow", fail_threshold_pct=0.5,
+                 target_column=col, cde_id=cde_id, status="shadow", fail_threshold_pct=0.5,
                  effective_from=RUN_TS, created_at=RUN_TS, created_by="job:onboard-generate",
                  promoted_by=None, promoted_at=None, note="generated")
         rules.append(r)
@@ -123,10 +149,13 @@ def build(tmp: Path, *, open_proposal: bool = False, measured: bool = True) -> P
         runs = _read(out, "results.check_run")
         row = runs.iloc[0].to_dict()
         new = []
-        for rid, v, n in [("LEAD_EMAIL_FMT", 25, 980), ("LEAD_EMAIL_NOT_NULL", 0, 1000)]:
+        measures = [("LEAD_EMAIL_FMT", 25, 980, "EMAIL"), ("LEAD_EMAIL_NOT_NULL", 0, 1000, "EMAIL")]
+        if second_column:
+            measures.append(("LEAD_HOME_PHONE_FMT", 600, 1000, "HOME_PHONE"))
+        for rid, v, n, col in measures:
             r = dict(row)
             r.update(result_id=f"res-{rid}", run_id="run-lead-1", run_ts=RUN_TS, rule_id=rid,
-                     rule_version=1, target_table=LEAD, target_column="EMAIL",
+                     rule_version=1, target_table=LEAD, target_column=col,
                      rows_scanned=n, violation_count=v, violation_pct=round(100 * v / n, 4),
                      threshold_pct=0.5, status="skipped", message="shadow rule")
             new.append(r)
@@ -513,6 +542,82 @@ def test_without_the_waiver_the_rule_holds():
     with pytest.raises(onboarding.OnboardingRejected, match="second person"):
         onboarding.validate_review({"proposed_by": me}, me, "approved", None)
     onboarding.validate_review({"proposed_by": me}, me, "approved", None, allow_self=True)
+
+
+# --- Excluding a column at promotion -------------------------------------------------------
+
+def test_an_approved_binding_is_excludable_and_a_later_rejection_excludes_it():
+    props = pd.DataFrame([
+        dict(proposal_id="p1", proposed_at=RUN_TS, target_table=LEAD, target_column="A",
+             cde_id="E1"),
+        dict(proposal_id="p2", proposed_at=RUN_TS, target_table=LEAD, target_column="B",
+             cde_id="E2"),
+        dict(proposal_id="p3", proposed_at=RUN_TS, target_table=LEAD, target_column="C",
+             cde_id="E3")])
+    t0, t1 = RUN_TS, datetime(2026, 10, 6)
+    revs = pd.DataFrame([
+        dict(proposal_id="p1", decision="approved", reviewed_at=t0, reason=None),
+        dict(proposal_id="p2", decision="approved", reviewed_at=t0, reason=None),
+        dict(proposal_id="p2", decision="rejected", reviewed_at=t1,
+             reason=f"{onboarding.EXCLUSION_MARK} holds account notes"),
+        dict(proposal_id="p3", decision="rejected", reviewed_at=t0, reason="not a phone")])
+    assert onboarding.excludable_columns(props, revs, LEAD) == {"A": "p1"}
+    # Only the exclusion: a first-time rejection never bound anything.
+    assert onboarding.excluded_bindings(props, revs) == {(LEAD, "B", "E2")}
+    # A later approval of a new proposal for the same pair binds it again.
+    props2 = pd.concat([props, pd.DataFrame([dict(
+        proposal_id="p4", proposed_at=t1, target_table=LEAD, target_column="B", cde_id="E2")])])
+    revs2 = pd.concat([revs, pd.DataFrame([dict(
+        proposal_id="p4", decision="approved", reviewed_at=datetime(2026, 10, 7), reason=None)])])
+    assert onboarding.excluded_bindings(props2, revs2) == set()
+    assert onboarding.excludable_columns(props2, revs2, LEAD) == {"A": "p1", "B": "p4"}
+
+
+def test_excluding_a_column_retires_its_checks_and_takes_its_binding_back(page, tmp_path):
+    at = page(build(tmp_path, second_column=True), table=True)
+    assert [str(b.label) for b in _promote_button(at)] == ["Promote 3 checks"]
+    at.checkbox(key="_onb_inc_HOME_PHONE").uncheck().run()
+    assert [str(b.label) for b in _promote_button(at)] == ["Promote 2 checks"]
+    assert "1 column</b> excluded, 1 check retired" in _text(at)
+
+    # No reason: the dialog says so and the adapter refuses; nothing is written.
+    _promote_button(at)[0].click().run()
+    assert "An exclusion needs a reason" in _text(at)
+    _confirm(at, "promote")
+    assert not at.session_state["_pending_rule_versions"] \
+        if "_pending_rule_versions" in at.session_state else True
+
+    at.button(key="_onb_ask_no_promote").click().run()
+    at.text_input(key="onbt_ex_reason").input("Holds the account's fax number").run()
+    _promote_button(at)[0].click().run()
+    assert "Excluded" in _text(at) and "HOME_PHONE" in _text(at)
+    _confirm(at, "promote")
+    assert not at.exception, [e.message for e in at.exception]
+
+    versions = {v["rule_id"]: v for v in at.session_state["_pending_rule_versions"]}
+    assert {k: v["status"] for k, v in versions.items()} == {
+        "LEAD_EMAIL_FMT": "active", "LEAD_EMAIL_NOT_NULL": "active",
+        "LEAD_HOME_PHONE_FMT": "retired"}
+    assert "fax number" in versions["LEAD_HOME_PHONE_FMT"]["note"]
+    assert pd.isna(versions["LEAD_HOME_PHONE_FMT"].get("promoted_by"))
+    revs = [r for r in at.session_state["_pending_binding_reviews"] if r["proposal_id"] == "p-home"]
+    assert len(revs) == 1 and revs[0]["decision"] == "rejected"
+    assert revs[0]["reason"] == f"{onboarding.EXCLUSION_MARK} Holds the account's fax number"
+
+    body = _text(at)
+    assert "All 2 checks are active" in body
+    assert "excluded at promotion" in body
+
+
+def test_a_binding_registered_by_hand_cannot_be_excluded(page, tmp_path):
+    d = build(tmp_path, second_column=True)
+    revs = _read(d, "config.binding_review")
+    _write(d, "config.binding_review", revs[revs["proposal_id"] != "p-home"])
+    props = _read(d, "config.binding_proposal")
+    _write(d, "config.binding_proposal", props[props["proposal_id"] != "p-home"])
+    at = page(d, table=True)
+    assert at.checkbox(key="_onb_inc_HOME_PHONE").disabled
+    assert not at.checkbox(key="_onb_inc_EMAIL").disabled
 
 
 # --- Pause, resume, decommission ----------------------------------------------------------

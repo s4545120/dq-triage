@@ -11,9 +11,8 @@ promotion needs — the same rule-version append the Rules page makes.
 reason every other view here is: a promotion made in this session has to move the
 table's stage before any warehouse could re-run the view.
 
-Binding confirmation is NOT here. It would be the app's fourth write, and until that
-is decided it happens in `onboarding/review.sql`; this page shows open proposals and
-says where they are reviewed.
+A binding decision is a `config.binding_review` append (`adapter.review_binding`), and
+so is excluding a column at promotion (`excludable_columns`, `excluded_bindings`).
 """
 
 from __future__ import annotations
@@ -281,6 +280,56 @@ def validate_review(proposal: dict, reviewer: str, decision: str, reason: str | 
     if decision == "rejected" and not (reason or "").strip():
         raise OnboardingRejected("Say why you are rejecting it. The reason is kept with "
                                  "the decision, and stops the same proposal coming back.")
+
+
+# --- Excluding a column at promotion ------------------------------------------------------
+# The last look at a table is the Promote card, with every check measured. A column
+# whose numbers show the binding was wrong is EXCLUDED there: its shadow checks get a
+# retired version, and a second review -- `rejected`, reason starting EXCLUSION_MARK --
+# is appended to the proposal that bound it. That second review is the one place a
+# proposal carries two decisions, and the latest one wins everywhere: the apply job
+# reads the latest review per proposal so it does not re-apply the binding, discovery
+# treats the column as settled, and the onboarding job's unbind step drops the binding
+# whose latest decision is this rejection. No new table and no new grant: it is the
+# binding_review append the review form already makes.
+
+EXCLUSION_MARK = "[excluded at promotion]"
+
+
+def latest_reviews(reviews: pd.DataFrame) -> pd.DataFrame:
+    if reviews.empty:
+        return reviews
+    return (reviews.sort_values("reviewed_at").groupby("proposal_id", as_index=False)
+            .tail(1))
+
+
+def excludable_columns(proposals: pd.DataFrame, reviews: pd.DataFrame,
+                       table: str) -> dict[str, str]:
+    """{column: proposal_id} for the columns of `table` whose binding came from a
+    proposal whose latest decision is an approval -- the bindings a person can take back.
+    A binding registered by hand has no proposal to record the exclusion against."""
+    if proposals.empty or reviews.empty:
+        return {}
+    latest = latest_reviews(reviews)
+    ok = set(latest.loc[latest["decision"] == "approved", "proposal_id"])
+    p = proposals[(proposals["target_table"] == table) & proposals["proposal_id"].isin(ok)]
+    p = p.sort_values("proposed_at")
+    return dict(zip(p["target_column"], p["proposal_id"]))       # latest proposal wins
+
+
+def excluded_bindings(proposals: pd.DataFrame, reviews: pd.DataFrame) -> set[tuple]:
+    """(table, column, cde_id) of every binding excluded at promotion: the latest
+    decision about that column and element is a rejection carrying EXCLUSION_MARK.
+    A later approval of a new proposal for the same pair undoes it. The SQL twin is
+    `unbind_excluded` in onboarding/onboard.py."""
+    if proposals.empty or reviews.empty:
+        return set()
+    j = proposals.merge(reviews, on="proposal_id")
+    j = j.sort_values("reviewed_at").groupby(
+        ["target_table", "target_column", "cde_id"], as_index=False).tail(1)
+    hit = j[(j["decision"] == "rejected")
+            & j["reason"].fillna("").str.startswith(EXCLUSION_MARK)]
+    return set(zip(hit["target_table"], hit["target_column"], hit["cde_id"]))
 
 
 # --- How the pages say it ---------------------------------------------------------------

@@ -578,6 +578,22 @@ def write_binding_review(row: dict) -> bool:
     )
 
 
+def write_binding_exclusion(row: dict) -> bool:
+    """The second review a proposal can carry: a rejection appended at promotion to a
+    binding approved earlier. Refused unless the proposal has an approval and no
+    rejection, so a column is excluded once and only after it was bound."""
+    table = _t("config", "binding_review")
+    return _guarded_insert(
+        table, row, list(row.keys()),
+        guard=(f"EXISTS (SELECT 1 FROM {table} WHERE proposal_id = :g_proposal_id "
+               "AND decision = 'approved') AND NOT EXISTS (SELECT 1 FROM "
+               f"{table} WHERE proposal_id = :g_proposal_id AND decision = 'rejected')"),
+        guard_params={"proposal_id": row["proposal_id"]},
+        readback={"proposal_id": row["proposal_id"], "reviewed_by": row["reviewed_by"],
+                  "decision": "rejected"},
+    )
+
+
 def threshold_proposals() -> pd.DataFrame:
     return _q(f"SELECT * FROM {_t('results', 'threshold_proposal')}")
 

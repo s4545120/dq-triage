@@ -594,6 +594,60 @@ WHERE  cde_id = {lit(cde)}
         print("decommissioned tables hold no bindings")
 
 
+EXCLUSION_MARK = "[excluded at promotion]"     # dq_app/domain/onboarding.py says the same
+
+
+def unbind_excluded(conn) -> None:
+    """Remove the bindings a person excluded at promotion.
+
+    The app appends a rejection marked EXCLUSION_MARK to the approved proposal and
+    retires the column's checks; this drops the binding, the same one-version-per-element
+    write as unbind_retired. A binding is excluded when the LATEST decision on any
+    proposal for its (table, column, element) is that rejection, so approving a new
+    proposal for the same pair later binds it again and this leaves it alone. The app's
+    twin is `onboarding.excluded_bindings`."""
+    hits = run(conn, f"""
+        WITH d AS (
+          SELECT p.target_table, p.target_column, p.cde_id, r.decision, r.reason,
+                 ROW_NUMBER() OVER (PARTITION BY p.target_table, p.target_column, p.cde_id
+                                    ORDER BY r.reviewed_at DESC) AS rn
+          FROM   {t('config', 'binding_proposal')} p
+          JOIN   {t('config', 'binding_review')} r ON r.proposal_id = p.proposal_id)
+        SELECT b.cde_id, b.target_table, b.target_column
+        FROM   d
+        JOIN   {t('config', 'v_binding_current')} b
+               ON b.target_table = d.target_table AND b.target_column = d.target_column
+              AND b.cde_id = d.cde_id
+        WHERE  d.rn = 1 AND d.decision = 'rejected'
+          AND  startswith(d.reason, {lit(EXCLUSION_MARK)})""")
+    if not hits:
+        print("no excluded bindings")
+        return
+    by_cde: dict[str, list[tuple[str, str]]] = {}
+    for h in hits:
+        by_cde.setdefault(h["cde_id"], []).append((h["target_table"], h["target_column"]))
+    reg = t("config", "cde_registry")
+    cols = ("cde_id, cde_version, cde_name, business_term, data_class, definition, "
+            "expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings, "
+            "business_domain, owner_group, status, effective_from, registered_by, registered_at, "
+            "note")
+    for cde, pairs in by_cde.items():
+        names = ", ".join(f"{tb.split('.')[-1]}.{c}" for tb, c in pairs)
+        keys = ", ".join(lit(f"{tb}|{c}") for tb, c in pairs)
+        note = f"Unbinds {names}: excluded at promotion. Nothing else changed."
+        run(conn, f"""INSERT INTO {reg} ({cols})
+SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
+       expected_signature, criticality, pii, regulatory_basis, tolerance_pct,
+       filter(bindings, b -> NOT array_contains(array({keys}),
+                                                concat(b.target_table, '|', b.target_column))),
+       business_domain, owner_group, status, current_timestamp(), 'job:onboard-unbind',
+       current_timestamp(), {lit(note)}
+FROM   {reg}
+WHERE  cde_id = {lit(cde)}
+  AND  cde_version = (SELECT max(cde_version) FROM {reg} WHERE cde_id = {lit(cde)})""")
+        print(f"{cde}: unbound {names} (excluded at promotion)")
+
+
 def unmeasured_tables(conn) -> list[str]:
     """Selected tables carrying a shadow rule version that no check run has measured."""
     return [r["target_table"] for r in run(conn, f"""
@@ -636,6 +690,7 @@ def steps(conn) -> None:
     print("== discover"); discover(conn)
     print("\n== apply"); apply(conn)
     print("\n== unbind decommissioned tables"); unbind_retired(conn)
+    print("\n== unbind columns excluded at promotion"); unbind_excluded(conn)
     print("\n== generate"); generate(conn)
     print("\n== measure new shadow checks"); measure_shadow(conn)
 

@@ -1293,6 +1293,17 @@ lists runs or compares one run with the one before should start from
   whose input type differs from the column's, is skipped and says why.
 * **Promotion is offered only once every binding is decided and every shadow check is
   measured.** A promoted check counts from the next daily run.
+* **Promotion is the last chance to drop a column (2026-10-06).** The Promote card ticks
+  every column, and unticking one *excludes* it. `adapter.promote_table` first appends a
+  second `binding_review` on the column's approved proposal, `rejected`, with a reason
+  starting `[excluded at promotion]`. Only once that lands does it retire the column's
+  shadow checks, in the same append as the promotions. Then `onboard.py unbind_excluded`
+  (in `steps`) drops the binding. This is the one place a proposal carries two
+  decisions; the latest one is the decision for apply, discovery and unbind alike. It
+  needs no new grant, because it is the existing `binding_review` append. A column bound
+  by hand has no proposal to record against, so its checkbox is disabled. Excluding every
+  column is refused: that is a decommission. The twins are
+  `onboarding.excluded_bindings` and the job's SQL.
 * **Decommission is permanent; pause is not.** Retiring the table stops the runner
   (it checks only `selected` tables); every check gets a retired version; the job removes
   the bindings. Results and Triage problems stay as history. Table codes are never reused.

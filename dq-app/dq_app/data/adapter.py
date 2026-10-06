@@ -725,6 +725,73 @@ def promote_rules(rule_ids: list[str], note: str) -> tuple[list[str], list[str]]
     return [r["rule_id"] for r in rows if r["rule_id"] in landed], refused
 
 
+def promote_table(promote_ids: list[str], exclude: dict[str, list[str]], note: str,
+                  reason: str | None = None) -> tuple[list[str], list[str], list[str]]:
+    """Promote a table's shadow checks, less the columns excluded at the last look.
+    Returns (promoted, retired, refused reasons).
+
+    `exclude` maps the proposal that bound each excluded column to that column's shadow
+    checks. For each one, a rejection marked `onboarding.EXCLUSION_MARK` is appended to
+    the proposal first -- the onboarding job then unbinds the column -- and only if it
+    landed are the column's checks retired. Then the retirements and the promotions go
+    in one append. Exclusions first: a refused exclusion leaves its column in shadow,
+    not active, so a column the person meant to drop is never promoted by accident.
+    """
+    who = identity.current()
+    _require_platform_identity(who, "Promoting rules")
+    if exclude and not (reason or "").strip():
+        raise WriteRejected("Say why the excluded columns do not hold their element. The "
+                            "reason is kept with the binding's history.")
+    if not promote_ids:
+        raise WriteRejected("Every column is excluded, so nothing would be promoted. "
+                            "Decommission the table instead.")
+    latest = onboarding.latest_reviews(get_binding_reviews())
+    approved = set(latest.loc[latest["decision"] == "approved", "proposal_id"]) \
+        if len(latest) else set()
+    now = datetime.now()
+    refused, retire = [], []
+    for pid, rule_ids in exclude.items():
+        if pid not in approved:
+            refused.append(f"{', '.join(rule_ids)}: the binding is no longer an approved "
+                           "one, so it was not excluded.")
+            continue
+        row = {"proposal_id": pid, "decision": "rejected", "reviewed_by": who.email,
+               "reviewed_at": now,
+               "reason": f"{onboarding.EXCLUSION_MARK} {reason.strip()}"}
+        if not _impl.write_binding_exclusion(row):
+            refused.append(f"{', '.join(rule_ids)}: someone decided this binding since you "
+                           "opened it, so it was not excluded.")
+            continue
+        retire += rule_ids
+
+    reg = get_rule_registry()
+    rows = []
+    for rid in retire:
+        latest_v = reg[reg["rule_id"] == rid].sort_values("rule_version").iloc[-1]
+        if latest_v["status"] != "shadow":
+            refused.append(f"{rid}: is '{latest_v['status']}', not 'shadow'; not retired.")
+            continue
+        r = latest_v.to_dict()
+        r.update({"rule_version": int(latest_v["rule_version"]) + 1, "status": "retired",
+                  "effective_from": now, "created_by": who.email, "created_at": now,
+                  "note": f"Excluded at promotion with its column: {reason.strip()}"})
+        rows.append(r)
+    for rid in promote_ids:
+        try:
+            rows.append(_promotion_row(rid, note, who, now))
+        except WriteRejected as exc:
+            refused.append(f"{rid}: {exc}")
+    landed = _impl.append_rule_versions(rows) if rows else set()
+    for r in rows:
+        if r["rule_id"] not in landed:
+            refused.append(f"{r['rule_id']}: gained a new version after you opened it, so "
+                           "it was not written.")
+    clear_cache()
+    done = [r["rule_id"] for r in rows if r["rule_id"] in landed]
+    return ([r for r in done if r in set(promote_ids)],
+            [r for r in done if r in set(retire)], refused)
+
+
 # The domain refuses reviews; this is the same exception under the name the page uses.
 ReviewRejected = thresholds.ReviewRejected
 

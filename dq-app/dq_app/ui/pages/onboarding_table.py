@@ -312,38 +312,83 @@ if len(ev):
                     'measured at the next scheduled run; promote after that.</div>',
                     unsafe_allow_html=True)
             elif len(shadow):
-                sb = int(shadow["would_breach"].astype(bool).sum())
+                # The final decision: every column is promoted unless unticked here. An
+                # unticked column is EXCLUDED -- its binding is taken back and its checks
+                # retired -- which only a binding that came from a proposal can record.
+                excludable = onboarding.excludable_columns(proposals, reviews, table)
+                by_col = {c: g for c, g in shadow.groupby(shadow["target_column"].fillna(""))}
+                st.markdown('<div class="onb-cap">Untick a column to exclude it: its binding '
+                            'is taken back and its checks retired.</div>',
+                            unsafe_allow_html=True)
+                keep: dict[str, bool] = {}
+                for col in sorted(by_col):
+                    g = by_col[col]
+                    nb = int(g["would_breach"].astype(bool).sum())
+                    can = bool(col) and col in excludable
+                    keep[col] = st.checkbox(
+                        f"{col or 'Cross-table'} · {len(g)} check{'s' if len(g) != 1 else ''}"
+                        + (f" · {nb} would breach" if nb else ""),
+                        value=True, key=f"_onb_inc_{col or '_xt'}", disabled=not can,
+                        help=None if can else "Bound by hand, not through a proposal, so it "
+                        "is promoted with the rest.")
+                promote = pd.concat([g for c, g in by_col.items() if keep[c]]) \
+                    if any(keep.values()) else shadow.iloc[0:0]
+                dropped = [c for c in sorted(by_col) if not keep[c]]
+                exclude = {excludable[c]: list(by_col[c]["rule_id"]) for c in dropped}
+                sb = int(promote["would_breach"].astype(bool).sum())
+                n_ex = sum(len(by_col[c]) for c in dropped)
                 st.markdown(
-                    f'<div class="onb-ev">Makes <b>{len(shadow)} checks</b> active. On the latest '
-                    f'run <b style="color:{theme.TONE["critical"]["fg"]}">{sb}</b> would breach '
-                    'and open problems in Triage on the next run.</div>',
-                    unsafe_allow_html=True)
+                    f'<div class="onb-ev">Makes <b>{len(promote)} checks</b> active. On the '
+                    f'latest run <b style="color:{theme.TONE["critical"]["fg"]}">{sb}</b> would '
+                    'breach and open problems in Triage on the next run.'
+                    + (f' <b>{len(dropped)} column{"s" if len(dropped) != 1 else ""}</b> '
+                       f'excluded, {n_ex} check{"s" if n_ex != 1 else ""} retired.'
+                       if dropped else "") + '</div>', unsafe_allow_html=True)
+                ex_reason = (st.text_input("Why exclude", key="onbt_ex_reason",
+                                           placeholder="Why the column does not hold its element")
+                             if dropped else "")
                 note = st.text_input("Note", key="onbt_note",
                                      value=f"Promoted after shadow review of {name}.")
-                if st.button(f"Promote {len(shadow)} checks", key="onbt_promote",
-                             type="primary", use_container_width=True):
+                if st.button(f"Promote {len(promote)} checks", key="onbt_promote",
+                             type="primary", use_container_width=True,
+                             disabled=promote.empty):
                     ui.ask("promote")
 
                 def _promote():
                     try:
-                        done, refused = adapter.promote_rules(list(shadow["rule_id"]), note)
+                        done, retired, refused = adapter.promote_table(
+                            list(promote["rule_id"]), exclude, note, ex_reason)
                     except adapter.WriteRejected as exc:
                         return str(exc)
                     if refused:
-                        return (f"Promoted {len(done)} of {len(shadow)}. Not promoted:\n\n"
+                        return (f"Promoted {len(done)} of {len(promote)}, retired "
+                                f"{len(retired)} of {n_ex}. Not written:\n\n"
                                 + "\n\n".join(refused))
+                    for c in by_col:
+                        st.session_state.pop(f"_onb_inc_{c or '_xt'}", None)
                     return None
 
-                breaching = [_check_label(e) for _, e in shadow.iterrows() if e["would_breach"]]
+                breaching = [_check_label(e) for _, e in promote.iterrows() if e["would_breach"]]
+                el_of = {c: (cde[g["cde_id"].iloc[0]]["cde_name"] if g["cde_id"].iloc[0] in cde
+                             else g["cde_id"].iloc[0]) for c, g in by_col.items()}
                 ui.confirm(
-                    "promote", f"Promote {len(shadow)} checks on {name}?",
-                    f"<b>{len(shadow)} checks</b> become active. On the latest run "
+                    "promote", f"Promote {len(promote)} checks on {name}?",
+                    f"<b>{len(promote)} checks</b> become active. On the latest run "
                     f'<b style="color:{theme.TONE["critical"]["fg"]}">{sb} would breach</b> and '
-                    f"open problems in Triage at the next run, and {len(shadow) - sb} would pass."
+                    f"open problems in Triage at the next run, and {len(promote) - sb} would pass."
                     + (ui.items(breaching, 6) if breaching else "<br>")
+                    + (f"<b>Excluded</b>, their checks retired and their bindings taken back at "
+                       "the next onboarding run:"
+                       + ui.items([f'<span class="onb-mono">{html.escape(c)}</span> → '
+                                   f'{html.escape(el_of[c])} · {len(by_col[c])} checks'
+                                   for c in dropped])
+                       + (f'Reason: “{html.escape(ex_reason)}”<br>' if ex_reason.strip()
+                          else '<b style="color:#b91c1c">An exclusion needs a reason — add '
+                               'one first.</b><br>')
+                       if dropped else "")
                     + f"Each check gets a new version signed {html.escape(me)}. Taking one back "
                       "is another new version, not an undo.",
-                    f"Promote {len(shadow)} checks", _promote)
+                    f"Promote {len(promote)} checks", _promote)
                 st.markdown(f'<div class="onb-cap">Each check gets a new version signed '
                             f'{html.escape(me)}.</div>', unsafe_allow_html=True)
                 if not adapter.writes_are_durable():
@@ -369,6 +414,9 @@ if len(ev):
             found = {"uc_tag": "found by tag", "value_signature": "found by value pattern",
                      "name_match": "found by column name", "suggested": "suggested",
                      "manual": "registered by hand"}
+            # Excluded at promotion: the binding stays on the register until the
+            # onboarding job's unbind step runs, so say so rather than list it as bound.
+            gone = onboarding.excluded_bindings(proposals, reviews)
             st.markdown(
                 "".join(
                     f'<div class="onb-ev" style="padding:.3rem 0;border-bottom:1px solid #f0f0f5">'
@@ -377,6 +425,8 @@ if len(ev):
                     f'{found.get(b["discovered_by"], b["discovered_by"])}'
                     + (f' · approved by {html.escape(approved_by[(table, b["target_column"])])}'
                        if (table, b["target_column"]) in approved_by else "")
+                    + (" · <b>excluded at promotion</b>, unbound at the next onboarding run"
+                       if (table, b["target_column"], b["cde_id"]) in gone else "")
                     + "</span></div>"
                     for b in sorted(bound, key=lambda b: b["target_column"]))
                 or '<div class="onb-ev">Nothing bound yet.</div>', unsafe_allow_html=True)

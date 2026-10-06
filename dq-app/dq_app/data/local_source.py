@@ -278,6 +278,19 @@ def write_binding_review(row: dict) -> bool:
     return _append_pending("review", row)
 
 
+def write_binding_exclusion(row: dict) -> bool:
+    """A rejection appended to an approved proposal: refused unless the proposal has an
+    approval and no rejection yet."""
+    base = binding_reviews()
+    seen = (base[base["proposal_id"] == row["proposal_id"]].to_dict("records")
+            if len(base) else [])
+    seen += [r for r in pending_onboarding("review") if r["proposal_id"] == row["proposal_id"]]
+    decisions = {r["decision"] for r in seen}
+    if "approved" not in decisions or "rejected" in decisions:
+        return False
+    return _append_pending("review", row)
+
+
 def discard_pending() -> None:
     for key in _PENDING_ONB.values():
         st.session_state[key] = []
