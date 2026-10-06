@@ -2446,6 +2446,11 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 .dq-rr .q {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
 .dq-rr .q {{ font-size: clamp(.72rem, .85vw, .79rem); color: var(--dq-text-2); }}
 .dq-rr .dq-badge {{ flex: none; }}
+/* Rows with the state on the second line (2026-10-06): the name takes the full width
+   and wraps to two lines at most, rather than being cut beside a badge. */
+.dq-rr2 .nm {{ white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }}
+.dq-rdet-hd .n {{ display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }}
 [class*="st-key-dqrow_"]:has(.dq-rr) {{ min-height: 4.1rem; }}
 [class*="st-key-dqrow_"] .dq-rowgrid:has(.dq-rr) {{ padding: .7rem 1rem;
   border-left: 3px solid transparent; }}

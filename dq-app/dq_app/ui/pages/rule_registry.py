@@ -211,36 +211,38 @@ def _rule_cards() -> None:
         crumb.append(f'&nbsp;&nbsp;/&nbsp;&nbsp;{html.escape(sel["Name"])}')
     st.markdown("".join(crumb) + "</span>", unsafe_allow_html=True)
 
-    head, ctl = st.columns([3, 1.4], vertical_alignment="top")
-    with head:
-        if sel:
-            where = f'{sel["Table"]}.{sel["Column"]}' if sel["Column"] != "join" \
-                else f'{sel["Table"]} (join)'
-            st.markdown(
-                '<div class="dq-tmhead dq-rhead">'
-                f'<div class="n">{html.escape(sel["Name"])}{theme.badge(sel["State"], sel["Tone"])}</div>'
-                f'<div class="m">{html.escape(sel_el["Element"])} · '
-                f'<span class="fq">{html.escape(where)}</span></div></div>',
-                unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="dq-tmhead dq-rhead"><div class="n">Rules</div>'
-                        '<div class="m">Every rule names the element it watches.</div></div>',
-                        unsafe_allow_html=True)
-    with ctl, st.container(key="dq_rctl"):
-        if sel:
-            st.button("View run history", icon=":material/history:", key="_rule_hist",
-                      on_click=_to_tab, args=(TAB_LABELS[2],), width="stretch")
-        st.markdown(
-            f'<div class="dq-tmrun">{n_active} active · {n_shadow} in shadow · '
-            "33 of 34 expressions verified"
-            + theme.hint(
-                "Each rule_expr was run against the mock tables in workspace.dq_triage and "
-                "its count diffed against the fixture's Python evaluator. 33 agree. "
-                "XREF_NAME_AGREEMENT does not: its <> comparison is not null-safe, so it "
-                "reports 0 where the evaluator reports 2. That figure is the result of "
-                "sql/out/checkrun.sql, not something this page computes.")
-            + "</div>",
-            unsafe_allow_html=True)
+    # The page is headed by what it is, not by the rule picked: that name is the
+    # detail card's heading, and printing it twice side by side was the page's loudest
+    # line saying nothing new. The four figures are the registry at a glance, in the
+    # Tables and Triage pages' strip.
+    n_failing = sum(x["Failing"] and not x["Disputed"] for x in rows)
+    n_disputed = sum(x["Failing"] and x["Disputed"] for x in rows)
+    _red = f' style="color:{BELOW}"' if n_failing else ""
+    st.markdown(
+        '<div class="dq-page-hd"><div class="t">Rules</div>'
+        '<div class="s">Every rule names the critical data element it watches. Pick an '
+        "element, then a rule.</div></div>"
+        '<div class="dq-tmkpi">'
+        f'<div class="f"><div class="l">Active rules</div><div class="v">{n_active}</div>'
+        '<div class="c">raise breaches to Triage</div></div>'
+        f'<div class="f"><div class="l">'
+        + (theme.dot("critical") if n_failing else "") + 'Failing now</div>'
+        + f'<div class="v"{_red}>{n_failing}</div>'
+        f'<div class="c">over their limit on the latest run'
+        + (f" · {n_disputed} more with scope disputed" if n_disputed else "") + "</div></div>"
+        f'<div class="f"><div class="l">In shadow</div><div class="v">{n_shadow}</div>'
+        '<div class="c">measured, raising nothing</div></div>'
+        '<div class="f"><div class="l">Expressions verified'
+        + theme.hint(
+            "Each rule_expr was run against the mock tables in workspace.dq_triage and "
+            "its count diffed against the fixture's Python evaluator. 33 agree. "
+            "XREF_NAME_AGREEMENT does not: its <> comparison is not null-safe, so it "
+            "reports 0 where the evaluator reports 2. That figure is the result of "
+            "sql/out/checkrun.sql, not something this page computes.", side="left")
+        + '</div><div class="v">33<span class="of"> / 34</span></div>'
+        '<div class="c">against the evaluator · one not null-safe</div></div>'
+        "</div>",
+        unsafe_allow_html=True)
 
 
     # --- The three cards -----------------------------------------------------------------
@@ -274,14 +276,18 @@ def _rule_cards() -> None:
             st.session_state["_rule_cde_page"] = to
 
         def _el_cells(e) -> str:
-            badge = theme.coverage_badge(e["Gap"]) if e["Gap"] else ""
+            # The status rides on the second line as coloured words, not as a badge on
+            # the right: a badge took a third of a narrow card and cut every name.
+            gap = e["Gap"]
+            status = (f'<span style="color:{theme.TONE[theme.COVERAGE_GAP_TONE.get(gap, "neutral")]["fg"]}">'
+                      f'{html.escape(theme.COVERAGE_GAP_LABEL.get(gap, gap))}</span> · '
+                      if gap else "")
             n = f'{e["N"]} {"rule" if e["N"] == 1 else "rules"}' if e["N"] else "No rules"
             fail = (f' · <span class="dq-below">{e["Failing"]} failing</span>'
                     if e["Failing"] else "")
-            return (f'<span class="dq-rr"><span class="a"><span class="nm">'
+            return (f'<span class="dq-rr dq-rr2"><span class="a"><span class="nm">'
                     f'{html.escape(e["Element"])}</span>'
-                    f'<span class="q">{html.escape(str(e["Domain"]))} · {n}{fail}</span></span>'
-                    f"{badge}</span>")
+                    f'<span class="q">{status}{n}{fail}</span></span></span>')
 
         def _el_tip(e) -> list:
             cols = columns_of.get(e["key"], [])
@@ -327,10 +333,12 @@ def _rule_cards() -> None:
             line = x["Dimension"]
             if x["Status"] == "shadow" and x["Bad"] is not None:
                 line += f" · would flag {x['Bad']:,}" if x["Bad"] else " · would pass"
-            return (f'<span class="dq-rr"><span class="a"><span class="nm">'
+            # The state as coloured words on the second line, as on the element list.
+            return (f'<span class="dq-rr dq-rr2"><span class="a"><span class="nm">'
                     f'{html.escape(x["Name"])}</span>'
-                    f'<span class="q">{html.escape(line)}</span></span>'
-                    f'{theme.badge(x["State"], x["Tone"])}</span>')
+                    f'<span class="q"><span style="color:{theme.TONE[x["Tone"]]["fg"]};'
+                    f'font-weight:600">{html.escape(x["State"])}</span> · '
+                    f'{html.escape(line)}</span></span></span>')
 
         def _rule_tip(x) -> list:
             return [x["Name"], (f"{x['Rule id']} · {x['Table']}.{x['Column']}", "mono"),
@@ -442,8 +450,12 @@ def _rule_cards() -> None:
             shadow = sel["Status"] == "shadow"
             dim = sel["Dimension"]
             st.markdown(
-                '<div class="dq-rdet-hd"><div class="k">Rule details</div>'
-                f'<div class="n">{html.escape(sel["Name"])}</div>'
+                # `dq-rhead`: the one place the rule's name and state are printed. A
+                # disputed rule's state reads "Scope disputed" here, never "Failing".
+                '<div class="dq-rdet-hd dq-rhead"><div class="k">Rule details</div>'
+                f'<div class="n">{html.escape(sel["Name"])}'
+                + ("" if shadow else theme.badge(sel["State"], sel["Tone"]))
+                + "</div>"
                 '<div class="b">'
                 + theme.badge(dim, "neutral")
                 + (theme.hint(theme.DIMENSIONS[dim]["long"]) if dim in theme.DIMENSIONS else "")

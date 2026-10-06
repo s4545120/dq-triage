@@ -122,12 +122,16 @@ def test_turning_a_page_keeps_the_open_tab():
     """The pager turns pages by callback. With a button and `st.rerun()` the run
     stopped before the tabs were drawn and History snapped back to Definition."""
     at = _run()
-    next(b for b in at.button if b.key == "_rule_hist").click().run()
+    # The "View run history" button went with the 2026-10-06 header redraw (the History
+    # tab is beside it). The Definition tab's link to the sampled rows is the other
+    # button that switches tab by callback, so it stands in.
+    next(b for b in at.button if b.key == "_rule_to_rows").click().run()
     key = next(k for k in at.session_state.filtered_state if k.startswith("_rule_tab_"))
-    assert at.session_state[key] == "History"
+    assert at.session_state[key].startswith("Sample rows")
+    opened = at.session_state[key]
     next(b for b in at.button if b.key == "_rule_next").click().run()
     assert not at.exception
-    assert at.session_state[key] == "History"
+    assert at.session_state[key] == opened
     assert at.session_state["_rule_cde_page"] == 1
 
 
