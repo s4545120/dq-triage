@@ -46,29 +46,15 @@ except NameError:
     _HERE = Path(sys.argv[0]).resolve().parent
 sys.path.insert(0, str(_HERE))
 import mock_lead
+import discovery
 import templates as tpl
 import wh
 from wh import CATALOG, PREFIX, SOURCE_SCHEMA, connect, in_databricks, lit, run, src, t
 
 HERE = _HERE
 LEAD = src("crm_lead")
-SIGNATURE_THRESHOLD_PCT = 95.0   # Ataccama's "detection threshold": share of non-blank values
-SIGNATURE_MIN_VALUES = 20        # too few values and a match rate means nothing
-NAME_MATCH_CONFIDENCE = 0.6      # a column name is a weaker claim than a tag or the values
-
-# Column names that say which element a column holds, compared with case and every
-# non-alphanumeric character removed. The fallback for a catalog nobody can tag --
-# `samples` is read-only -- and for columns whose values have no fixed shape. A name is
-# proposed only when it matches exactly one element; the owner still decides.
-NAME_HINTS = {
-    "CDE_CUST_EMAIL": ["email", "emailaddress", "emailaddr", "emlid", "eml"],
-    "CDE_CUST_NAME": ["firstname", "givenname", "lastname", "familyname", "surname",
-                      "frstnm", "lastnm", "fullname", "legalname"],
-    "CDE_CUST_DOB": ["dob", "birthdate", "dateofbirth", "brthts", "birthts"],
-    "CDE_CUST_MOBILE": ["mobile", "mobileno", "mobilenumber", "mobilephone", "moblno"],
-    "CDE_CUST_LANDLINE": ["phone", "phoneno", "phonenumber", "homephone", "landline", "phnno"],
-    "CDE_CUST_KEY": ["customerid", "custid", "contactid", "customerkey", "ctctid", "ctctkey"],
-}
+# How a column is judged -- tags, value patterns, names, thresholds -- lives in
+# discovery.py, so evaluate_discovery.py measures exactly what this job runs.
 
 # What this job writes to the onboarding tables, in sql/ddl/15_config_onboarding.sql's
 # order. Every INSERT names its columns: fixtures/verify.py diffs these against the DDL,
@@ -275,6 +261,7 @@ def discover(conn) -> None:
     elements = run(conn, f"""SELECT cde_id, cde_name, data_class, expected_signature
         FROM {t('config', 'v_cde_registry_current')} WHERE status = 'registered'""")
     known = {e["cde_id"] for e in elements}
+    names = {e["cde_id"]: e["cde_name"] for e in elements}
     signed = [e for e in elements if e["expected_signature"]]
     tables = [r["target_table"] for r in run(conn, f"""
         SELECT target_table FROM {t('config', 'v_monitored_table_current')}
@@ -315,64 +302,31 @@ def discover(conn) -> None:
         todo = [c for c in cols if c not in bound and c not in pending]
         proposals, report = [], []
 
-        # 1. UC tags: someone already said what the column is.
-        for c in [c for c in todo if c in tags]:
-            if tags[c] in known:
-                proposals.append((c, tags[c], "uc_tag", 1.0, f"column tag cde = {tags[c]}"))
-            else:
-                report.append((c, "tag names an element that is not registered", tags[c]))
-
-        # 2. Value signatures, one aggregate over the table for every untagged text column.
-        untagged = [c for c in todo if c not in tags]
-        unnamed = []                 # left for step 3
-        non_text = [c for c in untagged if typed[c] != "STRING"]
-        untagged = [c for c in untagged if typed[c] == "STRING"]
-        unnamed += non_text
-        if untagged and signed:
+        # Value patterns: one aggregate over the table for every untagged text column.
+        texts = [c for c in todo if c not in tags and typed[c] == "STRING"]
+        agg = {}
+        if texts and signed:
             parts = []
-            for c in untagged:
+            for c in texts:
                 parts.append(f"count_if(trim({c}) <> '') AS n__{c}")
                 for k, e in enumerate(signed):
                     parts.append(f"count_if(trim({c}) <> '' AND {c} RLIKE "
                                  f"{lit(e['expected_signature'])}) AS m__{c}__{k}")
             agg = run(conn, f"SELECT {', '.join(parts)} FROM {table}")[0]
-            for c in untagged:
-                n = agg[f"n__{c}"] or 0
-                if n < SIGNATURE_MIN_VALUES:
-                    unnamed.append(c)
-                    continue
-                rates = sorted(((100.0 * (agg[f"m__{c}__{k}"] or 0) / n, e)
-                                for k, e in enumerate(signed)), key=lambda x: -x[0])
-                hits = [(pct, e) for pct, e in rates if pct >= SIGNATURE_THRESHOLD_PCT]
-                if len(hits) == 1:
-                    pct, e = hits[0]
-                    proposals.append((c, e["cde_id"], "value_signature", round(pct / 100, 4),
-                                      f"{pct:.1f}% of {n} non-blank values match "
-                                      f"{e['cde_name']}'s pattern; no other element's does"))
-                elif hits:
-                    report.append((c, f"matches {len(hits)} elements' patterns; tag it to say "
-                                      f"which", ", ".join(e["cde_id"] for _, e in hits)))
-                elif rates and rates[0][0] >= 50:
-                    report.append((c, f"near miss: best match {rates[0][0]:.1f}% "
-                                      f"({rates[0][1]['cde_id']}), below "
-                                      f"{SIGNATURE_THRESHOLD_PCT:.0f}%", ""))
-                else:
-                    unnamed.append(c)
-        else:
-            unnamed += untagged
 
-        # 3. Column names, for what neither a tag nor the values settled.
-        for c in unnamed:
-            key = "".join(ch for ch in c.lower() if ch.isalnum())
-            hits = [cde for cde, names in NAME_HINTS.items() if key in names and cde in known]
-            if len(hits) == 1:
-                proposals.append((c, hits[0], "name_match", NAME_MATCH_CONFIDENCE,
-                                  f"column name {c!r} names this element "
-                                  f"({typed[c]})"))
-            elif hits:
-                report.append((c, "name matches several elements", ", ".join(hits)))
+        for c in todo:
+            pct = None
+            if c in texts and agg:
+                n = agg[f"n__{c}"] or 0
+                pct = {e["cde_id"]: (100.0 * (agg[f"m__{c}__{k}"] or 0) / n if n else 0.0)
+                       for k, e in enumerate(signed)}
+            d = discovery.decide(c, typed[c], known=known, names=names, tag=tags.get(c),
+                                 nonblank=(agg[f"n__{c}"] or 0) if pct is not None else None,
+                                 match_pct=pct)
+            if d["cde_id"]:
+                proposals.append((c, d["cde_id"], d["method"], d["confidence"], d["evidence"]))
             else:
-                report.append((c, "nothing identifies it", typed[c]))
+                report.append((c, d["why"], d["detail"]))
 
         if proposals:
             vals = ",\n".join(
