@@ -253,3 +253,32 @@ def test_a_shadow_only_run_is_never_the_latest_run():
     assert metrics.latest_run_id(runs[runs["run_id"] == "shadow"]) == "shadow"  # nothing else
     assert set(metrics.scheduled_runs(runs)["run_id"]) == {"daily"}
     assert list(metrics.domains_of(runs)) == ["Customer", metrics.UNASSIGNED, "Sales"]
+
+
+def test_a_rerun_the_same_day_replaces_the_earlier_run():
+    """Run twice in one day, the later run is the day's run. Nothing is deleted from
+    `check_run` -- cohorts reference its rows -- the earlier run is only not read."""
+    import pandas as pd
+
+    from dq_app.domain import metrics
+
+    def row(run_id, ts, status="breach", rule_id="R1"):
+        return dict(run_id=run_id, run_ts=pd.Timestamp(ts), status=status, rule_id=rule_id)
+
+    runs = pd.DataFrame([
+        row("mon", "2026-10-04 16:00"),            # 03:00 Sydney, 5 Oct
+        row("tue", "2026-10-05 16:00"),            # 03:00 Sydney, 6 Oct
+        row("tue_rerun", "2026-10-06 01:30"),      # 12:30 Sydney, 6 Oct: replaces it
+        row("shadow", "2026-10-06 05:00", "skipped"),  # never a run, never replaces one
+    ])
+    assert set(metrics.scheduled_runs(runs)["run_id"]) == {"mon", "tue_rerun"}
+    assert metrics.latest_run_id(runs) == "tue_rerun"
+    # The same day in UTC is not the same day: 16:00 UTC on the 5th is the 6th in Sydney.
+    assert set(metrics.scheduled_runs(runs[runs["run_id"] != "tue_rerun"])["run_id"]) == {
+        "mon", "tue"}
+
+    # Per rule, for a history that whole runs cannot give (a shadow rule's).
+    shadow = pd.DataFrame([row("a", "2026-10-05 22:00", "skipped", "S"),
+                           row("b", "2026-10-06 02:00", "skipped", "S"),
+                           row("c", "2026-10-06 20:00", "skipped", "S")])
+    assert list(metrics.last_per_day(shadow)["run_id"]) == ["b", "c"]

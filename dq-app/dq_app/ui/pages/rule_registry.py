@@ -39,7 +39,7 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter, identity
-from dq_app.domain import rule_sql
+from dq_app.domain import metrics, rule_sql
 from dq_app.ui import components, theme
 from dq_app.ui.components import opt
 
@@ -79,7 +79,8 @@ samples = adapter.get_violation_samples()
 # Each rule's own latest measurement. Not the estate's latest run: a shadow check
 # measured by the onboarding job is never in "the latest run" (see
 # `metrics.latest_run_id`), and its figures would vanish from its own page.
-measured = runs[runs["status"] != "error"]
+# A rerun the same day replaces the earlier measurement (`metrics.scheduled_runs`).
+measured = metrics.last_per_day(runs[runs["status"] != "error"])
 latest = (measured.sort_values("run_ts").drop_duplicates("rule_id", keep="last")
           .set_index("rule_id"))
 # Rules the register says measure rows they should not. Their breach is a fact about

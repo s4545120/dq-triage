@@ -1282,6 +1282,12 @@ read `nan pts since last run`, because a shadow-only run has no score.
 lists runs or compares one run with the one before should start from
 `scheduled_runs`, not from `get_check_runs()` raw.
 
+**A run twice in one day replaces the earlier one** (since 2026-10-06), in the reading
+and not in the table: `scheduled_runs` keeps the day's last run, the day being
+Sydney's (`metrics.RUN_DAY_TZ`), and a single rule's history uses
+`metrics.last_per_day`. Nothing is deleted from `check_run` — cohorts reference its
+rows by `result_id` — and a shadow-only run never replaces a scheduled one.
+
 **Rules that look like bugs and are not.**
 
 * **Selecting a table writes nothing until Submit.** The first build wrote on "Select"

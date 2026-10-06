@@ -40,6 +40,8 @@ def scoped_runs(runs: pd.DataFrame) -> pd.DataFrame:
     versions = adapter.get_rule_registry().sort_values("rule_version")
     retired = set(versions.groupby("rule_id").tail(1).query("status == 'retired'").rule_id)
     attached = coverage.attached_rule_ids(adapter.get_cde_coverage())
+    # One run a day, the day's last (`metrics.scheduled_runs`), as the scorecard reads.
+    runs = metrics.scheduled_runs(runs)
     return runs[runs["rule_id"].isin(attached) & ~runs["rule_id"].isin(retired)]
 
 

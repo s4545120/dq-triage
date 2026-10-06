@@ -62,18 +62,54 @@ def domains_of(runs: pd.DataFrame) -> pd.Series:
     return runs["business_domain"].fillna(UNASSIGNED)
 
 
+# The day a run belongs to is the day where the schedule lives (03:00 Sydney), not
+# UTC's. `run_ts` reaches the app naive in UTC (`databricks_source._naive_timestamps`).
+RUN_DAY_TZ = "Australia/Sydney"
+
+
+def run_day(run_ts: pd.Series) -> pd.Series:
+    """The local calendar day of each timestamp, read as UTC."""
+    return (pd.to_datetime(run_ts).dt.tz_localize("UTC")
+            .dt.tz_convert(RUN_DAY_TZ).dt.date)
+
+
+def last_per_day(rows: pd.DataFrame, by: str = "rule_id") -> pd.DataFrame:
+    """Each `by`'s last row of each day: a rerun the same day replaces the earlier one.
+
+    For a single rule's history, where whole runs are the wrong unit -- a shadow check
+    is only ever measured by shadow-only runs, which `scheduled_runs` drops.
+    """
+    if rows.empty:
+        return rows
+    rows = rows.sort_values("run_ts")
+    return rows[~rows.assign(_day=run_day(rows["run_ts"]))
+                .duplicated([by, "_day"], keep="last")]
+
+
 def scheduled_runs(check_run: pd.DataFrame) -> pd.DataFrame:
-    """Every row of every run that measured an active check; shadow-only runs dropped.
+    """Every row of the day's last run that measured an active check.
 
     A shadow-only run -- the onboarding job measures new shadow checks on one table the
     moment they exist -- records nothing but `skipped` verdicts and has no score. Kept
     in a run list it became "the previous run", and every change since it read `nan`.
     A scheduled run's own shadow rows stay: only whole runs are dropped.
+
+    **A run twice in one day replaces the earlier one.** The check job reruns by hand
+    as well as on its schedule, and two points for one day made "since last run" a
+    change of hours and drew the day twice on every trend. Nothing is deleted:
+    `check_run` rows are what cohorts reference by `result_id`, so the earlier run
+    stays in the table and is only not read as a run here. A shadow-only run never
+    replaces a scheduled one -- it is dropped first.
     """
     if check_run.empty:
         return check_run
-    live = check_run.loc[check_run["status"] != "skipped", "run_id"].unique()
-    return check_run[check_run["run_id"].isin(live)]
+    live = check_run[check_run["run_id"].isin(
+        check_run.loc[check_run["status"] != "skipped", "run_id"].unique())]
+    if live.empty:
+        return live
+    starts = live.groupby("run_id")["run_ts"].max().sort_values()
+    kept = starts[~run_day(starts).duplicated(keep="last").to_numpy()].index
+    return live[live["run_id"].isin(kept)]
 
 
 def latest_run_id(check_run: pd.DataFrame):
