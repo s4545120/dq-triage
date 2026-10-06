@@ -360,6 +360,17 @@ regrouped into a newer problem is counted once, under the newer one, which is wh
 breaching checks, 3.5 : 1 — and the `Show` dropdown widens to Open / Waiting on me /
 Closed / All for anyone who wants the lifecycle view instead.
 
+**Both Triage pages were redrawn on 2026-10-06 in the Tables page's language.** The
+queue has four figures again, but not the four removed on 2026-09-16, three of which
+restated one grouping: live problems, waiting on you, P1 problems, and grouping
+(compression beside its `≥ 5.0 : 1` target, amber below it). The queue is a card
+(`dq_tricard`, sharing `dq_tmcard`'s shell CSS through `:is()`) with search and the
+five views in its header; severity is the row's stripe and leading badge, not a column.
+The "What the queue is claiming" paragraph became the Grouping card, one segment per
+live problem sized by its checks. "Start here" opens the most urgent problem awaiting
+review. The problem page keeps every block in its order; the dotted fact line is a
+five-figure strip (`dq-prob-kpi`) and the tabs sit in a card (`dq_probtabs`).
+
 **The queue rows carry no selected state, deliberately.** A row there is a link, not
 a selection: clicking one calls `st.switch_page`. `selected_cohort` survives the trip
 to the detail page and back, so passing it as the table's `picked` tinted a row every
