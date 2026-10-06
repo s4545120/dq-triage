@@ -632,6 +632,19 @@ is folded outside the fragment — the promotion dialog keeps its `st.rerun()` f
 Code above a fragment must not read a selection made inside one, or it shows the old
 one until the next full run.
 
+**A rerun shows a bar, not a grey page** (2026-10-06, `theme.py`, "Rerun feedback").
+Streamlit fades every element to 33% half a second into a rerun; on a 2s warehouse
+read that was the old page going grey and the new one landing at once. Now a 2px
+indigo bar runs along the top while `stApp[data-test-script-state="running"]` (shown
+after 150ms, so a fragment pick never flashes it), `[data-stale="true"]` dims only to
+82% after 0.4s, and the status widget is hidden while running. Both hooks are
+Streamlit's own attributes: if an upgrade renames them the app falls back to the
+default fade rather than breaking. The sidebar links sit in `dqnav_<page>`
+containers and `app.py` writes one rule per run lighting the current one — a
+drill-down lights its parent (`PARENT`), which Streamlit's own highlight cannot. All of
+it stops moving under `prefers-reduced-motion`. Testing it in a hidden browser tab
+shows every transition frozen at its start; that is the tab, not the CSS.
+
 **Unity Catalog hands back tz-aware timestamps and the fixture's parquet is naive.**
 `databricks_source._naive_timestamps` converts to UTC and drops the offset on every
 read, so the two sources stay interchangeable. Without it the detail page's age line

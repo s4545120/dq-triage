@@ -95,24 +95,36 @@ SIDEBAR = {
 }
 
 
-def _sidebar_nav() -> None:
+# A drill-down lights the link of the page it was opened from.
+PARENT = {"table_detail": "tables", "triage_detail": "triage",
+          "onboarding_add": "onboarding", "onboarding_table": "onboarding"}
+
+
+def _sidebar_nav(current) -> None:
     """The nav, by hand, because `st.navigation` renders all-or-nothing."""
+    here = next((k for k, p in PAGES.items() if p == current), None)
+    here = PARENT.get(here, here)
+    # One rule naming the current link, so its marker transitions in (theme.py,
+    # `st-key-dqnav_`) on a container that persists rather than one re-keyed per run.
     st.sidebar.markdown(
         '<div class="dq-brand"><span class="sq">DQ</span>'
-        "<span class='nm'>Triage</span></div>",
+        "<span class='nm'>Triage</span></div>"
+        # Doubled class: theme.py's base rule is injected later and would win a tie.
+        f"<style>.st-key-dqnav_{here}.st-key-dqnav_{here}::before{{transform:scaleY(1);opacity:1}}</style>",
         unsafe_allow_html=True,
     )
     for group, keys in SIDEBAR.items():
         st.sidebar.markdown(f'<div class="dq-navgrp">{group}</div>',
                             unsafe_allow_html=True)
         for key in keys:
-            st.sidebar.page_link(PAGES[key])
+            with st.sidebar.container(key=f"dqnav_{key}"):
+                st.page_link(PAGES[key])
 
 
 nav = st.navigation(list(PAGES.values()), position="hidden")
 
 # The brand and links are written before the page runs, so `components.page_chrome`
 # appends the source badge and identity below them rather than above.
-_sidebar_nav()
+_sidebar_nav(nav)
 
 nav.run()

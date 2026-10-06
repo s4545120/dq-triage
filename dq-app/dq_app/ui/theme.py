@@ -1022,6 +1022,54 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   letter-spacing: .02em; flex: none; }}
 .dq-navgrp {{ font-size: .63rem; letter-spacing: .1em; text-transform: uppercase;
   color: var(--dq-text-3); font-weight: 600; padding: .75rem .25rem .2rem; }}
+/* Each link sits in a `dqnav_<page>` container, and app.py writes one rule per run
+   naming the current page's (`.dq-navon`) — Streamlit's own current-page styling is
+   an emotion class with no attribute a selector can reach, and it would not light
+   the parent of a drill-down anyway. The marker is a pseudo-element on a container
+   that persists across reruns, so it transitions rather than popping. */
+[class*="st-key-dqnav_"] {{ position: relative; }}
+[class*="st-key-dqnav_"]::before {{ content: ""; position: absolute; left: -.55rem;
+  top: 22%; bottom: 22%; width: 3px; border-radius: 0 3px 3px 0; background: {ACCENT};
+  transform: scaleY(0); opacity: 0;
+  transition: transform .18s cubic-bezier(.22, .61, .36, 1), opacity .12s ease; }}
+[class*="st-key-dqnav_"] [data-testid="stPageLink-NavLink"] {{
+  transition: background-color .12s ease, color .12s ease; }}
+
+/* --- Rerun feedback: a bar, not a grey page. --------------------------------
+   Every click re-runs the page in Python. Streamlit's own signal for that is to
+   fade every element to 33% after half a second, which on a 2s warehouse read is
+   the old page going grey and the new one landing all at once. Instead: a thin
+   indeterminate bar along the top while the script runs (delayed, so a 300ms
+   fragment pick never flashes it), the old content kept legible and dimmed only a
+   little, and only once the wait is long enough to be a wait. The two hooks are
+   `stApp[data-test-script-state]` and `[data-stale]` — both Streamlit's own
+   attributes; if an upgrade renames them this degrades to Streamlit's default,
+   it does not break. */
+[data-testid="stApp"]::after {{ content: ""; position: fixed; top: 0; left: 0;
+  right: 0; height: 2px; z-index: 1000010; pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, {ACCENT} 35%, #8b85f7 65%,
+                              transparent 100%) no-repeat;
+  background-size: 40% 100%; background-position: -40% 0;
+  opacity: 0; transition: opacity .2s ease; }}
+[data-testid="stApp"][data-test-script-state="running"]::after {{ opacity: 1;
+  transition-delay: .15s; animation: dq-progress 1.1s cubic-bezier(.45, 0, .55, 1) infinite; }}
+@keyframes dq-progress {{
+  from {{ background-position: -40% 0; }}
+  to {{ background-position: 140% 0; }}
+}}
+.stMain [data-stale="true"] {{ opacity: .82 !important;
+  transition: opacity .25s ease .4s !important; }}
+/* The running man and Stop say what the bar says. Hidden only while running, so
+   anything else the widget has to report still shows. */
+[data-test-script-state="running"] [data-testid="stStatusWidget"] {{ visibility: hidden; }}
+
+@media (prefers-reduced-motion: reduce) {{
+  [data-testid="stApp"][data-test-script-state="running"]::after {{ animation: none;
+    background: {ACCENT}; opacity: .55; }}
+  .stMain [data-stale="true"] {{ transition: none !important; }}
+  [class*="st-key-dqnav_"]::before,
+  [class*="st-key-dqnav_"] [data-testid="stPageLink-NavLink"] {{ transition: none; }}
+}}
 
 /* --- Detail blocks: the three questions, labelled. -------------------------- */
 .dq-blockhd {{ display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
