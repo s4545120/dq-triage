@@ -1235,6 +1235,17 @@ the full check on every selected table daily at 03:00 Sydney, and is the only so
 active results. A shadow-only run is never "the latest run": `metrics.latest_run_id`
 takes the latest run that measured an active check, or every page would show one table.
 
+**Nor is it a run at all, to the scorecard.** `metrics.scheduled_runs` drops every run
+whose verdicts are all `skipped` (a scheduled run's own shadow rows stay), and
+`latest_run_id` reads through it. The scorecard loads its runs through it too, since
+2026-10-06: before that its run list, deltas and trend counted shadow-only runs, so
+one landing between two scheduled runs — onboarding `sales_customers` at 23:36, the
+check job at 23:41 — became "the previous run" and the headline and every element
+read `nan pts since last run`, because a shadow-only run has no score.
+`test_a_shadow_only_run_is_not_the_scorecards_previous_run` pins it. Any new page that
+lists runs or compares one run with the one before should start from
+`scheduled_runs`, not from `get_check_runs()` raw.
+
 **Rules that look like bugs and are not.**
 
 * **Selecting a table writes nothing until Submit.** The first build wrote on "Select"
