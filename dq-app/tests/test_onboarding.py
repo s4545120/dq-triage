@@ -355,6 +355,36 @@ def _button(at, label):
     return hits[0]
 
 
+def test_the_tree_the_rows_and_cancel_select_without_a_full_rerun(page, tmp_path, monkeypatch):
+    """The browse half of Add tables is a fragment, so each of its controls is a
+    callback rather than a button then `st.rerun()`. Clicked here, not set in session:
+    a pick, a Cancel, and a schema opened from the tree, which must drop the pick and
+    list the new schema's tables -- the schema is read inside the fragment."""
+    d = with_catalog(build(tmp_path))
+    tables = pd.read_parquet(d / "catalog.tables.parquet")
+    extra = dict(tables.iloc[1])
+    extra.update(table_schema="nyctaxi", table_name="trips")
+    _write(d, "catalog.tables", pd.concat([tables, pd.DataFrame([extra])], ignore_index=True))
+    monkeypatch.setenv("DQ_FIXTURE_DIR", str(d))
+    at = _open_add(page, d)
+    assert "Selection · 1 table" in _text(at)
+
+    _button(at, "Cancel").click().run()
+    assert not at.exception
+    assert "_add_pick" not in at.session_state and "Choose a table" in _text(at)
+
+    suppliers = re.sub(r"[^A-Za-z0-9]+", "_", "samples.bakehouse.sales_suppliers")
+    at.button(key=f"_open_dqrow_add_{suppliers}").click().run()
+    assert at.session_state["_add_pick"] == suppliers
+    assert "samples.bakehouse.sales_suppliers" in _text(at)
+
+    _button(at, "nyctaxi").click().run()
+    assert not at.exception
+    assert at.session_state["_add_sch"] == "nyctaxi"
+    assert "_add_pick" not in at.session_state
+    assert "trips" in _text(at) and "sales_suppliers" not in _text(at)
+
+
 def test_suggest_row_key_and_scan_label():
     assert onboarding.suggest_row_key(["first_name", "customerID"]) == ["customerID"]
     assert onboarding.suggest_row_key(["a", "b"], primary_key=["b"]) == ["b"]

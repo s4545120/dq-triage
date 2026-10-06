@@ -55,6 +55,14 @@ def _back():
         st.switch_page("dq_app/ui/pages/onboarding.py")
 
 
+def _open_schema(c: str, sc: str) -> None:
+    """A tree click. A callback, not a button then `st.rerun()`: the tree is inside the
+    browse fragment, and a rerun there is the whole page again."""
+    if (st.session_state.get("_add_cat"), st.session_state.get("_add_sch")) != (c, sc):
+        st.session_state.pop("_add_pick", None)
+    st.session_state["_add_cat"], st.session_state["_add_sch"] = c, sc
+
+
 def _size(b) -> str:
     if b is None or pd.isna(b):
         return "—"
@@ -254,166 +262,175 @@ if tables.empty:
 tables = tables.assign(fqn=tables["table_catalog"] + "." + tables["table_schema"] + "."
                        + tables["table_name"])
 
-cats = sorted(tables["table_catalog"].unique())
-cat = st.session_state.get("_add_cat") if st.session_state.get("_add_cat") in cats else cats[0]
-schemas_of = {c: sorted(tables.loc[tables["table_catalog"] == c, "table_schema"].unique())
-              for c in cats}
-sch = st.session_state.get("_add_sch")
-if sch not in schemas_of[cat]:
-    sch = schemas_of[cat][0]
 
-tree, mid, side = st.columns([.9, 2.6, 1.15])
-
-with tree, st.container(key="onbcard_tree"):
-    ui.head("Catalog")
-    find = st.text_input("Search tables", key="_add_find", placeholder="Search tables",
-                         label_visibility="collapsed")
-    # Only the open catalog is expanded: `samples` alone holds fourteen schemas.
-    for c in cats:
-        if st.button(f"{'▾' if c == cat else '▸'} {c}", key=f"onbtree_cat_{_key(c)}",
-                     use_container_width=True) and c != cat:
-            st.session_state["_add_cat"] = c
-            st.session_state["_add_sch"] = schemas_of[c][0]
-            st.session_state.pop("_add_pick", None)
-            st.rerun()
-        if c != cat:
-            continue
-        for sc in schemas_of[c]:
-            on = (c, sc) == (cat, sch)
-            if st.button(sc, key=f"onbtree_{'on_' if on else ''}{_key(c, sc)}",
-                         use_container_width=True):
-                st.session_state["_add_cat"], st.session_state["_add_sch"] = c, sc
-                st.session_state.pop("_add_pick", None)
-                st.rerun()
-
-view = tables[(tables["table_catalog"] == cat) & (tables["table_schema"] == sch)]
-if find.strip():
-    view = view[view["table_name"].str.contains(find.strip(), case=False, regex=False)]
-view = view.sort_values("table_name")
-readable = adapter.get_readable_tables(cat, sch)
-schema_cols = adapter.get_catalog_columns(f"{cat}.{sch}")
-ncols = schema_cols.groupby("table_name").size().to_dict() if len(schema_cols) else {}
-ntags = (schema_cols[schema_cols["tag_cde"].notna()].groupby("table_name").size().to_dict()
-         if len(schema_cols) else {})
-sizes_key = f"{cat}.{sch}"
-sizes = st.session_state.get("_add_sizes", {}).get(sizes_key)     # None: not fetched yet
-picked = st.session_state.get("_add_pick")
+# From here down is one fragment: opening a schema, searching, picking a table and
+# filling in the selection card redraw the tree, the list and the card, not the page
+# around them. The catalog and schema are read inside it, so a tree click redraws
+# against the schema it chose. Continue keeps a full-page `st.rerun()`: it switches
+# the page into the draft, which is drawn above this fragment.
 
 
-def _access(r) -> tuple[str, str]:
-    if r["fqn"] in selected_now:
-        return "Already selected", "info"
-    if r["table_name"] not in readable:
-        return "Not readable — grant SELECT", "critical"
-    if sizes is None:
-        return "Checking size…", "neutral"
-    size = sizes.get(r["fqn"])
-    if size is not None and float(size) > onboarding.SCAN_LIMIT_BYTES:
-        return "Too large for a daily scan", "high"
-    lab = onboarding.scan_label(size)
-    return lab[0].upper() + lab[1:], "success"     # green already says "readable"
+@st.fragment
+def _browse() -> None:
+    cats = sorted(tables["table_catalog"].unique())
+    cat = st.session_state.get("_add_cat") if st.session_state.get("_add_cat") in cats else cats[0]
+    schemas_of = {c: sorted(tables.loc[tables["table_catalog"] == c, "table_schema"].unique())
+                  for c in cats}
+    sch = st.session_state.get("_add_sch")
+    if sch not in schemas_of[cat]:
+        sch = schemas_of[cat][0]
+
+    tree, mid, side = st.columns([.9, 2.6, 1.15])
+
+    with tree, st.container(key="onbcard_tree"):
+        ui.head("Catalog")
+        find = st.text_input("Search tables", key="_add_find", placeholder="Search tables",
+                             label_visibility="collapsed")
+        # Only the open catalog is expanded: `samples` alone holds fourteen schemas.
+        for c in cats:
+            st.button(f"{'▾' if c == cat else '▸'} {c}", key=f"onbtree_cat_{_key(c)}",
+                      use_container_width=True, on_click=_open_schema,
+                      args=(c, schemas_of[c][0]) if c != cat else (cat, sch))
+            if c != cat:
+                continue
+            for sc in schemas_of[c]:
+                on = (c, sc) == (cat, sch)
+                st.button(sc, key=f"onbtree_{'on_' if on else ''}{_key(c, sc)}",
+                          use_container_width=True, on_click=_open_schema, args=(c, sc))
+
+    view = tables[(tables["table_catalog"] == cat) & (tables["table_schema"] == sch)]
+    if find.strip():
+        view = view[view["table_name"].str.contains(find.strip(), case=False, regex=False)]
+    view = view.sort_values("table_name")
+    readable = adapter.get_readable_tables(cat, sch)
+    schema_cols = adapter.get_catalog_columns(f"{cat}.{sch}")
+    ncols = schema_cols.groupby("table_name").size().to_dict() if len(schema_cols) else {}
+    ntags = (schema_cols[schema_cols["tag_cde"].notna()].groupby("table_name").size().to_dict()
+             if len(schema_cols) else {})
+    sizes_key = f"{cat}.{sch}"
+    sizes = st.session_state.get("_add_sizes", {}).get(sizes_key)     # None: not fetched yet
+    picked = st.session_state.get("_add_pick")
 
 
-rows = []
-for _, r in view.iterrows():
-    size = sizes.get(r["fqn"]) if sizes else None
-    rows.append({
-        "Id": _key(r["fqn"]), "Fqn": r["fqn"], "Name": r["table_name"],
-        "Owner": str(r["table_owner"] or "—"),
-        "Size": _size(size) if sizes is not None else "…",
-        "SizeBytes": size,
-        "Cols": int(ncols.get(r["table_name"], 0)), "Tags": int(ntags.get(r["table_name"], 0)),
-        "Access": _access(r),
-    })
-if picked not in {r["Id"] for r in rows}:
-    picked = None
+    def _access(r) -> tuple[str, str]:
+        if r["fqn"] in selected_now:
+            return "Already selected", "info"
+        if r["table_name"] not in readable:
+            return "Not readable — grant SELECT", "critical"
+        if sizes is None:
+            return "Checking size…", "neutral"
+        size = sizes.get(r["fqn"])
+        if size is not None and float(size) > onboarding.SCAN_LIMIT_BYTES:
+            return "Too large for a daily scan", "high"
+        lab = onboarding.scan_label(size)
+        return lab[0].upper() + lab[1:], "success"     # green already says "readable"
 
-with mid, st.container(key="onbcard_rows_tables"):
-    ui.head(f"{html.escape(cat)}.{html.escape(sch)} · {len(rows)} table{'s' if len(rows) != 1 else ''}",
-            "Size and tags from Unity Catalog")
-    if not rows:
-        st.markdown('<div class="onb-ev" style="padding:.3rem 0 .8rem">No tables here match.'
-                    '</div>', unsafe_allow_html=True)
-    else:
-        # Flexible columns shrink and truncate; fixed minimums overflowed into the
-        # selection card beside this one.
-        GRID = "1.4rem minmax(0,1.7fr) 4.4rem 2.8rem minmax(0,.8fr) minmax(0,1.5fr)"
 
-        def _cells(m) -> str:
-            box = f'<span class="onb-box{" on" if m["Id"] == picked else ""}"></span>'
-            tags = theme.badge(f'{m["Tags"]} tagged', "info") if m["Tags"] \
-                else theme.badge("no tags", "neutral")
-            return (f'<span>{box}</span>'
-                    f'<span class="stack"><span class="name">{html.escape(m["Name"])}</span>'
-                    f'<span class="t2">owner: {html.escape(m["Owner"])}</span></span>'
-                    f'<span class="num">{m["Size"]}</span><span class="num">{m["Cols"]}</span>'
-                    f'<span>{tags}</span><span>{theme.badge(*m["Access"])}</span>')
+    rows = []
+    for _, r in view.iterrows():
+        size = sizes.get(r["fqn"]) if sizes else None
+        rows.append({
+            "Id": _key(r["fqn"]), "Fqn": r["fqn"], "Name": r["table_name"],
+            "Owner": str(r["table_owner"] or "—"),
+            "Size": _size(size) if sizes is not None else "…",
+            "SizeBytes": size,
+            "Cols": int(ncols.get(r["table_name"], 0)), "Tags": int(ntags.get(r["table_name"], 0)),
+            "Access": _access(r),
+        })
+    if picked not in {r["Id"] for r in rows}:
+        picked = None
 
-        components.row_head(["", "Table", ("Size", "n"), ("Cols", "n"), "Tags", "Daily check"],
-                            GRID)
-        with st.container(key="dqrows_add"):
-            components.clickable_rows(rows, GRID, _cells, "add", "Id",
-                                      lambda m: f"Choose {m['Fqn']}", picked=picked,
-                                      on_pick=components.pick_into("_add_pick"))
-        st.markdown(
-            '<div class="onb-cap" style="padding:.6rem 0 .5rem">Check time is estimated from '
-            'size: about 15 s per 1.5 GB on the smallest warehouse. Tables above the cost '
-            'limit wait on partition scans. A table the checks cannot read would fail on '
-            'every run, so it cannot be selected until access is granted.</div>',
-            unsafe_allow_html=True)
-
-with side, st.container(key="onbcard_sel"):
-    if picked is None:
-        ui.head("Selection")
-        st.markdown('<div class="onb-cap">Choose a table to see whether it can be checked.'
-                    '</div>', unsafe_allow_html=True)
-    else:
-        r = next(x for x in rows if x["Id"] == picked)
-        fqn = r["Fqn"]
-        ui.head("Selection · 1 table")
-        st.markdown(f'<div class="onb-mono onb-wrap">{html.escape(fqn)}</div>',
-                    unsafe_allow_html=True)
-        text, tone = r["Access"]
-        if tone in ("critical", "high", "info"):
-            st.markdown(f'<div class="onb-note">{theme.badge(text, tone)}<br>'
-                        + {"critical": "The checks could not read it, so every run would fail. "
-                                       "Ask its owner to grant SELECT first.",
-                           "high": "A full daily scan would cost too much. Large tables wait "
-                                   "on partition scans.",
-                           "info": "Its progress is on Onboarding."}[tone]
-                        + "</div>", unsafe_allow_html=True)
+    with mid, st.container(key="onbcard_rows_tables"):
+        ui.head(f"{html.escape(cat)}.{html.escape(sch)} · {len(rows)} table{'s' if len(rows) != 1 else ''}",
+                "Size and tags from Unity Catalog")
+        if not rows:
+            st.markdown('<div class="onb-ev" style="padding:.3rem 0 .8rem">No tables here match.'
+                        '</div>', unsafe_allow_html=True)
         else:
-            cols = adapter.get_catalog_columns(fqn)
-            names = list(cols["column_name"]) if len(cols) else []
-            groups = sorted({g for g in regs["owner_group"].dropna()}) if len(regs) else []
-            key = st.multiselect("Row key", names, default=onboarding.suggest_row_key(names),
-                                 key="add_rowkey",
-                                 help="The column(s) that identify a row. Stamped on every "
-                                      "failed row the checks sample.")
-            owner = st.selectbox("Owner of record", groups or ["dq-stewards"], key="add_owner")
-            # Every check on the table carries this, and the Tables page and scorecard
-            # filter by it -- a table onboarded without one vanished from both.
-            domains = sorted({d for d in regs["business_domain"].dropna()}) if len(regs) else []
-            domain = st.selectbox("Business domain", domains or ["Customer"], key="add_domain")
-            scan = f'{r["Size"]} · {onboarding.scan_label(r["SizeBytes"])}'
-            st.selectbox("Checked", ["Daily at 03:00"], disabled=True, key="add_sched")
-            st.selectbox("Scan", [f"Full table · {scan}"], disabled=True, key="add_scan")
-            st.markdown('<div class="onb-note">Next you can suggest bindings, then submit. '
-                        'Nothing is written until you submit.</div>', unsafe_allow_html=True)
-            if st.button("Continue", key="add_continue", type="primary", disabled=not key,
-                         use_container_width=True):
-                st.session_state["_add_draft"] = {"fqn": fqn, "row_key": list(key),
-                                                  "owner": owner, "domain": domain,
-                                                  "scan": scan}
-                st.session_state.pop("_add_pick", None)
-                st.rerun()
-        if st.button("Cancel", key="add_cancel", use_container_width=True):
-            st.session_state.pop("_add_pick", None)
-            st.rerun()
+            # Flexible columns shrink and truncate; fixed minimums overflowed into the
+            # selection card beside this one.
+            GRID = "1.4rem minmax(0,1.7fr) 4.4rem 2.8rem minmax(0,.8fr) minmax(0,1.5fr)"
 
-# Sizes last: the page above is already on screen while they load, then one rerun fills
-# them in. Cached for an hour, so a schema opened before comes back at once.
-if sizes is None and rows:
-    fetched = adapter.get_table_sizes(tuple(view["fqn"].head(SIZE_CAP)))
-    st.session_state.setdefault("_add_sizes", {})[sizes_key] = fetched
-    st.rerun()
+            def _cells(m) -> str:
+                box = f'<span class="onb-box{" on" if m["Id"] == picked else ""}"></span>'
+                tags = theme.badge(f'{m["Tags"]} tagged', "info") if m["Tags"] \
+                    else theme.badge("no tags", "neutral")
+                return (f'<span>{box}</span>'
+                        f'<span class="stack"><span class="name">{html.escape(m["Name"])}</span>'
+                        f'<span class="t2">owner: {html.escape(m["Owner"])}</span></span>'
+                        f'<span class="num">{m["Size"]}</span><span class="num">{m["Cols"]}</span>'
+                        f'<span>{tags}</span><span>{theme.badge(*m["Access"])}</span>')
+
+            components.row_head(["", "Table", ("Size", "n"), ("Cols", "n"), "Tags", "Daily check"],
+                                GRID)
+            with st.container(key="dqrows_add"):
+                components.clickable_rows(rows, GRID, _cells, "add", "Id",
+                                          lambda m: f"Choose {m['Fqn']}", picked=picked,
+                                          on_pick=components.pick_into("_add_pick"))
+            st.markdown(
+                '<div class="onb-cap" style="padding:.6rem 0 .5rem">Check time is estimated from '
+                'size: about 15 s per 1.5 GB on the smallest warehouse. Tables above the cost '
+                'limit wait on partition scans. A table the checks cannot read would fail on '
+                'every run, so it cannot be selected until access is granted.</div>',
+                unsafe_allow_html=True)
+
+    with side, st.container(key="onbcard_sel"):
+        if picked is None:
+            ui.head("Selection")
+            st.markdown('<div class="onb-cap">Choose a table to see whether it can be checked.'
+                        '</div>', unsafe_allow_html=True)
+        else:
+            r = next(x for x in rows if x["Id"] == picked)
+            fqn = r["Fqn"]
+            ui.head("Selection · 1 table")
+            st.markdown(f'<div class="onb-mono onb-wrap">{html.escape(fqn)}</div>',
+                        unsafe_allow_html=True)
+            text, tone = r["Access"]
+            if tone in ("critical", "high", "info"):
+                st.markdown(f'<div class="onb-note">{theme.badge(text, tone)}<br>'
+                            + {"critical": "The checks could not read it, so every run would fail. "
+                                           "Ask its owner to grant SELECT first.",
+                               "high": "A full daily scan would cost too much. Large tables wait "
+                                       "on partition scans.",
+                               "info": "Its progress is on Onboarding."}[tone]
+                            + "</div>", unsafe_allow_html=True)
+            else:
+                cols = adapter.get_catalog_columns(fqn)
+                names = list(cols["column_name"]) if len(cols) else []
+                groups = sorted({g for g in regs["owner_group"].dropna()}) if len(regs) else []
+                key = st.multiselect("Row key", names, default=onboarding.suggest_row_key(names),
+                                     key="add_rowkey",
+                                     help="The column(s) that identify a row. Stamped on every "
+                                          "failed row the checks sample.")
+                owner = st.selectbox("Owner of record", groups or ["dq-stewards"], key="add_owner")
+                # Every check on the table carries this, and the Tables page and scorecard
+                # filter by it -- a table onboarded without one vanished from both.
+                domains = sorted({d for d in regs["business_domain"].dropna()}) if len(regs) else []
+                domain = st.selectbox("Business domain", domains or ["Customer"], key="add_domain")
+                scan = f'{r["Size"]} · {onboarding.scan_label(r["SizeBytes"])}'
+                st.selectbox("Checked", ["Daily at 03:00"], disabled=True, key="add_sched")
+                st.selectbox("Scan", [f"Full table · {scan}"], disabled=True, key="add_scan")
+                st.markdown('<div class="onb-note">Next you can suggest bindings, then submit. '
+                            'Nothing is written until you submit.</div>', unsafe_allow_html=True)
+                if st.button("Continue", key="add_continue", type="primary", disabled=not key,
+                             use_container_width=True):
+                    st.session_state["_add_draft"] = {"fqn": fqn, "row_key": list(key),
+                                                      "owner": owner, "domain": domain,
+                                                      "scan": scan}
+                    st.session_state.pop("_add_pick", None)
+                    st.rerun()
+            st.button("Cancel", key="add_cancel", use_container_width=True,
+                      on_click=lambda: st.session_state.pop("_add_pick", None))
+
+    # Sizes last: the page above is already on screen while they load, then one rerun fills
+    # them in. Cached for an hour, so a schema opened before comes back at once.
+    if sizes is None and rows:
+        fetched = adapter.get_table_sizes(tuple(view["fqn"].head(SIZE_CAP)))
+        st.session_state.setdefault("_add_sizes", {})[sizes_key] = fetched
+        # A full run, not `scope="fragment"`: this branch runs as part of a full run
+        # (a schema opened for the first time), where Streamlit refuses that scope.
+        # Once per schema, then the sizes are in session.
+        st.rerun()
+
+
+_browse()

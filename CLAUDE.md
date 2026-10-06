@@ -624,7 +624,10 @@ the local fixture: a row pick is an `on_click` (`clickable_rows(on_pick=
 components.pick_into(...))`), not "read the return value, set state, `st.rerun()`",
 which ran the page twice per click; and the master–detail halves are `@st.fragment`s —
 the Scorecard's element list, pane and drawers, the Rules page's three cards, the Tables
-detail's rule list and pane, and the problem page's Evidence tab. Scorecard 610 →
+detail's rule list and pane, the problem page's Evidence tab, and (since the same
+day) the Thresholds list with its proposal, and Add tables' tree, list and selection
+card — which reads the catalog and schema inside the fragment, so a tree click redraws
+against the schema it chose. Scorecard 610 →
 360 ms per pick, Tables detail 590 → 305, Evidence 515 → 290, Rules 470 → 330. **Inside
 a fragment, a selection must be a callback**: `st.rerun()` there is a full-page run and
 undoes the point. A write is the exception and wants the full run, since what it changed

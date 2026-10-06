@@ -103,139 +103,150 @@ def _cells(m) -> str:
     )
 
 
-picked = st.session_state.get("_thr_pick")
-if picked not in set(view["proposal_id"]):
-    picked = rows[0]["Proposal id"] if rows else None
 
-components.row_head(
-    ["Check", "Element", ("Now", "n"), ("Proposed", "n"), "Basis", "State", "Reviewer"], GRID)
-with st.container(key="dqrows_thr"):
-    components.clickable_rows(
-        rows, GRID, _cells, "thr", "Proposal id",
-        lambda m: f"Open the proposal on {m['Check']}", picked=picked,
-        on_pick=components.pick_into("_thr_pick"))
+# From here down is one fragment: picking a proposal redraws the list, the proposal
+# and its decision form, not the figures above, which read no selection. The form's
+# `st.rerun()` after a write stays a full-page run -- what it changed is folded above.
 
-st.caption(
-    "Every rule the threshold job has advised on, latest proposal first. Bold is a "
-    "change; the rest is advice to keep the limit, with its reason.",
-    help="The tolerance the element declares is a ceiling the advice may never "
-         "exceed — enforced by the job's validator and by a CHECK constraint on "
-         "the table. Where no tolerance is declared the expected advice is keep: "
-         "history alone says where the data is, not where it may be.",
-)
 
-# --- The proposal picked --------------------------------------------------------
-if picked is None:
-    st.stop()
-p = view[view["proposal_id"] == picked].iloc[0]
-state = str(p["review_state"])
-tol = opt(p["tolerance_pct"])
+@st.fragment
+def _proposals() -> None:
+    picked = st.session_state.get("_thr_pick")
+    if picked not in set(view["proposal_id"]):
+        picked = rows[0]["Proposal id"] if rows else None
 
-theme.section(f"{opt(p['rule_name']) or p['rule_id']} · {p['rule_id']}")
-left, right = st.columns([3, 2])
-with left:
-    st.markdown(
-        theme.badge(theme.THRESHOLD_STATE_LABEL.get(state, state),
-                    theme.THRESHOLD_STATE_TONE.get(state, "neutral"))
-        + " "
-        + theme.badge(theme.THRESHOLD_BASIS_LABEL.get(p["basis"], p["basis"]),
-                      theme.THRESHOLD_BASIS_TONE.get(p["basis"], "neutral"))
-        + " "
-        + theme.severity_badge(p["severity"]) if opt(p["severity"]) else "",
-        unsafe_allow_html=True,
+    components.row_head(
+        ["Check", "Element", ("Now", "n"), ("Proposed", "n"), "Basis", "State", "Reviewer"], GRID)
+    with st.container(key="dqrows_thr"):
+        components.clickable_rows(
+            rows, GRID, _cells, "thr", "Proposal id",
+            lambda m: f"Open the proposal on {m['Check']}", picked=picked,
+            on_pick=components.pick_into("_thr_pick"))
+
+    st.caption(
+        "Every rule the threshold job has advised on, latest proposal first. Bold is a "
+        "change; the rest is advice to keep the limit, with its reason.",
+        help="The tolerance the element declares is a ceiling the advice may never "
+             "exceed — enforced by the job's validator and by a CHECK constraint on "
+             "the table. Where no tolerance is declared the expected advice is keep: "
+             "history alone says where the data is, not where it may be.",
     )
-    st.markdown(
-        f'<div class="dq-because"><b>'
-        f'{float(p["current_threshold_pct"]):g}% → {float(p["proposed_threshold_pct"]):g}%'
-        f'</b> — {html.escape(str(p["rationale"]))}</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(theme.THRESHOLD_BASIS_MEANING.get(p["basis"], ""))
-    if opt(p["latest_decision"]):
-        when = p["latest_review_ts"]
-        stamp = f" on {when:%-d %b}" if isinstance(when, pd.Timestamp) else ""
-        line = (f'<b>{html.escape(theme.THRESHOLD_STATE_LABEL.get(state, state))}</b> by '
-                f'{html.escape(str(p["latest_reviewer"]))}{stamp}')
-        if opt(p["latest_reason"]):
-            line += f': {html.escape(str(p["latest_reason"]))}'
-        if opt(p["review_by_date"]) is not None:
-            line += f' · resurfaces {pd.Timestamp(p["review_by_date"]):%-d %b %Y}'
-        if opt(p["adopted_rule_version"]) is not None:
-            line += f' · rule version {int(p["adopted_rule_version"])}'
-        st.markdown(f'<div class="dq-because">{line}</div>', unsafe_allow_html=True)
 
-with right:
-    st.markdown(
-        theme.kv("Element", cde_name.get(p["cde_id"], p["cde_id"]))
-        + theme.kv("Declared tolerance",
-                   f"{float(tol):g}% — the ceiling" if tol is not None else "none declared")
-        + theme.kv("Registry now", f"{float(p['registry_threshold_pct']):g}%"
-                   if opt(p["registry_threshold_pct"]) is not None else "—")
-        + theme.kv("Advised on", f"rule version {int(p['rule_version'])}, "
-                                 f"{p['proposed_ts']:%-d %b %Y}")
-        + theme.kv("Reviewer", p["reviewer"]),
-        unsafe_allow_html=True,
-    )
-    if opt(p["runs_observed"]) is not None and int(p["runs_observed"]):
+    # --- The proposal picked --------------------------------------------------------
+    if picked is None:
+        st.stop()
+    p = view[view["proposal_id"] == picked].iloc[0]
+    state = str(p["review_state"])
+    tol = opt(p["tolerance_pct"])
+
+    theme.section(f"{opt(p['rule_name']) or p['rule_id']} · {p['rule_id']}")
+    left, right = st.columns([3, 2])
+    with left:
         st.markdown(
-            '<div class="dq-blockhd"><b>WHERE THE RATE HAS SAT</b></div>'
-            + theme.kv("Runs", f"{int(p['runs_observed'])}, "
-                               f"{int(p['runs_breaching'])} breaching the current limit")
-            + theme.kv("Min / median", f"{float(p['pct_min']):g}% / {float(p['pct_median']):g}%")
-            + theme.kv("p90 / max", f"{float(p['pct_p90']):g}% / {float(p['pct_max']):g}%")
-            + theme.kv("Latest run", f"{float(p['latest_violation_pct']):g}%"
-                       if opt(p["latest_violation_pct"]) is not None else "—"),
+            theme.badge(theme.THRESHOLD_STATE_LABEL.get(state, state),
+                        theme.THRESHOLD_STATE_TONE.get(state, "neutral"))
+            + " "
+            + theme.badge(theme.THRESHOLD_BASIS_LABEL.get(p["basis"], p["basis"]),
+                          theme.THRESHOLD_BASIS_TONE.get(p["basis"], "neutral"))
+            + " "
+            + theme.severity_badge(p["severity"]) if opt(p["severity"]) else "",
             unsafe_allow_html=True,
         )
-    st.caption(
-        "Where the violation rate has sat is context, never a basis on its own.",
-        help="A flat rate is where the data is, not where it may be. The advice "
-             "rests on the declared tolerance; the history says how far from it "
-             "the data sits.",
-    )
+        st.markdown(
+            f'<div class="dq-because"><b>'
+            f'{float(p["current_threshold_pct"]):g}% → {float(p["proposed_threshold_pct"]):g}%'
+            f'</b> — {html.escape(str(p["rationale"]))}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(theme.THRESHOLD_BASIS_MEANING.get(p["basis"], ""))
+        if opt(p["latest_decision"]):
+            when = p["latest_review_ts"]
+            stamp = f" on {when:%-d %b}" if isinstance(when, pd.Timestamp) else ""
+            line = (f'<b>{html.escape(theme.THRESHOLD_STATE_LABEL.get(state, state))}</b> by '
+                    f'{html.escape(str(p["latest_reviewer"]))}{stamp}')
+            if opt(p["latest_reason"]):
+                line += f': {html.escape(str(p["latest_reason"]))}'
+            if opt(p["review_by_date"]) is not None:
+                line += f' · resurfaces {pd.Timestamp(p["review_by_date"]):%-d %b %Y}'
+            if opt(p["adopted_rule_version"]) is not None:
+                line += f' · rule version {int(p["adopted_rule_version"])}'
+            st.markdown(f'<div class="dq-because">{line}</div>', unsafe_allow_html=True)
 
-# --- The decision ----------------------------------------------------------------
-if state in thresholds.DECIDABLE:
-    theme.section("Decide")
-    st.markdown(
-        '<div class="dq-because">Adopting appends a new rule version carrying the '
-        'proposed limit and records it here. Rejecting and deferring record the '
-        'decision only. Nothing changes a limit without a name on the row.</div>',
-        unsafe_allow_html=True,
-    )
-    if not adapter.writes_are_durable():
-        st.caption("Writes are session-only here — lost on restart. Deploy to decide.")
-    with st.form("threshold_review_form", border=False):
-        decision = st.radio(
-            "Decision", list(thresholds.DECISIONS),
-            format_func=lambda d: {
-                "adopted": f"Adopt — set the limit to {float(p['proposed_threshold_pct']):g}%",
-                "rejected": "Reject — keep the current limit",
-                "deferred": "Defer — decide later",
-            }[d],
+    with right:
+        st.markdown(
+            theme.kv("Element", cde_name.get(p["cde_id"], p["cde_id"]))
+            + theme.kv("Declared tolerance",
+                       f"{float(tol):g}% — the ceiling" if tol is not None else "none declared")
+            + theme.kv("Registry now", f"{float(p['registry_threshold_pct']):g}%"
+                       if opt(p["registry_threshold_pct"]) is not None else "—")
+            + theme.kv("Advised on", f"rule version {int(p['rule_version'])}, "
+                                     f"{p['proposed_ts']:%-d %b %Y}")
+            + theme.kv("Reviewer", p["reviewer"]),
+            unsafe_allow_html=True,
         )
-        reason = st.text_area(
-            "Reason", placeholder="What you checked and what convinced you.",
-            help="Required for reject and defer — enforced here and by a CHECK "
-                 "constraint on the table. On adoption it is carried into the new "
-                 "rule version's note.",
+        if opt(p["runs_observed"]) is not None and int(p["runs_observed"]):
+            st.markdown(
+                '<div class="dq-blockhd"><b>WHERE THE RATE HAS SAT</b></div>'
+                + theme.kv("Runs", f"{int(p['runs_observed'])}, "
+                                   f"{int(p['runs_breaching'])} breaching the current limit")
+                + theme.kv("Min / median", f"{float(p['pct_min']):g}% / {float(p['pct_median']):g}%")
+                + theme.kv("p90 / max", f"{float(p['pct_p90']):g}% / {float(p['pct_max']):g}%")
+                + theme.kv("Latest run", f"{float(p['latest_violation_pct']):g}%"
+                           if opt(p["latest_violation_pct"]) is not None else "—"),
+                unsafe_allow_html=True,
+            )
+        st.caption(
+            "Where the violation rate has sat is context, never a basis on its own.",
+            help="A flat rate is where the data is, not where it may be. The advice "
+                 "rests on the declared tolerance; the history says how far from it "
+                 "the data sits.",
         )
-        review_by = st.date_input("Review by", value=date.today() + timedelta(days=30),
-                                  help="Deferrals only.")
-        if st.form_submit_button("Append decision", type="primary"):
-            try:
-                adapter.review_threshold(
-                    picked, decision, reason=reason or None,
-                    review_by_date=review_by if decision == "deferred" else None)
-                st.rerun()
-            except adapter.ReviewRejected as exc:
-                st.error(str(exc), icon=":material/block:")
-else:
-    st.caption(
-        {
-            "adopted": "Adopted. The registry carries the new limit as a new rule version.",
-            "rejected": "Rejected. The next pass of the threshold job may propose again.",
-            "in_force": "The registry already carries this limit.",
-            "no_change": "The advice was to keep the limit. There is nothing to decide.",
-        }.get(state, ""),
-    )
+
+    # --- The decision ----------------------------------------------------------------
+    if state in thresholds.DECIDABLE:
+        theme.section("Decide")
+        st.markdown(
+            '<div class="dq-because">Adopting appends a new rule version carrying the '
+            'proposed limit and records it here. Rejecting and deferring record the '
+            'decision only. Nothing changes a limit without a name on the row.</div>',
+            unsafe_allow_html=True,
+        )
+        if not adapter.writes_are_durable():
+            st.caption("Writes are session-only here — lost on restart. Deploy to decide.")
+        with st.form("threshold_review_form", border=False):
+            decision = st.radio(
+                "Decision", list(thresholds.DECISIONS),
+                format_func=lambda d: {
+                    "adopted": f"Adopt — set the limit to {float(p['proposed_threshold_pct']):g}%",
+                    "rejected": "Reject — keep the current limit",
+                    "deferred": "Defer — decide later",
+                }[d],
+            )
+            reason = st.text_area(
+                "Reason", placeholder="What you checked and what convinced you.",
+                help="Required for reject and defer — enforced here and by a CHECK "
+                     "constraint on the table. On adoption it is carried into the new "
+                     "rule version's note.",
+            )
+            review_by = st.date_input("Review by", value=date.today() + timedelta(days=30),
+                                      help="Deferrals only.")
+            if st.form_submit_button("Append decision", type="primary"):
+                try:
+                    adapter.review_threshold(
+                        picked, decision, reason=reason or None,
+                        review_by_date=review_by if decision == "deferred" else None)
+                    st.rerun()
+                except adapter.ReviewRejected as exc:
+                    st.error(str(exc), icon=":material/block:")
+    else:
+        st.caption(
+            {
+                "adopted": "Adopted. The registry carries the new limit as a new rule version.",
+                "rejected": "Rejected. The next pass of the threshold job may propose again.",
+                "in_force": "The registry already carries this limit.",
+                "no_change": "The advice was to keep the limit. There is nothing to decide.",
+            }.get(state, ""),
+        )
+
+
+_proposals()
