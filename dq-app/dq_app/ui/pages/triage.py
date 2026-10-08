@@ -16,6 +16,13 @@ currently owns it. Two consequences worth knowing:
     the row count and the compression ratio under the table can never disagree —
     they read the same function.
 
+**A breach inside its element's tolerance is not work (2026-10-08).** The business
+decides one number per element, `tolerance_pct`; a breach whose element sat within it
+on the latest run is held back (`tolerance.held_on_run`), unless it is a P1. Held
+checks stay breaches on the scorecard and the Rules page, the Live figure counts them
+in its sub-line, and the grouping card names their elements, so a shorter queue is
+never a quieter one by accident.
+
 **Redrawn 2026-10-06 in the Tables page's language**: four figures, the queue in a
 card with its views in the header, and two cards under it. The four figures are not
 the four tiles removed on 2026-09-16 -- Breaching rules, Grouped into, Needing action
@@ -38,7 +45,7 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter
-from dq_app.domain import lifecycle, metrics
+from dq_app.domain import lifecycle, metrics, tolerance
 from dq_app.ui import components, theme
 from dq_app.ui.components import as_list, opt
 
@@ -117,8 +124,13 @@ registry = adapter.get_rule_registry_current()
 # One definition of compression, in domain/metrics.py — recomputing it here with a
 # slightly different denominator is how a headline starts disagreeing with the
 # scorecard that reports it. The queue below lists exactly the cohorts it divides by.
-compression = metrics.cohort_compression(runs, cohorts)
-live = metrics.live_cohorts(runs, cohorts)
+#
+# Breaches whose element sat within the tolerance the business declared are held
+# back: still breaches on every other page, not work here. P1s are never held.
+held = tolerance.held_on_run(runs, cde_cov, adapter.get_cde_registry_current(),
+                             metrics.queue_run_id(runs))
+compression = metrics.cohort_compression(runs, cohorts, held)
+live = metrics.live_cohorts(runs, cohorts, held)
 live_ids = set(live.values())
 
 st.markdown(
@@ -144,7 +156,8 @@ closed_ids = set(current[current["lifecycle_state"].str.startswith("closed")]["c
 SCOPES = {
     "live": ("Live", live_ids,
              "Every problem with a check breaching on the latest run — including ones "
-             "that were closed and have come back. This is the set the grouping ratio "
+             "that were closed and have come back — less checks whose element is "
+             "within its agreed tolerance. This is the set the grouping ratio "
              "divides by."),
     "mine": ("Waiting on me", mine_ids,
              "Awaiting review — a steward has to accept, defer or reject it."),
@@ -200,7 +213,8 @@ def _fig(label: str, value: str, colour: str | None = None, dot: str = "",
 st.markdown(
     '<div class="dq-tmkpi">'
     + _fig("Live problems", str(len(live_ids)),
-           sub=f"from {int(compression.numerator or 0)} failing checks")
+           sub=f"from {int(compression.numerator or 0)} failing checks"
+               + (f" · {len(held)} within tolerance" if held else ""))
     + _fig("Waiting on you", str(len(mine_ids)), amber if mine_ids else None,
            theme.dot("high") if mine_ids else "", sub="awaiting your review")
     + _fig("P1 problems", str(n_p1), red if n_p1 else None, sub="in the live queue")
@@ -353,6 +367,21 @@ st.markdown(
 
 # --- How the checks were grouped, and where to start -------------------------
 
+def _held_sentence() -> str:
+    """Says what was held back and why, so a shorter queue is never a quieter one
+    by accident."""
+    if not held:
+        return ""
+    names = dict(zip(cde_cov["cde_id"], cde_cov["cde_name"]))
+    rule_cde = {r: c for c, ids in tolerance.attached(cde_cov).items() for r in ids}
+    els = sorted({names.get(rule_cde.get(r), r) for r in held})
+    n = len(held)
+    return (f" <b>{n} more failing check{'s' if n != 1 else ''}</b> "
+            f"{'are' if n != 1 else 'is'} within {'their' if n != 1 else 'its'} "
+            f"element's agreed tolerance and {'were' if n != 1 else 'was'} not sent "
+            f"here: {html.escape(', '.join(els))}.")
+
+
 group, start = st.columns([1.45, 1], gap="medium")
 
 with group, st.container(key="dq_trigroup"):
@@ -369,7 +398,7 @@ with group, st.container(key="dq_trigroup"):
         f'latest run belong to <b>{int(compression.denominator or 0)} problems</b> — '
         f"{html.escape(compression.display)} against a target of "
         f"{html.escape(compression.target)}. Each segment is one problem, sized by "
-        "its checks.</div>"
+        "its checks." + _held_sentence() + "</div>"
         f'<div class="dq-cov3 dq-trisegs">{segs}</div>'
         f'<div class="dq-legend">'
         + "".join(f'<span>{theme.dot(theme.SEVERITY_TONE[s])}{theme.SEVERITY_SHORT[s]}'

@@ -691,13 +691,16 @@ def generate(conn) -> None:
             if version is None:
                 skipped.append(f"{rule_id}: id already used by a rule not from this template")
                 continue
-            # The element's tolerance is the ceiling on any rule's limit; the generated
-            # rule starts AT the ceiling and the threshold job may tighten it in shadow.
-            limit = float(b["tolerance_pct"]) if b["tolerance_pct"] is not None else 0.0
+            # A generated rule's limit is 0: any failing row makes the check read
+            # breach. Since 2026-10-08 the element's tolerance decides what reaches
+            # triage (v_check_escalation), so copying it onto every rule as well would
+            # let N rules each spend the whole tolerance. A steward may still set a
+            # rule's limit by hand; nobody is asked to approve one.
+            limit = 0.0
             name = tp.title.replace("{element}", b["cde_name"]) + f" ({col})"
             note = (f"Generated from {tp.template_id} v{tp.version} (lifted from "
                     f"{tp.source_rule}) on the binding {col} -> {b['cde_id']}. "
-                    f"Limit set to the element's tolerance.")
+                    f"Limit 0: the element's tolerance governs escalation.")
             if tp.is_pattern:
                 note += f" Pattern is {b['cde_id']}'s expected_signature {sig}."
             if tp.takes_date_format:

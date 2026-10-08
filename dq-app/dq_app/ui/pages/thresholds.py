@@ -1,24 +1,28 @@
-"""Thresholds — the detection limits, as advised, and the decisions on the advice.
+"""Thresholds — one tolerance per element, as advised, and the decisions on the advice.
 
-Every rule has a `fail_threshold_pct`: the line between normal variation and a
-breach. The threshold job (`notebooks/06_suggest_thresholds.ipynb`) advises on where
-that line should be, once per rule per pass, from two things the page shows side by
-side: the tolerance the CDE register declares on the element the rule monitors, which
-is a ceiling the advice may never exceed, and where the violation rate has sat across
-the run history. This page puts each rule's latest proposal to its reviewer.
+**The business decides one number per element (2026-10-08).** `config.cde_registry.
+tolerance_pct` is the share of an element's rows the business will accept failing, and
+since this date it decides what reaches Triage: a breach whose element sat within its
+tolerance is held back (`v_check_escalation`), unless it is a P1. A rule's
+`fail_threshold_pct` only decides whether one check reads `breach`; it is a steward's
+setting, 0 by default, and nobody is asked to approve it.
 
-**Detection, not triage.** Nothing here reads a cohort or the disposition register,
-and nothing on the Triage pages reads this. A limit is a property of a rule; a
-problem is a property of a run.
+Until then this page put every rule's limit to review — 86 proposals over 19 elements
+on the threshold job's first real pass, 30 asking for a decision. That was too many
+decisions about the wrong thing. They stay in `results.threshold_proposal` as history
+and the page says how many; it no longer lists them.
 
-**The decision is the app's third write, and adoption is also its second.** Adopting
-appends a `rule_version` to the registry carrying the proposed limit — the same
-append that promotes a shadow rule — and records which version on
-`results.threshold_review`. Rejecting and deferring write the review row only.
-Nothing here changes a threshold without a person's name on the row that did it.
+**What the job advises now** (`notebooks/06_suggest_thresholds.ipynb`, one row per
+element per pass in `results.tolerance_proposal`): keep the tolerance, tighten it, or
+put it to the business. Never a higher number — that is the business accepting worse
+data, and a CHECK constraint refuses it.
 
-Same shape as Triage: a clickable table, one row per rule, and a panel for the row
-picked. `_thr_pick` holds the selection.
+**Accepting writes the decision and nothing else.** The register changes through the
+Elements page: a person proposes the amendment, a second approves it, the onboarding
+job applies it, and the advice then reads `In force`. The decision is the app's ninth
+write (`results.tolerance_review`); every one opens a confirmation first.
+
+`_tol_pick` holds the element picked.
 """
 
 from __future__ import annotations
@@ -30,223 +34,291 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter
-from dq_app.domain import thresholds
-from dq_app.ui import components, theme
+from dq_app.domain import metrics, tolerance
+from dq_app.ui import components, onboarding_style, theme
 from dq_app.ui.components import opt
 
 components.page_chrome()
 
-st.title("Thresholds")
+st.markdown(
+    '<div class="dq-page-hd"><div class="t">Thresholds</div>'
+    '<div class="s">One tolerance per critical data element, decided by the business. '
+    "It decides which failing checks reach Triage.</div></div>",
+    unsafe_allow_html=True,
+)
 
-current = adapter.get_threshold_proposal_current()
-cdes = adapter.get_cde_registry_current()
-cde_name = dict(zip(cdes["cde_id"], cdes["cde_name"])) if len(cdes) else {}
+current = adapter.get_tolerance_proposal_current()
+old = adapter.get_threshold_proposals()
+
+
+def _history_note() -> None:
+    if len(old):
+        st.caption(
+            f"{old['rule_id'].nunique()} rules' earlier limit proposals are kept as history.",
+            help="Until 2026-10-08 the threshold job advised on every rule's own limit, "
+                 "and this page put each one to review. Rule limits are now a "
+                 "steward's setting, 0 by default; the business decides the element's "
+                 "tolerance instead. The proposals stay in results.threshold_proposal.",
+        )
+
 
 if current.empty:
     st.caption(
-        "No threshold proposals yet.",
-        help="The threshold job has not run against this catalog. It writes one "
-             "proposal per rule per pass to results.threshold_proposal; this page "
-             "shows the latest per rule and the decision on it.",
+        "No tolerance advice yet.",
+        help="The threshold job has not advised on tolerances in this catalog. It "
+             "writes one row per element per pass to results.tolerance_proposal.",
     )
+    _history_note()
     st.stop()
 
-# --- The counts --------------------------------------------------------------
-s = thresholds.summary(current)
+# --- What is held back right now ----------------------------------------------
+# The point of a tolerance, shown beside the advice about it: which failing checks the
+# current figures keep out of Triage.
+
+runs = adapter.get_check_runs()
+cde_cov = adapter.get_cde_coverage()
+registry = adapter.get_cde_registry_current()
+run_id = metrics.queue_run_id(runs)
+_run = runs[runs["run_id"] == run_id] if run_id is not None else runs.iloc[0:0]
+escalation = tolerance.check_escalation(
+    _run, cde_cov, tolerance.element_tolerance(_run, cde_cov, registry))
+held_by_cde = (escalation[~escalation["escalates"].astype(bool)]
+               .groupby("cde_id")["rule_id"].apply(sorted).to_dict()
+               if len(escalation) else {})
+
+# --- The figures ---------------------------------------------------------------
+s = tolerance.summary(current)
+decide = current[current["review_state"].isin(tolerance.DECIDABLE)]
 components.kpi_row([
-    {"label": "Awaiting review", "value": f"{s['open']}", "tone": "high" if s["open"] else None,
-     "help": "A proposal that moves a limit and that nobody has decided."},
-    {"label": "Deferred", "value": f"{s['deferred']}", "sub": "with a review-by date"},
-    {"label": "Adopted", "value": f"{s['adopted']}", "sub": "new rule version appended"},
-    {"label": "Rejected", "value": f"{s['rejected']}"},
-    {"label": "Keep as is", "value": f"{s['no_change']}",
-     "help": "The advice was to keep the current limit, with the reason stated. "
-             "Nothing to decide."},
-    {"label": "Rules advised", "value": f"{s['proposals']}",
-     "sub": f"latest pass {current['proposed_ts'].max():%-d %b}"},
+    {"label": "Awaiting decision", "value": f"{s['open']}",
+     "tone": "high" if s["open"] else None,
+     "help": "Advice nobody has decided. At most one per element."},
+    {"label": "Business decisions", "value": str(int((decide["advice"] == "review").sum())),
+     "sub": "element outside its tolerance",
+     "help": "The data gets fixed, or the business accepts more failure. The job "
+             "never raises a tolerance itself."},
+    {"label": "Tighten", "value": str(int((decide["advice"] == "tighten").sum())),
+     "sub": "tolerance looser than the data"},
+    {"label": "Held from Triage", "value": str(sum(len(v) for v in held_by_cde.values())),
+     "sub": "failing checks, latest run",
+     "help": "Failing checks whose element sat within its tolerance on the latest run. "
+             "Still breaches on the Scorecard and the Rules page; not work in Triage. "
+             "A P1 is never held."},
+    {"label": "Elements advised", "value": f"{s['proposals']}",
+     "sub": f"latest pass {pd.Timestamp(current['proposed_ts'].max()):%-d %b}"},
 ])
 
-# --- The table -----------------------------------------------------------------
-STATE_ORDER = {st_: i for i, st_ in enumerate(
-    ["open", "deferred", "in_force", "adopted", "rejected", "no_change"])}
-view = current.assign(_o=current["review_state"].map(STATE_ORDER)) \
-              .sort_values(["_o", "rule_id"])
+# --- The list ------------------------------------------------------------------
+STATE_ORDER = {k: i for i, k in enumerate(
+    ["open", "deferred", "accepted", "in_force", "rejected", "no_change"])}
+ADVICE_ORDER = {"review": 0, "tighten": 1, "keep": 2}
+view = (current.assign(_o=current["review_state"].map(STATE_ORDER),
+                       _a=current["advice"].map(ADVICE_ORDER))
+               .sort_values(["_o", "_a", "cde_id"]))
 
-rows = []
-for _, r in view.iterrows():
-    rows.append({
-        "Proposal id": r["proposal_id"],
-        "Check": opt(r["rule_name"]) or r["rule_id"],
-        "Rule id": r["rule_id"],
-        "Element": cde_name.get(r["cde_id"], r["cde_id"]),
-        "Now": float(r["current_threshold_pct"]),
-        "Proposed": float(r["proposed_threshold_pct"]),
-        "Basis": str(r["basis"]),
-        "State": str(r["review_state"]),
-        "Reviewer": str(r["reviewer"]),
-    })
 
-GRID = ("minmax(9rem,1.3fr) minmax(7rem,1fr) 3.4rem 4.4rem minmax(6.5rem,8.5rem) "
-        "minmax(6.5rem,8rem) minmax(7rem,9rem)")
+def _pct(v) -> str:
+    return "—" if opt(v) is None else f"{float(v):g}%"
+
+
+rows = [{
+    "Proposal id": r["proposal_id"],
+    "Element": opt(r["cde_name"]) or r["cde_id"],
+    "Cde": r["cde_id"],
+    "Criticality": opt(r["criticality"]) or "",
+    "Now": _pct(r["current_tolerance_pct"]),
+    "Advised": _pct(r["proposed_tolerance_pct"]) if r["advice"] == "tighten" else "",
+    "Failing": _pct(r["latest_fail_pct"]),
+    "Outside": ("—" if opt(r["runs_observed"]) is None
+                else f"{int(r['runs_outside'])} of {int(r['runs_observed'])}"),
+    "Advice": str(r["advice"]),
+    "State": str(r["review_state"]),
+} for _, r in view.iterrows()]
+
+GRID = ("minmax(10rem,1.6fr) minmax(5rem,7rem) 4.6rem 5.4rem minmax(7.5rem,9rem) "
+        "minmax(7rem,9rem)")
 
 
 def _cells(m) -> str:
-    moved = m["Basis"] != "unchanged"
     return (
-        f'<span class="name" title="{html.escape(m["Rule id"])}">{html.escape(m["Check"])}</span>'
-        f'<span>{html.escape(m["Element"])}</span>'
-        f'<span class="num">{m["Now"]:g}%</span>'
-        f'<span class="num">{"<b>" if moved else ""}{m["Proposed"]:g}%{"</b>" if moved else ""}</span>'
-        f'<span>{theme.badge(theme.THRESHOLD_BASIS_LABEL.get(m["Basis"], m["Basis"]), theme.THRESHOLD_BASIS_TONE.get(m["Basis"], "neutral"))}</span>'
-        f'<span>{theme.badge(theme.THRESHOLD_STATE_LABEL.get(m["State"], m["State"]), theme.THRESHOLD_STATE_TONE.get(m["State"], "neutral"))}</span>'
-        f'<span class="mono">{html.escape(m["Reviewer"])}</span>'
+        f'<span class="name" title="{html.escape(m["Cde"])}">{html.escape(m["Element"])}'
+        f'<span style="color:var(--dq-text-2)"> · {html.escape(m["Criticality"])}</span></span>'
+        f'<span class="num">{m["Now"]}'
+        + (f' → <b>{m["Advised"]}</b>' if m["Advised"] else "") + "</span>"
+        f'<span class="num">{m["Failing"]}</span>'
+        f'<span class="num">{m["Outside"]}</span>'
+        f'<span>{theme.badge(theme.TOLERANCE_ADVICE_LABEL.get(m["Advice"], m["Advice"]), theme.TOLERANCE_ADVICE_TONE.get(m["Advice"], "neutral"))}</span>'
+        f'<span>{theme.badge(theme.TOLERANCE_STATE_LABEL.get(m["State"], m["State"]), theme.TOLERANCE_STATE_TONE.get(m["State"], "neutral"))}</span>'
     )
 
 
+DECIDE = "tolerance_review"
+PENDING = "_tol_decision"
 
-# From here down is one fragment: picking a proposal redraws the list, the proposal
-# and its decision form, not the figures above, which read no selection. The form's
-# `st.rerun()` after a write stays a full-page run -- what it changed is folded above.
+
+def _write() -> str | None:
+    pid, decision, reason, by = st.session_state.get(PENDING, (None,) * 4)
+    try:
+        adapter.review_tolerance(pid, decision, reason=reason, review_by_date=by)
+    except adapter.ToleranceReviewRejected as exc:
+        return str(exc)
+    st.session_state.pop(PENDING, None)
+    return None
+
+
+def _to_elements(cde_id: str) -> None:
+    st.session_state["_el_pick"] = cde_id
+    st.session_state["_el_mode"] = "amend"
+
+
+# One fragment: picking an element redraws the list, the advice and the form, not the
+# figures above, which read no selection. The write is a full run (the confirmation's
+# st.rerun), because what it changed is folded above.
 
 
 @st.fragment
-def _proposals() -> None:
-    picked = st.session_state.get("_thr_pick")
+def _advice() -> None:
+    picked = st.session_state.get("_tol_pick")
     if picked not in set(view["proposal_id"]):
         picked = rows[0]["Proposal id"] if rows else None
 
     components.row_head(
-        ["Check", "Element", ("Now", "n"), ("Proposed", "n"), "Basis", "State", "Reviewer"], GRID)
-    with st.container(key="dqrows_thr"):
+        ["Element", ("Tolerance", "n"), ("Failing", "n"), ("Runs outside", "n"),
+         "Advice", "State"], GRID)
+    with st.container(key="dqrows_tol"):
         components.clickable_rows(
-            rows, GRID, _cells, "thr", "Proposal id",
-            lambda m: f"Open the proposal on {m['Check']}", picked=picked,
-            on_pick=components.pick_into("_thr_pick"))
-
+            rows, GRID, _cells, "tol", "Proposal id",
+            lambda m: f"Open the advice on {m['Element']}", picked=picked,
+            on_pick=components.pick_into("_tol_pick"))
     st.caption(
-        "Every rule the threshold job has advised on, latest proposal first. Bold is a "
-        "change; the rest is advice to keep the limit, with its reason.",
-        help="The tolerance the element declares is a ceiling the advice may never "
-             "exceed — enforced by the job's validator and by a CHECK constraint on "
-             "the table. Where no tolerance is declared the expected advice is keep: "
-             "history alone says where the data is, not where it may be.",
-    )
+        "Failing is rows failed over rows checked across the element's checks on the "
+        "latest run — the same figure the Scorecard prints against the same target.",
+        help="A sum of failures across checks, not a count of distinct bad rows: a row "
+             "failing two checks counts twice. check_run stores counts, not keys.")
+    _history_note()
 
-    # --- The proposal picked --------------------------------------------------------
     if picked is None:
-        st.stop()
+        return
     p = view[view["proposal_id"] == picked].iloc[0]
-    state = str(p["review_state"])
-    tol = opt(p["tolerance_pct"])
+    state, advice = str(p["review_state"]), str(p["advice"])
 
-    theme.section(f"{opt(p['rule_name']) or p['rule_id']} · {p['rule_id']}")
+    theme.section(f"{opt(p['cde_name']) or p['cde_id']} · {p['cde_id']}")
     left, right = st.columns([3, 2])
     with left:
         st.markdown(
-            theme.badge(theme.THRESHOLD_STATE_LABEL.get(state, state),
-                        theme.THRESHOLD_STATE_TONE.get(state, "neutral"))
-            + " "
-            + theme.badge(theme.THRESHOLD_BASIS_LABEL.get(p["basis"], p["basis"]),
-                          theme.THRESHOLD_BASIS_TONE.get(p["basis"], "neutral"))
-            + " "
-            + theme.severity_badge(p["severity"]) if opt(p["severity"]) else "",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<div class="dq-because"><b>'
-            f'{float(p["current_threshold_pct"]):g}% → {float(p["proposed_threshold_pct"]):g}%'
-            f'</b> — {html.escape(str(p["rationale"]))}</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(theme.THRESHOLD_BASIS_MEANING.get(p["basis"], ""))
+            theme.badge(theme.TOLERANCE_STATE_LABEL.get(state, state),
+                        theme.TOLERANCE_STATE_TONE.get(state, "neutral")) + " "
+            + theme.badge(theme.TOLERANCE_ADVICE_LABEL.get(advice, advice),
+                          theme.TOLERANCE_ADVICE_TONE.get(advice, "neutral")),
+            unsafe_allow_html=True)
+        head = (f"{_pct(p['current_tolerance_pct'])} → {_pct(p['proposed_tolerance_pct'])}"
+                if advice == "tighten" else f"Tolerance {_pct(p['current_tolerance_pct'])}")
+        st.markdown(f'<div class="dq-because"><b>{head}</b> — '
+                    f'{html.escape(str(p["rationale"]))}</div>', unsafe_allow_html=True)
+        st.caption(theme.TOLERANCE_ADVICE_MEANING.get(advice, ""))
+        held = held_by_cde.get(p["cde_id"], [])
+        if held:
+            st.markdown(
+                f'<div class="dq-because"><b>Held from Triage on the latest run:</b> '
+                f'{html.escape(", ".join(held))} — failing, but inside this tolerance.'
+                "</div>", unsafe_allow_html=True)
         if opt(p["latest_decision"]):
             when = p["latest_review_ts"]
-            stamp = f" on {when:%-d %b}" if isinstance(when, pd.Timestamp) else ""
-            line = (f'<b>{html.escape(theme.THRESHOLD_STATE_LABEL.get(state, state))}</b> by '
-                    f'{html.escape(str(p["latest_reviewer"]))}{stamp}')
+            stamp = f" on {pd.Timestamp(when):%-d %b}" if opt(when) is not None else ""
+            line = (f'<b>{html.escape(theme.TOLERANCE_STATE_LABEL.get(state, state))}</b> '
+                    f'by {html.escape(str(p["latest_reviewer"]))}{stamp}')
             if opt(p["latest_reason"]):
                 line += f': {html.escape(str(p["latest_reason"]))}'
             if opt(p["review_by_date"]) is not None:
                 line += f' · resurfaces {pd.Timestamp(p["review_by_date"]):%-d %b %Y}'
-            if opt(p["adopted_rule_version"]) is not None:
-                line += f' · rule version {int(p["adopted_rule_version"])}'
             st.markdown(f'<div class="dq-because">{line}</div>', unsafe_allow_html=True)
 
     with right:
         st.markdown(
-            theme.kv("Element", cde_name.get(p["cde_id"], p["cde_id"]))
-            + theme.kv("Declared tolerance",
-                       f"{float(tol):g}% — the ceiling" if tol is not None else "none declared")
-            + theme.kv("Registry now", f"{float(p['registry_threshold_pct']):g}%"
-                       if opt(p["registry_threshold_pct"]) is not None else "—")
-            + theme.kv("Advised on", f"rule version {int(p['rule_version'])}, "
-                                     f"{p['proposed_ts']:%-d %b %Y}")
-            + theme.kv("Reviewer", p["reviewer"]),
-            unsafe_allow_html=True,
-        )
+            theme.kv("Register now", _pct(p["register_tolerance_pct"]))
+            + theme.kv("Advised on", f"element version {int(p['cde_version'])}, "
+                                     f"{pd.Timestamp(p['proposed_ts']):%-d %b %Y}")
+            + theme.kv("Decided by", p["reviewer"]),
+            unsafe_allow_html=True)
         if opt(p["runs_observed"]) is not None and int(p["runs_observed"]):
             st.markdown(
-                '<div class="dq-blockhd"><b>WHERE THE RATE HAS SAT</b></div>'
+                '<div class="dq-blockhd"><b>WHERE THE ELEMENT HAS SAT</b></div>'
                 + theme.kv("Runs", f"{int(p['runs_observed'])}, "
-                                   f"{int(p['runs_breaching'])} breaching the current limit")
-                + theme.kv("Min / median", f"{float(p['pct_min']):g}% / {float(p['pct_median']):g}%")
-                + theme.kv("p90 / max", f"{float(p['pct_p90']):g}% / {float(p['pct_max']):g}%")
-                + theme.kv("Latest run", f"{float(p['latest_violation_pct']):g}%"
-                           if opt(p["latest_violation_pct"]) is not None else "—"),
-                unsafe_allow_html=True,
-            )
-        st.caption(
-            "Where the violation rate has sat is context, never a basis on its own.",
-            help="A flat rate is where the data is, not where it may be. The advice "
-                 "rests on the declared tolerance; the history says how far from it "
-                 "the data sits.",
-        )
+                                   f"{int(p['runs_outside'])} outside the tolerance")
+                + theme.kv("Failing min / median",
+                           f"{_pct(p['fail_pct_min'])} / {_pct(p['fail_pct_median'])}")
+                + theme.kv("p90 / max", f"{_pct(p['fail_pct_p90'])} / {_pct(p['fail_pct_max'])}")
+                + theme.kv("Latest run", _pct(p["latest_fail_pct"])),
+                unsafe_allow_html=True)
+        if bool(p["scope_disputed"]):
+            st.caption("A rule on this element is in scope mismatch, so its failure rate "
+                       "measures the rule, not the data. Nothing on it is held back.")
 
-    # --- The decision ----------------------------------------------------------------
-    if state in thresholds.DECIDABLE:
-        theme.section("Decide")
+    if state == "accepted" and advice == "tighten":
         st.markdown(
-            '<div class="dq-because">Adopting appends a new rule version carrying the '
-            'proposed limit and records it here. Rejecting and deferring record the '
-            'decision only. Nothing changes a limit without a name on the row.</div>',
-            unsafe_allow_html=True,
-        )
-        if not adapter.writes_are_durable():
-            st.caption("Writes are session-only here — lost on restart. Deploy to decide.")
-        with st.form("threshold_review_form", border=False):
-            decision = st.radio(
-                "Decision", list(thresholds.DECISIONS),
-                format_func=lambda d: {
-                    "adopted": f"Adopt — set the limit to {float(p['proposed_threshold_pct']):g}%",
-                    "rejected": "Reject — keep the current limit",
-                    "deferred": "Defer — decide later",
-                }[d],
-            )
-            reason = st.text_area(
-                "Reason", placeholder="What you checked and what convinced you.",
-                help="Required for reject and defer — enforced here and by a CHECK "
-                     "constraint on the table. On adoption it is carried into the new "
-                     "rule version's note.",
-            )
-            review_by = st.date_input("Review by", value=date.today() + timedelta(days=30),
-                                      help="Deferrals only.")
-            if st.form_submit_button("Append decision", type="primary"):
-                try:
-                    adapter.review_threshold(
-                        picked, decision, reason=reason or None,
-                        review_by_date=review_by if decision == "deferred" else None)
-                    st.rerun()
-                except adapter.ReviewRejected as exc:
-                    st.error(str(exc), icon=":material/block:")
-    else:
-        st.caption(
-            {
-                "adopted": "Adopted. The registry carries the new limit as a new rule version.",
-                "rejected": "Rejected. The next pass of the threshold job may propose again.",
-                "in_force": "The registry already carries this limit.",
-                "no_change": "The advice was to keep the limit. There is nothing to decide.",
-            }.get(state, ""),
-        )
+            '<div class="dq-because">Accepted. The register still says '
+            f'{_pct(p["register_tolerance_pct"])}: the change itself is an amendment on '
+            "the Elements page, approved by a second person and applied by the "
+            "onboarding job. This advice reads <b>In force</b> once it lands.</div>",
+            unsafe_allow_html=True)
+        if st.button("Amend on Elements", icon=":material/edit:", key="tol_to_elements",
+                     on_click=_to_elements, args=(p["cde_id"],)):
+            st.switch_page("dq_app/ui/pages/elements.py")
+
+    if state not in tolerance.DECIDABLE:
+        st.caption({
+            "accepted": "" if advice == "tighten" else
+                        "Accepted. The decision it asks for is the business's to make.",
+            "rejected": "Rejected. The next pass may advise again if the history changes.",
+            "in_force": "The register carries this tolerance.",
+            "no_change": "The advice was to keep the tolerance. Nothing to decide.",
+        }.get(state, ""))
+        return
+
+    theme.section("Decide")
+    if not adapter.writes_are_durable():
+        st.caption("Writes are session-only here — lost on restart. Deploy to decide.")
+    labels = {
+        "accepted": (f"Accept — tighten to {_pct(p['proposed_tolerance_pct'])} through "
+                     "the Elements page" if advice == "tighten" else
+                     "Accept — the business will decide: fix the data or amend the tolerance"),
+        "rejected": "Reject — the tolerance stays as it is",
+        "deferred": "Defer — decide later",
+    }
+    st.radio("Decision", list(tolerance.DECISIONS), key=f"tol_dec_{picked}",
+             format_func=labels.get)
+    st.text_area("Reason", key=f"tol_reason_{picked}",
+                          placeholder="What you checked and what convinced you.",
+                          help="Required to reject or defer — here and by a CHECK "
+                               "constraint on the table.")
+    st.date_input("Review by", value=date.today() + timedelta(days=30),
+                              key=f"tol_by_{picked}", help="Deferrals only.")
+
+    def _ask() -> None:
+        # Read the widgets' values from session state, not this run's locals: a click
+        # that arrives together with a changed radio or reason runs this callback
+        # before the script redraws, and the locals would still hold the old values.
+        d = st.session_state[f"tol_dec_{picked}"]
+        r = (st.session_state.get(f"tol_reason_{picked}") or "").strip() or None
+        by = st.session_state.get(f"tol_by_{picked}")
+        st.session_state[PENDING] = (picked, d, r, by if d == "deferred" else None)
+        onboarding_style.ask(DECIDE)
+
+    st.button("Record decision", type="primary", key="tol_go", on_click=_ask)
+
+    pending = st.session_state.get(PENDING)
+    if pending and pending[0] == picked:
+        _, d, r, by = pending
+        name = html.escape(str(opt(p["cde_name"]) or p["cde_id"]))
+        body = (f"Appends one row to <b>results.tolerance_review</b>, in your name: "
+                f"<b>{html.escape(theme.TOLERANCE_STATE_LABEL.get(d, d))}</b> on the advice "
+                f"for {name}."
+                + (f" Resurfaces {by:%-d %b %Y}." if by else "")
+                + " The register is not changed"
+                + (" — the tightening is then an amendment on the Elements page, approved "
+                   "by a second person." if d == "accepted" and advice == "tighten" else ".")
+                + " A decision cannot be edited, only followed by another.")
+        onboarding_style.confirm(DECIDE, "Record this decision?", body, "Record", _write)
 
 
-_proposals()
+_advice()

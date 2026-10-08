@@ -49,7 +49,8 @@ import streamlit as st
 
 from dq_app.data import identity
 from dq_app.data import notify as _notify_transport
-from dq_app.domain import coverage, elements, lifecycle, onboarding, slices, thresholds
+from dq_app.domain import (coverage, elements, lifecycle, onboarding, slices, thresholds,
+                           tolerance)
 
 APP_VERSION = "dq-triage-app/1.0.0"
 
@@ -190,6 +191,32 @@ def get_threshold_proposal_current() -> pd.DataFrame:
         get_threshold_proposals(), get_threshold_reviews(), get_rule_registry())
 
 
+@st.cache_data(**_CACHE)
+def get_tolerance_proposals() -> pd.DataFrame:
+    return _impl.tolerance_proposals()
+
+
+@st.cache_data(**_CACHE)
+def _base_tolerance_reviews() -> pd.DataFrame:
+    return _impl.tolerance_reviews()
+
+
+def get_tolerance_reviews() -> pd.DataFrame:
+    """Every decision on tolerance advice, including any recorded in this session."""
+    base = _base_tolerance_reviews()
+    pending = getattr(_impl, "pending_tolerance_reviews", lambda: [])()
+    if not pending:
+        return base
+    return pd.concat([base, pd.DataFrame(pending)], ignore_index=True)
+
+
+def get_tolerance_proposal_current() -> pd.DataFrame:
+    """One row per element: the threshold job's latest advice on its tolerance, with
+    the latest review folded in. The Python twin of `v_tolerance_proposal_current`."""
+    return tolerance.derive_proposal_current(
+        get_tolerance_proposals(), get_tolerance_reviews(), get_cde_registry_current())
+
+
 def get_cde_registry_current() -> pd.DataFrame:
     """Latest non-retired version of each element, with `effective_to` derived.
     The Python twin of `v_cde_registry_current`."""
@@ -299,7 +326,6 @@ def get_catalog_columns(fqn: str) -> pd.DataFrame:
 @st.cache_data(**_CACHE)
 def probe_table(fqn: str) -> dict:
     return _impl.table_probe(fqn)
-
 
 
 @st.cache_data(**_CACHE)
@@ -700,7 +726,8 @@ _SHARED_READS = (
     _base_rule_registry, get_playbook, get_cde_registry, get_cde_profile,
     get_threshold_proposals, _base_threshold_reviews, _base_monitored_tables,
     _base_binding_proposals, _base_binding_reviews, get_check_templates,
-    _base_cde_proposals, _base_cde_reviews,
+    _base_cde_proposals, _base_cde_reviews, get_tolerance_proposals,
+    _base_tolerance_reviews,
 )
 _WARM_LOCK = threading.Lock()
 _warmed_at = 0.0
@@ -1027,69 +1054,33 @@ def promote_table(promote_ids: list[str], exclude: dict[str, list[str]], note: s
 
 
 # The domain refuses reviews; this is the same exception under the name the page uses.
-ReviewRejected = thresholds.ReviewRejected
+# Deciding a RULE's limit left the app on 2026-10-08 with review_threshold: a rule's
+# limit is a steward's setting now, and the business decides the element's tolerance.
+# results.threshold_review is read as history and written by nothing here.
+ToleranceReviewRejected = tolerance.ReviewRejected
 
 
-def review_threshold(
-    proposal_id: str,
-    decision: str,
-    *,
-    reason: str | None = None,
-    review_by_date: date | None = None,
-) -> dict:
-    """Decide a threshold proposal. The app's third write — and, on adoption, the
-    second one too.
+def review_tolerance(proposal_id: str, decision: str, *, reason: str | None = None,
+                     review_by_date: date | None = None) -> dict:
+    """Decide the threshold job's advice on one element's tolerance. The app's ninth
+    write, and the only one this decision makes: accepting changes nothing in the
+    register. A tolerance changes through the Elements page's amendment, proposed by
+    a person and approved by a second, and the advice then reads `in_force`.
 
-    Adopting appends a `rule_version` carrying the proposed limit, exactly as
-    `promote_rule` appends one carrying a new status: same table, same grant, same
-    append. The review row then records which version that was. Rejecting and
-    deferring write the review row only. Validation is `domain.thresholds.
-    validate_review`, pure and tested without a runtime; what happens here is the
-    stamping and the two inserts.
-
-    The order is adopt-then-record, deliberately: a review row claiming an adoption
-    that never landed in the registry is the worse of the two failures.
-    """
-    current = get_threshold_proposal_current()
+    Like a threshold review's: the identity is stamped here and the table's
+    `tolerance_review_has_identity` refuses a laptop's row in the workspace."""
+    current = get_tolerance_proposal_current()
     match = current[current["proposal_id"] == proposal_id]
     if match.empty:
-        raise ReviewRejected("That proposal is not the latest for its rule, or does not exist.")
+        raise ToleranceReviewRejected(
+            "That advice is not the latest for its element, or does not exist.")
     p = match.iloc[0]
     who = identity.current()
-    if decision == "adopted":
-        _require_platform_identity(who, "Adopting a limit", ReviewRejected)
-    thresholds.validate_review(
-        decision, reason=reason, review_by_date=review_by_date,
-        state=str(p["review_state"]))
-
-    reviews = get_threshold_reviews()
+    tolerance.validate_review(decision, reason=reason, review_by_date=review_by_date,
+                              state=str(p["review_state"]))
+    reviews = get_tolerance_reviews()
     reviews_seen = int((reviews["proposal_id"] == proposal_id).sum())
     now = datetime.now()
-    adopted_version = None
-    if decision == "adopted":
-        reg = get_rule_registry()
-        versions = reg[reg["rule_id"] == p["rule_id"]].sort_values("rule_version")
-        latest = versions.iloc[-1]
-        adopted_version = int(latest["rule_version"]) + 1
-        row = latest.to_dict()
-        row.update({
-            "rule_version": adopted_version,
-            "fail_threshold_pct": float(p["proposed_threshold_pct"]),
-            "effective_from": now,
-            "created_by": who.email,
-            "created_at": now,
-            "note": (f"v{adopted_version}: fail_threshold_pct "
-                     f"{float(latest['fail_threshold_pct']):g}% -> "
-                     f"{float(p['proposed_threshold_pct']):g}%, adopting threshold "
-                     f"proposal {proposal_id[:8]} ({p['basis']}). "
-                     + (reason or "").strip()).strip(),
-        })
-        if not _impl.append_rule_version(row):
-            clear_cache()
-            raise ReviewRejected(
-                f"{p['rule_id']} gained a new version after you opened this proposal, so "
-                "nothing was written. The page has been refreshed; review it again.")
-
     review = {
         "review_id": str(uuid.uuid4()),
         "proposal_id": proposal_id,
@@ -1099,24 +1090,16 @@ def review_threshold(
         "actor_display_name": who.display_name,
         "actor_source": who.source,
         "decision": decision,
-        "reason": (reason or None),
+        "reason": (reason or "").strip() or None,
         "review_by_date": review_by_date if decision == "deferred" else None,
-        "adopted_rule_version": adopted_version,
         "app_version": APP_VERSION,
     }
-    if not _impl.write_threshold_review(review, reviews_seen=reviews_seen):
+    if not _impl.write_tolerance_review(review, reviews_seen=reviews_seen):
         clear_cache()
-        if adopted_version is not None:
-            # The limit landed and the record of deciding it did not: someone reviewed
-            # the same proposal in between. The registry row names the proposal in its
-            # note, so the adoption is traceable, but the reviewer has to be told.
-            raise ReviewRejected(
-                f"The new limit was written as {p['rule_id']} v{adopted_version}, but "
-                "someone else reviewed this proposal at the same moment, so your review "
-                "row was not. Their decision is now the one on record; reconcile the two "
-                "before acting further.")
-        raise ReviewRejected(
-            "Someone else reviewed this proposal after you opened it, so your decision "
+        raise ToleranceReviewRejected(
+            "Someone else decided this advice after you opened it, so your decision "
             "was not written. The page has been refreshed; read theirs.")
     clear_cache()
     return review
+
+

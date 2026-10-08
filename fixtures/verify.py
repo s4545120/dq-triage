@@ -51,13 +51,15 @@ DDL_FOR = {
     "results.cde_profile": "10_results_cde_profile.sql",
     "results.threshold_proposal": "13_results_threshold.sql",
     "results.threshold_review": "13_results_threshold.sql",
+    "results.tolerance_proposal": "19_results_tolerance.sql",
+    "results.tolerance_review": "19_results_tolerance.sql",
 }
 
 
 def ddl_columns(fname: str, table: str | None = None) -> set[str]:
     text = (DDL_DIR / fname).read_text()
     if table:
-        # 13_results_threshold.sql declares two tables; pick the one asked for.
+        # 13 and 19 each declare two tables; pick the one asked for.
         text = text[text.index(f"CREATE TABLE IF NOT EXISTS {{catalog}}.{table} ("):]
     body = re.search(
         r"CREATE TABLE IF NOT EXISTS [^(]+\((.*?)\n\)\s*\nUSING DELTA",
@@ -112,6 +114,26 @@ if NOTEBOOK.exists():
         for c in sorted(declared - emitted):
             findings.append(f"notebook_drift: cohort.{c} is declared in "
                             "05_results_cohort.sql and the triage notebook never writes it")
+
+# --- 4b. The notebook that will really write results.tolerance_proposal ------
+# Same check for the threshold job: its write cell against 19_results_tolerance.sql,
+# anchored on the INSERT's staging view.
+NOTEBOOK_06 = Path(__file__).parent.parent / "notebooks" / "06_suggest_thresholds.ipynb"
+if NOTEBOOK_06.exists():
+    import json as _json
+
+    _cells06 = [c for c in _json.loads(NOTEBOOK_06.read_text())["cells"]
+                if c["cell_type"] == "code"
+                and 'createOrReplaceTempView("candidate_tolerance")' in "".join(c["source"])]
+    if len(_cells06) != 1:
+        findings.append(f"notebook_drift: expected one cell building the tolerance proposal "
+                        f"row, found {len(_cells06)}")
+    else:
+        emitted = set(re.findall(r'^\s{8}"([a-z_][a-z0-9_]*)":', "".join(_cells06[0]["source"]), re.M))
+        declared = ddl_columns("19_results_tolerance.sql", "results.tolerance_proposal")
+        for c in sorted(emitted ^ declared):
+            findings.append(f"notebook_drift: tolerance_proposal.{c} is written by notebook 06 "
+                            "or declared in 19_results_tolerance.sql, not both")
 
 # --- 5. The notebook's state enum against the view that produces them --------
 # `validate()` in the triage notebook rejects any response whose prior_state is not
@@ -357,6 +379,44 @@ assert (rev.actor_source == "obo_user").all() and rev.actor_identity.notna().all
 assert (prop.basis != "unchanged").any(), "no proposal moves a limit"
 _cur_view = T["results.v_threshold_proposal_current"]
 assert (_cur_view.review_state == "open").any(), "no open proposal for the app to decide"
+
+# --- Tolerance proposals, reviews and the escalation gate --------------------
+# The CHECK constraints in 19_results_tolerance.sql, as Python. Never a higher
+# number: the job may say a tolerance needs a business decision, never make it.
+tp, tr = T["results.tolerance_proposal"], T["results.tolerance_review"]
+assert tp.proposal_id.is_unique, "tolerance proposal_id not unique"
+assert tp.advice.isin(["keep", "tighten", "review"]).all(), "unknown tolerance advice"
+_dec = tp[tp.current_tolerance_pct.notna()]
+assert (_dec.proposed_tolerance_pct <= _dec.current_tolerance_pct).all(), \
+    "a tolerance proposal raises the tolerance -- that is the business's call, never a job's"
+_t = tp[tp.advice == "tighten"]
+assert (_t.current_tolerance_pct.notna() & (_t.proposed_tolerance_pct < _t.current_tolerance_pct)).all(), \
+    "a tightening that does not lower the tolerance"
+_o = tp[tp.advice != "tighten"]
+assert ((_o.proposed_tolerance_pct == _o.current_tolerance_pct)
+        | (_o.proposed_tolerance_pct.isna() & _o.current_tolerance_pct.isna())).all(), \
+    "keep or review that moves the number"
+assert ((tp.rationale.str.strip() != "") & (tp.reviewer.str.strip() != "")).all(), \
+    "blank tolerance advice"
+assert tp.cde_id.isin(set(cde.cde_id)).all(), "tolerance proposal for an unknown element"
+assert tr.review_id.is_unique and tr.proposal_id.isin(tp.proposal_id).all(), \
+    "tolerance review ids not unique, or of an unknown proposal"
+assert tr.decision.isin(["accepted", "rejected", "deferred"]).all(), "unknown tolerance decision"
+_nr = tr[tr.decision != "accepted"]
+assert _nr.reason.notna().all() and (_nr.reason.str.strip() != "").all(), \
+    "tolerance rejection or deferral without a reason"
+assert tr[tr.decision == "deferred"].review_by_date.notna().all(), "tolerance deferral without a date"
+assert (tr.actor_source == "obo_user").all() and tr.actor_identity.notna().all(), \
+    "a tolerance review not from a platform identity"
+assert (T["results.v_tolerance_proposal_current"].review_state == "open").any(), \
+    "no open tolerance proposal for the app to decide"
+# The gate never holds back a P1 or a scope mismatch: the two exceptions the whole
+# design rests on, checked on every run in the fixture.
+_esc = T["results.v_check_escalation"]
+assert _esc[_esc.severity == "P1_block"].escalates.all(), "a P1 breach was held back"
+_disp = set(T["results.v_element_tolerance"].query("scope_disputed").cde_id)
+assert _esc[_esc.cde_id.isin(_disp)].escalates.all(), \
+    "a breach on a scope-disputed element was held back -- that hides COH-B"
 
 # --- CDE register, profile and coverage -------------------------------------
 # The ordering claim, checked rather than asserted in prose: an element is

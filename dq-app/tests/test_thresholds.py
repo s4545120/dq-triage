@@ -1,5 +1,5 @@
-"""Threshold proposals: the fold that pins the app to the view, the review rules,
-and the third write end to end through the page.
+"""Threshold proposals: the fold that pins the app to the view, and the review rules.
+History since 2026-10-08 -- see test_tolerance.py for what replaced the page.
 
 Same discipline as the lifecycle and coverage twins. `derive_proposal_current` is a
 copy of `v_threshold_proposal_current`; if the conformance test fails after you
@@ -145,89 +145,9 @@ def test_a_rule_defect_is_answered_with_keep(proposals, cohorts):
         assert "scope" in p.iloc[0]["rationale"].lower()
 
 
-# --- The third write, through the page --------------------------------------------
-
-pytest.importorskip("streamlit.testing.v1")
-from streamlit.testing.v1 import AppTest  # noqa: E402
-
-
-def _open_proposal():
-    cur = _load("results.v_threshold_proposal_current")
-    return cur[cur["review_state"] == "open"].iloc[0]
-
-
-def _run(**session):
-    at = AppTest.from_file(str(APP_DIR / PAGE), default_timeout=90)
-    for k, v in session.items():
-        at.session_state[k] = v
-    at.run()
-    assert not at.exception, [e.message for e in at.exception]
-    return at
-
-
-def _submit(at):
-    for b in at.button:
-        if "Append decision" in str(b.label):
-            return b
-    raise AssertionError(f"no decision button: {[b.label for b in at.button]}")
-
-
-def test_the_page_lists_every_proposal_with_its_state_and_reviewer():
-    at = _run()
-    body = " ".join(str(m.value) for m in at.markdown)
-    cur = _load("results.v_threshold_proposal_current")
-    for _, r in cur.iterrows():
-        assert r["rule_id"] in body
-        assert r["reviewer"] in body
-    assert "Awaiting review" in body and "Keep as is" in body
-
-
-def test_adopting_appends_a_rule_version_and_records_which():
-    p = _open_proposal()
-    at = _run(_thr_pick=p["proposal_id"])
-    at.radio[0].set_value("adopted")
-    at.text_area[0].set_value("Agreed with the element's tolerance.")
-    _submit(at).click().run()
-    assert not at.exception, [e.message for e in at.exception]
-
-    reviews = at.session_state["_pending_threshold_reviews"]
-    versions = at.session_state["_pending_rule_versions"]
-    assert len(reviews) == 1 and len(versions) == 1
-    review, version = reviews[0], versions[0]
-    assert review["decision"] == "adopted"
-    assert review["proposal_id"] == p["proposal_id"]
-    assert version["rule_id"] == p["rule_id"]
-    assert float(version["fail_threshold_pct"]) == float(p["proposed_threshold_pct"])
-    assert review["adopted_rule_version"] == version["rule_version"] == int(p["rule_version"]) + 1
-    # Status carried forward: adopting a limit is not a promotion.
-    reg = _load("config.rule_registry")
-    assert version["status"] == reg[reg["rule_id"] == p["rule_id"]].sort_values(
-        "rule_version").iloc[-1]["status"]
-    assert p["proposal_id"][:8] in version["note"]
-
-    rendered = " ".join(str(m.value) for m in at.markdown)
-    assert "Adopted" in rendered
-
-
-def test_a_rejection_without_a_reason_is_refused():
-    p = _open_proposal()
-    at = _run(_thr_pick=p["proposal_id"])
-    at.radio[0].set_value("rejected")
-    at.text_area[0].set_value("  ")
-    _submit(at).click().run()
-    assert not at.exception
-    for key in ("_pending_threshold_reviews", "_pending_rule_versions"):
-        assert key not in at.session_state or not at.session_state[key]
-    assert any("reason" in str(e.value).lower() for e in at.error)
-
-
-def test_a_decided_proposal_offers_no_form():
-    cur = _load("results.v_threshold_proposal_current")
-    done = cur[cur["review_state"] == "rejected"].iloc[0]
-    at = _run(_thr_pick=done["proposal_id"])
-    assert not [b for b in at.button if "Append decision" in str(b.label)]
-    body = " ".join(str(m.value) for m in at.markdown)
-    assert "Rejected" in body and str(done["latest_reviewer"]) in body
+# The page that decided these left on 2026-10-08: rule limits are a steward's
+# setting now and the Thresholds page decides element tolerances (test_tolerance.py).
+# The fold stays pinned because results.threshold_proposal is still read as history.
 
 
 def test_summary_counts_every_state():

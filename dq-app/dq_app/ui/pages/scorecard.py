@@ -49,7 +49,7 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter
-from dq_app.domain import coverage, lifecycle, metrics, targets
+from dq_app.domain import coverage, lifecycle, metrics, targets, tolerance
 from dq_app.ui import components, theme
 
 # --- Scoring ----------------------------------------------------------------
@@ -59,18 +59,10 @@ from dq_app.ui import components, theme
 # element's score is the headline's question asked of a smaller set of rows.
 
 
-def _row_score(run: pd.DataFrame) -> float | None:
-    """Row-weighted quality for one run, or one dimension of one run.
-
-    Shadow checks are excluded from both sides — they record a count but raise
-    nothing, so counting their findings would make promoting a rule look like a
-    regression in the data.
-    """
-    raised = run[run["status"].isin(["pass", "breach"])]
-    evaluated = int(raised["rows_scanned"].sum())
-    if not evaluated:
-        return None
-    return 100.0 * (evaluated - int(raised["violation_count"].sum())) / evaluated
+# Row-weighted quality. Moved to domain/tolerance.py on 2026-10-08, because the
+# triage gate asks of each element the same question this page prints, and two copies
+# of one arithmetic is how a page and a queue come to disagree.
+_row_score = tolerance.row_score
 
 
 def _run_index(check_run: pd.DataFrame) -> pd.DataFrame:
@@ -212,29 +204,9 @@ def _row_markup(name: str, figure: str, figure_colour: str, bar: str,
     return f'<span class="dq-el">{head}{bar}<span class="l2">{words}</span></span>'
 
 
-def _element_scores(cde_cov: pd.DataFrame, run_rows: pd.DataFrame) -> dict:
-    """cde_id → row-weighted quality of the checks attached to that element.
-
-    The same arithmetic as the headline figure, over one element's share of it —
-    which is what makes the two commensurable: an element's score and the page score
-    are the same question asked of a smaller set of rows, not two different metrics
-    that happen to both be percentages.
-
-    `None` where the element has no check on this run, and it stays `None` rather
-    than becoming a zero: an element nothing watches has no quality figure, and
-    printing 0% would report the register's gap as a data defect.
-    """
-    if cde_cov.empty:
-        return {}
-    by_rule = run_rows.drop_duplicates("rule_id").set_index("rule_id")
-    out = {}
-    for cde_id, g in cde_cov.groupby("cde_id"):
-        # Deduped across bindings: a cross-table rule attaches to all three of the
-        # name element's bindings and must not be counted three times.
-        ids = {i for lst in g["rule_ids"] for i in components.as_list(lst)}
-        mine = by_rule[by_rule.index.isin(ids)]
-        out[cde_id] = _row_score(mine) if len(mine) else None
-    return out
+# cde_id -> the element's score on one run; None where no check on it ran. In
+# domain/tolerance.py with _row_score, for the same reason.
+_element_scores = tolerance.element_scores
 
 
 # The element list's "everything else" entry. Named rather than dropped: a check

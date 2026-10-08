@@ -359,6 +359,41 @@ THRESHOLD_BASIS_MEANING = {
 }
 
 
+# The threshold job's advice on an element's tolerance (since 2026-10-08), and where
+# it has got to -- v_tolerance_proposal_current.review_state -- in the reviewer's
+# words. `review` is advice that the business has a decision to make, not a figure.
+TOLERANCE_ADVICE_LABEL = {
+    "keep": "Keep",
+    "tighten": "Tighten",
+    "review": "Business decision",
+}
+TOLERANCE_ADVICE_TONE = {"keep": "neutral", "tighten": "info", "review": "high"}
+TOLERANCE_ADVICE_MEANING = {
+    "keep": "The tolerance stands. The rationale says why in figures.",
+    "tighten": "Every run sat well inside the tolerance, so it is looser than the data "
+               "has needed and a regression up to it would not reach Triage.",
+    "review": "The element sits outside its tolerance. Either the data gets fixed or "
+              "the business accepts more failure; the job never raises a tolerance "
+              "itself.",
+}
+TOLERANCE_STATE_LABEL = {
+    "open": "Awaiting decision",
+    "deferred": "Deferred",
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "in_force": "In force",
+    "no_change": "Keep as is",
+}
+TOLERANCE_STATE_TONE = {
+    "open": "high",
+    "deferred": "neutral",
+    "accepted": "success",
+    "rejected": "neutral",
+    "in_force": "info",
+    "no_change": "neutral",
+}
+
+
 def defect_badge(defect_location) -> str:
     """Where the fix belongs, as a claim rather than a category."""
     key = str(defect_location or "").strip()

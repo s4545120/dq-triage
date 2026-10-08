@@ -116,28 +116,28 @@ def _two_reviews_of_one_proposal():
     from dq_app.data import adapter
 
     pid = st.session_state["_pid"]
-    stale_reviews = adapter.get_threshold_reviews()
-    stale_current = adapter.get_threshold_proposal_current()
-    adapter.review_threshold(pid, "rejected", reason="first")
-    real = adapter.get_threshold_reviews, adapter.get_threshold_proposal_current
-    adapter.get_threshold_reviews = lambda: stale_reviews
-    adapter.get_threshold_proposal_current = lambda: stale_current
+    stale_reviews = adapter.get_tolerance_reviews()
+    stale_current = adapter.get_tolerance_proposal_current()
+    adapter.review_tolerance(pid, "rejected", reason="first")
+    real = adapter.get_tolerance_reviews, adapter.get_tolerance_proposal_current
+    adapter.get_tolerance_reviews = lambda: stale_reviews
+    adapter.get_tolerance_proposal_current = lambda: stale_current
     try:
-        adapter.review_threshold(pid, "rejected", reason="second")
+        adapter.review_tolerance(pid, "rejected", reason="second")
         st.session_state["refused"] = None
-    except adapter.ReviewRejected as exc:
+    except adapter.ToleranceReviewRejected as exc:
         st.session_state["refused"] = str(exc)
     finally:
-        adapter.get_threshold_reviews, adapter.get_threshold_proposal_current = real
+        adapter.get_tolerance_reviews, adapter.get_tolerance_proposal_current = real
 
 
-def test_a_threshold_review_made_on_a_stale_read_is_refused():
-    cur = _load("results.v_threshold_proposal_current")
+def test_a_tolerance_review_made_on_a_stale_read_is_refused():
+    cur = _load("results.v_tolerance_proposal_current")
     pid = cur[cur["review_state"] == "open"].iloc[0]["proposal_id"]
 
     at = _run(_two_reviews_of_one_proposal, _pid=pid)
 
-    written = at.session_state["_pending_threshold_reviews"]
+    written = at.session_state["_pending_tolerance_reviews"]
     assert [r["reason"] for r in written] == ["first"]
     assert "after you opened it" in at.session_state["refused"]
 

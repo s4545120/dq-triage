@@ -27,6 +27,7 @@ import streamlit as st
 _PENDING_KEY = "_pending_disposition_events"
 _PENDING_RULES_KEY = "_pending_rule_versions"
 _PENDING_REVIEWS_KEY = "_pending_threshold_reviews"
+_PENDING_TOLERANCE_KEY = "_pending_tolerance_reviews"
 _PENDING_ONB = {"monitored": "_pending_monitored_tables",
                 "proposal": "_pending_binding_proposals",
                 "review": "_pending_binding_reviews",
@@ -149,6 +150,17 @@ def threshold_reviews() -> pd.DataFrame:
     return _read("results.threshold_review")
 
 
+def tolerance_proposals() -> pd.DataFrame:
+    from dq_app.domain.tolerance import PROPOSAL_COLUMNS
+    return _read_optional("results.tolerance_proposal", PROPOSAL_COLUMNS)
+
+
+def tolerance_reviews() -> pd.DataFrame:
+    """As generated. Session-recorded reviews are layered on by the adapter."""
+    from dq_app.domain.tolerance import REVIEW_COLUMNS
+    return _read_optional("results.tolerance_review", REVIEW_COLUMNS)
+
+
 # --- Writes -----------------------------------------------------------------
 
 
@@ -187,17 +199,6 @@ def promote_rule(row: dict) -> bool:
     return append_rule_version(row)
 
 
-def write_threshold_review(row: dict, *, reviews_seen: int) -> bool:
-    """Refused if the proposal has gained a review since the caller counted them."""
-    base = threshold_reviews()
-    count = int((base["proposal_id"] == row["proposal_id"]).sum()) + sum(
-        1 for r in pending_threshold_reviews() if r["proposal_id"] == row["proposal_id"])
-    if count != reviews_seen:
-        return False
-    st.session_state.setdefault(_PENDING_REVIEWS_KEY, []).append(row)
-    return True
-
-
 def pending_events() -> list[dict]:
     return list(st.session_state.get(_PENDING_KEY, []))
 
@@ -208,6 +209,21 @@ def pending_rules() -> list[dict]:
 
 def pending_threshold_reviews() -> list[dict]:
     return list(st.session_state.get(_PENDING_REVIEWS_KEY, []))
+
+
+def write_tolerance_review(row: dict, *, reviews_seen: int) -> bool:
+    """Refused if the proposal has gained a review since the caller counted them."""
+    base = tolerance_reviews()
+    count = int((base["proposal_id"] == row["proposal_id"]).sum()) + sum(
+        1 for r in pending_tolerance_reviews() if r["proposal_id"] == row["proposal_id"])
+    if count != reviews_seen:
+        return False
+    st.session_state.setdefault(_PENDING_TOLERANCE_KEY, []).append(row)
+    return True
+
+
+def pending_tolerance_reviews() -> list[dict]:
+    return list(st.session_state.get(_PENDING_TOLERANCE_KEY, []))
 
 
 # --- Onboarding: the catalog, and three session-only writes ----------------------------

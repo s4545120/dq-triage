@@ -51,6 +51,7 @@ import coverage
 import profile as cde_profiler
 import rules
 import thresholds as threshold_advisor
+import tolerance as element_tolerance
 from rules import CTCT_TABLE, SUBS_TABLE, Ctx
 
 HERE = Path(__file__).parent
@@ -1223,6 +1224,17 @@ def main() -> None:
         proposals, det_uuid, STEWARD_A, STEWARD_B, APP_VERSION)
     proposal_current = threshold_advisor.proposal_current(proposals, reviews, registry)
 
+    # Since 2026-10-08 the business decides one tolerance per element, and that number
+    # decides which breaches reach triage. The two views, and the threshold job's
+    # per-element advice in the same pass -- see fixtures/tolerance.py.
+    el_tol = element_tolerance.element_tolerance(runs, cde_cov, cde_registry)
+    escalation = element_tolerance.check_escalation(runs, cde_cov, el_tol)
+    tol_proposals = element_tolerance.build_tolerance_proposals(
+        el_tol, cde_registry, SNAPSHOT + timedelta(hours=1), det_uuid)
+    tol_reviews = element_tolerance.build_tolerance_reviews(
+        tol_proposals, det_uuid, STEWARD_A, STEWARD_B, APP_VERSION)
+    tol_current = element_tolerance.proposal_current(tol_proposals, tol_reviews, cde_registry)
+
     tables = {
         "config.rule_registry": registry,
         "config.playbook": playbook,
@@ -1237,6 +1249,11 @@ def main() -> None:
         "results.threshold_proposal": proposals,
         "results.threshold_review": reviews,
         "results.v_threshold_proposal_current": proposal_current,
+        "results.v_element_tolerance": el_tol,
+        "results.v_check_escalation": escalation,
+        "results.tolerance_proposal": tol_proposals,
+        "results.tolerance_review": tol_reviews,
+        "results.v_tolerance_proposal_current": tol_current,
     }
     for name, df in tables.items():
         df.to_parquet(out / f"{name}.parquet", index=False)

@@ -658,20 +658,25 @@ def threshold_reviews() -> pd.DataFrame:
     return _q(f"SELECT * FROM {_t('results', 'threshold_review')}")
 
 
-_THRESHOLD_REVIEW_COLUMNS = [
-    "review_id", "proposal_id", "event_ts", "ingest_ts", "actor_identity",
-    "actor_display_name", "actor_source", "decision", "reason", "review_by_date",
-    "adopted_rule_version", "app_version",
-]
+def tolerance_proposals() -> pd.DataFrame:
+    """Optional: the table exists only where 19_results_tolerance.sql has run."""
+    from dq_app.domain.tolerance import PROPOSAL_COLUMNS
+    return _q_optional(_t("results", "tolerance_proposal"), PROPOSAL_COLUMNS)
 
 
-def write_threshold_review(row: dict, *, reviews_seen: int) -> bool:
-    """Append one reviewer decision. The app's third write; `INSERT` only, by
-    construction and by grant (07_grants.sql). Refused (False) if the proposal has
-    gained a review since the caller counted `reviews_seen` of them."""
-    table = _t("results", "threshold_review")
+def tolerance_reviews() -> pd.DataFrame:
+    from dq_app.domain.tolerance import REVIEW_COLUMNS
+    return _q_optional(_t("results", "tolerance_review"), REVIEW_COLUMNS)
+
+
+def write_tolerance_review(row: dict, *, reviews_seen: int) -> bool:
+    """Append one decision on an element's tolerance advice. The app's ninth write
+    (07_grants.sql); `INSERT` only. Refused (False) if the proposal has gained a review
+    since the caller counted `reviews_seen` of them."""
+    from dq_app.domain.tolerance import REVIEW_COLUMNS
+    table = _t("results", "tolerance_review")
     return _guarded_insert(
-        table, row, _THRESHOLD_REVIEW_COLUMNS,
+        table, row, REVIEW_COLUMNS,
         guard=(f"(SELECT count(*) FROM {table} "
                "WHERE proposal_id = :g_proposal_id) = :g_reviews_seen"),
         guard_params={"proposal_id": row["proposal_id"], "reviews_seen": reviews_seen},

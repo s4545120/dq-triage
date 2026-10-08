@@ -6,7 +6,7 @@ Workspace-bound code, and no longer uniformly unexecuted — read the status col
 |---|---|---|
 | `03_group_and_advise.ipynb` | **Executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b` | The advice endpoint. Groups breaches mechanically, reads the disposition register, calls a model once per group, writes `results.cohort`. |
 | `04_send_notification.ipynb` | **Never executed** — needs a job, a secret scope and an SMTP host that do not exist | The mail sender behind `DQ_NOTIFY=job`. Writes no table. |
-| `06_suggest_thresholds.ipynb` | **Executed once**, 2026-10-08, as a one-off serverless run on `workspace.dq_triage`: 28 proposals over 14 of 19 elements, then 27 more from a rerun of the five it lost (`only_cde`), after `MAX_TOKENS` went to 8000 and large elements were split into parts. A third run, after a prompt fix, covered the last two: 86 proposals over all 19 elements. Briefs are checked for record-shaped values before sending (`_no_values`). Not scheduled | The threshold job. One model call per registered element, advising on each rule's `fail_threshold_pct` against the element's declared tolerance and the run history. Writes `results.threshold_proposal` and nothing else. Detection, not triage. |
+| `06_suggest_thresholds.ipynb` | **Rewritten 2026-10-08 to advise per element.** The per-rule version ran three times that day as one-off serverless runs on `workspace.dq_triage` (86 proposals, now history). Not scheduled | The threshold job. One model call per registered element, advising keep / tighten / review on the element's `tolerance_pct` from its failure rate per run (`v_element_tolerance`) and its checks on the latest run. Never a higher number. Writes `results.tolerance_proposal` and nothing else. Briefs are checked for record-shaped values before sending (`_no_values`). Detection, not triage. |
 
 `03` has written 8 cohorts into `workspace.dq_triage` and has since completed cleanly
 on a table already holding its own output. What that run established, including the
@@ -70,14 +70,17 @@ workspace. Run it after editing either.
 5. **Check that `rival_hypothesis` comes back null sometimes.** Null is a claim that the
    evidence points one way. A model that always finds a rival has learned to hedge, and a
    model that never does is not reading rule 2.
-6. **On the first run of `06_suggest_thresholds.ipynb`, check what the model does with
-   the limit.** Three things, in order of how bad they are: a proposal above the element's
-   tolerance (the validator drops the whole element — count how often); a limit set at the
-   level a chronic rule sits at, on the `run_history` basis, which is hiding a defect with
-   a number; and `unchanged` on everything with no figures in the rationale, which is the
-   job being ignored. `SUBS_IMEI_NOT_NULL` and `SUBS_PRIM_ACCT_NOT_ZERO` are the test — the
-   right answer is keep, and the reason is scope. It needs `SELECT` on both schemas and
-   `MODIFY` on `results.threshold_proposal`, the same shape of grant as the triage job's.
+6. **On the first run of the per-element `06_suggest_thresholds.ipynb`, check the
+   advice.** Three things, in order of how bad they are:
+   * A higher number. The validator drops the element; count how often.
+   * A tightening that sits at or below a run in the history. It would escalate today
+     what did not escalate yesterday, with no change in the data.
+   * `keep` on an element outside its tolerance on every run, which is the job being
+     ignored: that is `review`.
+
+   `CDE_BILLING_ACCOUNT` and `CDE_DEVICE_IMEI` are the test: the right answer is keep,
+   and the reason is scope. A scheduled job principal needs `SELECT` on the schema and
+   `MODIFY` on `results.tolerance_proposal`.
 
 ## Verifying it locally
 

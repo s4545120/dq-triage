@@ -49,6 +49,15 @@ onboarding real there, and it is a decision, not a deploy — see *Onboarding* b
 Since 2026-10-06 they are in `07_grants.sql` as six writes, the onboarding three
 labelled as that decision: running the file as written takes it.
 
+**Since 2026-10-08 the business decides one tolerance per element, and it decides what
+reaches Triage.** A breach whose element sat within `tolerance_pct` on the run is held
+back from triage (`v_check_escalation`), unless the rule is `P1_block`. A rule's
+`fail_threshold_pct` is a steward's setting, 0 by default, and nobody approves it. The
+threshold job advises on the tolerance, one row per element, and a person's decision on
+that advice is the ninth write (`results.tolerance_review`). Accepting changes nothing
+else: the register still changes only through the Elements page. The app no longer
+writes `threshold_review`. See *Element tolerance decides escalation*.
+
 ## Current state — read before editing anything
 
 | Path | Status |
@@ -58,6 +67,7 @@ labelled as that decision: running the file as written takes it.
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16; scorecard redrawn around targets 2026-10-01. Runs on the fixture **and** against Unity Catalog; deployed as the Databricks App `dq-triage`. |
 | `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard`** (`onboard.py setup`) **and to `dq_triage`** (`onboard.py --schema dq_triage install`, 2026-10-06, with `01`'s two template columns). |
 | `sql/ddl/17_config_cde_onboarding.sql`, `18_views_cde_onboarding.sql`, `dq-app/.../pages/elements.py` | **Built 2026-10-08, applied to no schema and granted in none.** CDE onboarding: propose / second-person review / `onboard.py apply_elements`. See *CDE onboarding*. |
+| `sql/ddl/19_results_tolerance.sql`, `20_views_tolerance.sql` | Built 2026-10-08. Two tables and three views for element tolerance. See *Element tolerance decides escalation* for whether they are applied. |
 | `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app carries the Onboarding pages since 2026-10-06 (deployment `01f1c110…`). See *Onboarding in dq_triage*. |
 | `databricks.yml` + `resources/` | **Draft, never deployed** (2026-10-06). The two jobs above as a bundle: run as a job service principal (not yet created), code from git, failure email, timeouts. `resources/README.md` has the cutover — bind to the existing job ids, never deploy beside them. `onboard.py` takes `--catalog` and `--fn-prefix` since the same day (call-time in `wh`, like `--schema`); still one schema in the sandpit layout, so no `prod` target yet. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
@@ -106,7 +116,7 @@ before saying "running" — and the source tables are still the 1000-row mocks.
 | **Blast radius** | Invented. Real values come from Unity Catalog lineage, which was never queried |
 | **The CDE register's criticality tiers** | One person's judgement, one email address, one date. Addendum A lists this as an open question |
 | **The CDE register's tolerances, and its second ten elements** | `tolerance_pct` is set from the criticality tier (`fixtures/cdes.py`: critical 0.0, high 0.5, medium 2.0, low 5.0), and elements 11–20 were registered so that every rule could name one. The same one person's judgement, and every migration row says so |
-| **Every threshold review** | The fixture's two decisions are hand-authored in `fixtures/thresholds.py`. The workspace's proposals are real — 86 from three runs of notebook 06 on 2026-10-08 — and **none has been reviewed** |
+| **Every threshold and tolerance review** | The fixture's decisions are hand-written (`fixtures/thresholds.py`, `fixtures/tolerance.py`), and so are its 19 tolerance proposals. The workspace's 86 per-rule proposals are real (three runs of notebook 06 on 2026-10-08), none reviewed, and history since that day |
 
 ### How to state it honestly
 
@@ -371,8 +381,10 @@ the table can never disagree. Two consequences that look like bugs: a problem so
 closed whose checks are breaching again is **in** the queue with its closed state
 showing, because that is exactly what should be put in front of a steward; and a rule
 regrouped into a newer problem is counted once, under the newer one, which is why
-`CTCT_PHN_FMT` does not drag its August cohort back into the list. Six rows, 21
-breaching checks, 3.5 : 1 — and the `Show` dropdown widens to Open / Waiting on me /
+`CTCT_PHN_FMT` does not drag its August cohort back into the list. Six rows, 18
+breaching checks, 3.0 : 1. That leaves out three more breaching checks, held back
+because their element is within its tolerance (21 and 3.5 : 1 before 2026-10-08). The
+`Show` dropdown widens to Open / Waiting on me /
 Closed / All for anyone who wants the lifecycle view instead.
 
 **Both Triage pages were redrawn on 2026-10-06 in the Tables page's language.** The
@@ -488,7 +500,8 @@ below about 41rem of page.
   declared means no target, never an assumed hundred.
 * A **check's** is `100 - threshold_pct` off the run row — the limit it was actually
   judged on. Almost every limit in the fixture is 0, so almost every check reads
-  `≥ 100%`; that is the registry's state, and the Thresholds page is where it moves.
+  `≥ 100%`; that is the registry's state. Since 2026-10-08 a rule's limit is a
+  steward's setting and the Thresholds page decides element tolerances instead.
 * The **headline's** is the element targets weighted by the rows each check scanned
   (`blended_target`) — the figure the score would read if every element sat exactly
   on its tolerance. 99.3% on the fixture, against a score of 95.3% (92.1% until the
@@ -1202,6 +1215,83 @@ against `notebooks/README.md` item 6:
   given as scope. `SUBS_IMEI_NOT_NULL` is loosened 0 → 2.0% and its explanation never
   mentions scope. It still breaches at 20%, so nothing is hidden, but the answer is wrong.
 
+## Element tolerance decides escalation — 2026-10-08
+
+**The business decides one number per element, not one per rule.** Notebook 06's first
+real passes produced 86 per-rule limit proposals, 30 needing a decision, and eight of
+the nine that moved a limit just copied the element's tolerance onto the rule. Spread
+across rules that adds up: eleven email rules at 0.5% each let about 5.5% of rows fail
+with no check breaching. So the design changed, as a decision taken with the user:
+
+* **The element's tolerance decides what reaches Triage.** `v_check_escalation`
+  (`sql/ddl/20_views_tolerance.sql`) holds back a breach whose element sat within
+  `tolerance_pct` on that run. `v_element_tolerance` is the element's score per run,
+  the scorecard's arithmetic: failures summed over rows checked, not distinct bad rows.
+* **Two exceptions always escalate.** A `P1_block` rule (severity belongs to the rule).
+  A scope mismatch: its failures are a rule defect, and holding them back would hide
+  COH-B.
+* **Within tolerance is narrower than `targets.assessed`, on purpose.** The scorecard
+  will not say an element *meets* target without a content check. The gate asks only
+  whether the measured failures fit the tolerance. Gating on `assessed` held nothing
+  on the fixture, because every element inside its tolerance lacked a content check.
+* **A rule's limit is a steward's setting, 0 by default.** `onboard.py generate` now
+  writes 0, not the tolerance. Existing non-zero limits are left alone.
+* **Held is not hidden.** `check_run` still says `breach`, and the scorecard and
+  Rules page still show it. The Triage figure says "N within tolerance", and the
+  grouping card names the elements.
+
+**Where it lives.** `domain/tolerance.py` holds the app's copies of all three views.
+`metrics.live_cohorts` / `cohort_compression` take a `held` set
+(`tolerance.held_on_run` on `metrics.queue_run_id`), so the queue and its ratio still
+read one function. The scorecard's `_row_score` / `_element_scores` are now aliases of
+`tolerance.row_score` / `element_scores`, so there is one arithmetic. Notebook 03 groups
+only breaches that escalate and prints what it held. `fixtures/tolerance.py` is the
+fixture side. The app's copies were diffed against the SQL on the live workspace before
+any of it was applied: 748 element-runs and 761 breaches, no difference.
+
+**On the fixture** three checks are held: `SUBS_NTWK_NOT_NULL`, `XREF_NAME_AGREEMENT`
+and `XREF_OPEN_TS_AGREEMENT`. The queue goes from 21 checks to 18, still six problems,
+3.5 → 3.0 : 1. **On the workspace's 2026-10-08 run**, 2 of 20 are held.
+`XREF_NAME_AGREEMENT` passes there because of the null-safety bug.
+
+**The threshold job now advises on the tolerance** (`results.tolerance_proposal`, one
+row per element per pass). It answers keep, tighten (every run sat well inside it) or
+review (outside it: the business decides whether to fix the data or accept more).
+**Never a higher number**: a CHECK constraint, `validate` and `verify.py` all refuse
+one. A scope-disputed element is never tightened. The brief carries the element's
+failure rate per run and its checks on the latest run, with no rule expressions and
+no row values, and `_no_values` still runs.
+
+**A decision is the app's ninth write and changes nothing else.** `results.tolerance_review`
+holds accepted / rejected / deferred. Accepting a tightening does not write the
+register: the change is an Elements amendment, approved by a second person and applied
+by the onboarding job. `v_tolerance_proposal_current` then reads `in_force`, which
+outranks the decision. The page's "Amend on Elements" opens that element in amend mode.
+Every decision opens a confirmation first. `adapter.review_threshold` was removed;
+`threshold_review` is still granted, read as history, and written by nothing.
+
+**The Thresholds page is the per-element list**: at most 19 rows, with each element's
+tolerance, failure rate, runs outside, advice and state. The pane shows which checks the
+current tolerance holds back. The 86 old per-rule proposals are counted in a caption,
+not listed.
+
+**In the fixture**, 19 hand-written proposals (`fixtures/tolerance.py`):
+
+* 2 tighten (customer name 0.5 → 0.3, record lifecycle 2.0 → 1.0);
+* 6 review, for elements outside tolerance on most runs;
+* 11 keep, among them both scope-disputed elements with "scope" in the reason;
+* 3 decided: record lifecycle accepted, MSISDN deferred, activation rejected. Customer
+  name is left open for the write-path test.
+
+`tests/test_tolerance.py` (21 tests) pins the twins, the gate, the advice rules and the
+page.
+
+**A bug this found:** the "Record decision" callback first read the radio and reason
+from the run that drew the button. A click arriving together with a changed radio
+recorded the old decision; a reasonless rejection was written as an acceptance. The
+callback now reads the widget keys from session state. Any `on_click` that reads a form
+the same click can change should do the same.
+
 ## Rules extracted from the "DQ Queries" folder — 2026-10-05
 
 The workspace folder `/Users/lijinrui46@gmail.com/DQ Queries` holds seven saved SQL Editor
@@ -1736,10 +1826,11 @@ shadow since 2026-10-05 — the 34 below are additions, not a change to this des
 **Unity Catalog has no `INSERT` privilege.** The spec's wording ("granted `INSERT` on
 `dq.results`") is not expressible — `MODIFY` is the finest-grained write privilege and it
 permits `UPDATE`/`DELETE` too. The enforceable equivalent is table-level `MODIFY` on
-exactly six tables plus `delta.appendOnly` — the register, the rule registry, since
-2026-09-28 the threshold review, and since 2026-10-05 onboarding's monitored_table,
-binding_proposal and binding_review (granted in both `dq_onboard` and `dq_triage`). See
-`sql/README.md`.
+named tables only plus `delta.appendOnly` — the register, the rule registry, since
+2026-09-28 the threshold review, since 2026-10-05 onboarding's monitored_table,
+binding_proposal and binding_review (granted in both `dq_onboard` and `dq_triage`), the
+two CDE onboarding tables, and since 2026-10-08 the tolerance review. Nine in
+`07_grants.sql`. See `sql/README.md`.
 
 ## Commands
 
@@ -1794,9 +1885,9 @@ but the DDL does not declare, which fails in a workspace and passes locally.
   `sql/out/fix_cde_email_binding.sql` (one binding — see *Migrations applied*). The
   threshold grants that sat beside it were applied on 2026-10-06 (schema-level `SELECT`
   on `dq_triage`, `MODIFY` on `threshold_review`).
-- **Notebook 06 has run three times (2026-10-08) and is not scheduled.** Its 86
-  proposals over all 19 elements are unreviewed, 30 of them open. See *The threshold
-  job*.
+- **Notebook 06 is not scheduled.** Since 2026-10-08 it advises on element
+  tolerances. Its earlier 86 per-rule proposals are history. See *Element tolerance
+  decides escalation*.
 - `check_run.scope_fingerprint` is `NULL` everywhere — the spec's open question on pinning
   verification scope.
 - Detective vs preventive control, retention, and who may approve are open questions in

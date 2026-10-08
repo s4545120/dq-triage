@@ -112,6 +112,14 @@ def scheduled_runs(check_run: pd.DataFrame) -> pd.DataFrame:
     return live[live["run_id"].isin(kept)]
 
 
+def queue_run_id(check_run: pd.DataFrame):
+    """The run `live_cohorts` reads: the latest by run_ts. Named so the held set is
+    computed on the same run the queue lists."""
+    if check_run.empty:
+        return None
+    return check_run.loc[check_run["run_ts"].idxmax(), "run_id"]
+
+
 def latest_run_id(check_run: pd.DataFrame):
     """The latest run that measured an active check (see `scheduled_runs`). Taken from
     a shadow-only run, every page would show only that table, with nothing raised."""
@@ -350,10 +358,12 @@ def newly_failing(check_run: pd.DataFrame, table: str, days: int = 14) -> pd.Dat
 # --- Leading ----------------------------------------------------------------
 
 
-def live_cohorts(check_run: pd.DataFrame, cohort: pd.DataFrame) -> dict[str, str]:
+def live_cohorts(check_run: pd.DataFrame, cohort: pd.DataFrame,
+                 held: frozenset | set = frozenset()) -> dict[str, str]:
     """Breaching rule → the cohort that currently owns it. The queue, as a mapping.
 
-    For every rule breaching on the latest run, the most recent cohort containing it.
+    For every rule breaching on the latest run, less the ones `held` back, the most
+    recent cohort containing it.
     Later cohorts supersede earlier ones, which is what stops a rule that was closed
     under an old problem and regrouped under a newer one from being counted twice —
     `CTCT_PHN_FMT` closed under "Landline numbers loaded with inconsistent formatting"
@@ -368,16 +378,21 @@ def live_cohorts(check_run: pd.DataFrame, cohort: pd.DataFrame) -> dict[str, str
     Note what it does NOT filter on: lifecycle state. A closed problem whose checks
     are breaching again is live by this definition, and belongs at the top of a queue
     rather than behind a filter.
+
+    `held` is `tolerance.held_on_run` for that run: breaches whose element sat within
+    the tolerance the business declared, none of them P1. They are still breaches on
+    every other page; they are just not work. A problem whose every check is held
+    leaves the queue.
     """
     if check_run.empty or cohort.empty:
         return {}
 
-    latest_run = check_run.loc[check_run["run_ts"].idxmax(), "run_id"]
+    latest_run = queue_run_id(check_run)
     breaching = set(
         check_run.loc[
             (check_run["run_id"] == latest_run) & (check_run["status"] == "breach"), "rule_id"
         ]
-    )
+    ) - set(held)
 
     live: dict[str, str] = {}
     for row in cohort.sort_values("raised_ts").itertuples():
@@ -387,7 +402,8 @@ def live_cohorts(check_run: pd.DataFrame, cohort: pd.DataFrame) -> dict[str, str
     return live
 
 
-def cohort_compression(check_run: pd.DataFrame, cohort: pd.DataFrame) -> Metric:
+def cohort_compression(check_run: pd.DataFrame, cohort: pd.DataFrame,
+                       held: frozenset | set = frozenset()) -> Metric:
     """Breaches ÷ cohorts, on the breaches that are live right now. Target ≥5:1.
 
     The denominator is not "cohorts raised on the latest run". Cohorts are not
@@ -407,7 +423,7 @@ def cohort_compression(check_run: pd.DataFrame, cohort: pd.DataFrame) -> Metric:
     if check_run.empty or cohort.empty:
         return Metric("compression", "Cohort compression", None, "—", "≥ 5.0 : 1", None)
 
-    live = live_cohorts(check_run, cohort)
+    live = live_cohorts(check_run, cohort, held)
     n_breaches, n_cohorts = len(live), len(set(live.values()))
     value = n_breaches / n_cohorts if n_cohorts else None
     return Metric(
