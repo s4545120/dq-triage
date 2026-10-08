@@ -2506,10 +2506,13 @@ SELECT
   s.checks_raised,
   s.rows_evaluated,
   s.rows_failed,
-  CASE WHEN s.rows_evaluated > 0
-       THEN 100.0 * (s.rows_evaluated - s.rows_failed) / s.rows_evaluated END AS score_pct,
+  -- DOUBLE, not the DECIMAL `100.0 * ...` gives in Spark: a pandas reader cannot
+  -- subtract a Decimal from a float, and notebook 06's first run died on exactly that.
+  CAST(CASE WHEN s.rows_evaluated > 0
+            THEN 100.0 * (s.rows_evaluated - s.rows_failed) / s.rows_evaluated END
+       AS DOUBLE)                                                             AS score_pct,
   c.tolerance_pct,
-  100.0 - c.tolerance_pct                                                     AS target_pct,
+  CAST(100.0 - c.tolerance_pct AS DOUBLE)                                     AS target_pct,
   COALESCE(d.scope_disputed, FALSE)                                           AS scope_disputed,
   COALESCE(
     c.tolerance_pct IS NOT NULL
