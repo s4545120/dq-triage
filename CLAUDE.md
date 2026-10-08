@@ -67,7 +67,7 @@ writes `threshold_review`. See *Element tolerance decides escalation*.
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16; scorecard redrawn around targets 2026-10-01. Runs on the fixture **and** against Unity Catalog; deployed as the Databricks App `dq-triage`. |
 | `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard`** (`onboard.py setup`) **and to `dq_triage`** (`onboard.py --schema dq_triage install`, 2026-10-06, with `01`'s two template columns). |
 | `sql/ddl/17_config_cde_onboarding.sql`, `18_views_cde_onboarding.sql`, `dq-app/.../pages/elements.py` | **Built 2026-10-08, applied to no schema and granted in none.** CDE onboarding: propose / second-person review / `onboard.py apply_elements`. See *CDE onboarding*. |
-| `sql/ddl/19_results_tolerance.sql`, `20_views_tolerance.sql` | Built 2026-10-08. Two tables and three views for element tolerance. See *Element tolerance decides escalation* for whether they are applied. |
+| `sql/ddl/19_results_tolerance.sql`, `20_views_tolerance.sql` | Current, 2026-10-08. Two tables and three views for element tolerance. **Applied to `dq_triage`, granted and deployed** (deployment `01f1c2db…`); not applied to `dq_onboard`. See *Element tolerance decides escalation*. |
 | `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app carries the Onboarding pages since 2026-10-06 (deployment `01f1c110…`). See *Onboarding in dq_triage*. |
 | `databricks.yml` + `resources/` | **Draft, never deployed** (2026-10-06). The two jobs above as a bundle: run as a job service principal (not yet created), code from git, failure email, timeouts. `resources/README.md` has the cutover — bind to the existing job ids, never deploy beside them. `onboard.py` takes `--catalog` and `--fn-prefix` since the same day (call-time in `wh`, like `--schema`); still one schema in the sandpit layout, so no `prod` target yet. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
@@ -1285,6 +1285,28 @@ not listed.
 
 `tests/test_tolerance.py` (21 tests) pins the twins, the gate, the advice rules and the
 page.
+
+**Applied to `workspace.dq_triage` on 2026-10-08:**
+
+* **Objects.** Every statement in `sql/out/17_*` and `18_*` was `EXPLAIN`ed first; the
+  only plan errors were for tables the same file had not yet created. Then all 14 were
+  applied. The views return 748 element-runs and 761 breaches, 101 of them held across
+  all runs.
+* **Grant.** The `dq-triage` principal got `MODIFY` on `tolerance_review`, and now
+  holds seven `MODIFY`s in that schema: `07_grants.sql`'s nine, less the two CDE
+  onboarding tables nobody has granted.
+* **Notebook 06.** It ran per element (job `665507786607401`): 19 proposals, 0
+  rejected. 6 keep (both scope disputes, with scope as the reason), 3 tighten (name 0.5
+  → 0.25, network technology 2.0 → 1.8, record lifecycle 2.0 → 0.6; each above every
+  run so far), and 10 review. Four of the reviews are on elements whose latest run is
+  back inside tolerance, where prompt rule 5 says "usually keep". So 13 decisions where
+  the per-rule version asked for 30.
+* **The run before it failed:** the view's `100.0 * …` scores were Spark DECIMALs, and
+  pandas cannot subtract one from a float. The view casts them to DOUBLE now.
+* **The app**, deployed from `main` as `01f1c2db…`. The Thresholds, Triage and
+  Scorecard pages were rendered headlessly against Unity Catalog with no exceptions.
+  Triage reads 9 live problems from 17 failing checks, plus 2 within tolerance
+  (network technology and record lifecycle).
 
 **A bug this found:** the "Record decision" callback first read the radio and reason
 from the run that drew the button. A click arriving together with a changed radio
