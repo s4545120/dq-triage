@@ -13,6 +13,8 @@
   5. The notebook's PRIOR_STATES against the states v_cohort_current can return.
   6. The onboarding writers' column lists -- the job's and the app's -- against
      15_config_onboarding.sql and the template columns on rule_registry.
+  7. No notebook's code reads violation_sample.sample_row: row values carry PII and
+     never go into a model brief.
 
     ../.venv/bin/python verify.py [out_dir]
 
@@ -148,6 +150,21 @@ if NOTEBOOK.exists():
                 findings.append(
                     f"notebook_drift: the triage notebook accepts prior_state {st!r}, "
                     "which v_cohort_current never returns")
+
+# --- 7. No row values reach a model --------------------------------------------
+# violation_sample.sample_row holds customer values, and since 2026-10-08 no model brief
+# carries them: the triage notebook reads violation_sample for row_key overlap only.
+# A prompt cannot be trusted to keep that true, so the code is checked instead -- any
+# model-calling notebook whose code (comments aside) names `sample_row` is a finding.
+import json as _json
+for nb in sorted((Path(__file__).parent.parent / "notebooks").glob("*.ipynb")):
+    code = "\n".join(line for cell in _json.loads(nb.read_text())["cells"]
+                     if cell["cell_type"] == "code"
+                     for line in "".join(cell["source"]).splitlines()
+                     if not line.lstrip().startswith("#"))
+    if "sample_row" in code:
+        findings.append(f"pii_to_model: {nb.name} reads violation_sample.sample_row -- "
+                        "row values must not be put in a model brief")
 
 # --- 6. The onboarding writers against 15_config_onboarding.sql ---------------
 # No fixture stands in for the onboarding tables; two writers do the real thing. The

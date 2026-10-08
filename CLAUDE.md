@@ -296,6 +296,17 @@ the system prompt forbids it, the notebook's `validate` rejects the response,
 `tests/test_pages_render.py` assert it over what is stored and what is printed. Four,
 because a prompt can drift without anyone noticing.
 
+**No row values go to the model (2026-10-08).** Notebook 03's brief used to carry six
+`violation_sample` rows per member rule, with a `REDACT_PII` flag defaulting to off. Both
+are gone: the brief and `model_input_payload` carry the rule, scope, counts and history,
+never a value, and prompt rule 1a tells the model not to describe values it was not
+given. `violation_sample` is still read for grouping — `row_key` only, and only the
+shared-row count reaches the brief. `fixtures/verify.py` check 7 fails if any notebook's
+code names `sample_row`. The cost is real: COH-A's "six malformation classes" was read
+off the values, and a model without them can only say a steward should look. The eight
+cohorts already written hold samples in `model_input_payload`; this does not touch them.
+Steward `reason` text is still sent and may name a customer.
+
 **`fixtures/verify.py` now diffs the notebook too.** It already compared every fixture
 table's columns against the `CREATE TABLE`; check 4 does the same for the cell in
 `03_group_and_advise.ipynb` that builds the cohort row, anchored on the

@@ -55,11 +55,12 @@ workspace. Run it after editing either.
 1. **The `rule_expr` strings have never been parsed by anything.** Every number in
    `fixtures/out/` came from the Python evaluators. Run each `rule_expr` against the pilot
    data and compare to `results.check_run` before trusting any advice built on them.
-2. **Decide the PII question.** The briefs carry `violation_sample` rows — real email
-   addresses, names, dates of birth, service numbers — and steward-written `reason` text
-   that may name a customer. A `system.ai.*` endpoint keeps that inside the workspace
-   boundary; an external provider does not. `REDACT_PII = True` masks the sample values at
-   the cost of the evidence the model reasons from.
+2. **The PII question is decided: no row values go to the model** (2026-10-08). The
+   brief carries no `violation_sample` rows and `model_input_payload` stores none;
+   `violation_sample` is read for `row_key` overlap only. `fixtures/verify.py` check 7
+   fails if any notebook's code reads `sample_row`. What is left is steward-written
+   `reason` text, which may name a customer — review that before pointing this at an
+   endpoint outside the workspace.
 3. **`TEMPERATURE = 0.0`.** Advice lands in an audit register, so it should be
    reproducible. The pilot notebook left this at the provider default.
 4. **Check what the model does with `neither`.** `defect_location` gained a third value

@@ -150,10 +150,9 @@ Notes for a personal workspace:
 * `MODEL_NAME = "system.ai.gpt-oss-120b"` — the same endpoint your `02` notebook uses.
 * **Blast radius will be empty.** It reads `system.access.table_lineage`, which needs
   system tables enabled. The cell fails soft and prints why, rather than stopping the run.
-* **Decide the PII question first.** The briefs carry `violation_sample` rows — real-shaped
-  email addresses, names, dates of birth — plus steward-written `reason` text. A
-  `system.ai.*` endpoint keeps that inside your workspace. `REDACT_PII = True` masks the
-  values at the cost of the evidence the model reasons from.
+* **No row values go to the model.** Since 2026-10-08 the briefs carry no
+  `violation_sample` rows; the remaining free text is steward-written `reason`, which a
+  `system.ai.*` endpoint keeps inside your workspace.
 * It writes only `results.cohort`, by `INSERT`, skipping cohort ids that already exist —
   so re-running it is safe.
 
