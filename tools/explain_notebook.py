@@ -49,9 +49,11 @@ NAMES = {
     "RULE_REGISTRY": _t("config", "rule_registry"),
     "PLAYBOOK": _t("config", "playbook"),
     "CDE_REGISTRY": _t("config", "cde_registry"),
-    # Notebook 06, the threshold job.
-    "PROPOSAL": _t("results", "threshold_proposal"),
-    "PROPOSAL_CUR": _t("results", "v_threshold_proposal_current"),
+    "ESCALATION": _t("results", "v_check_escalation"),
+    # Notebook 06, the threshold job -- per element since 2026-10-08.
+    "ELEMENT_TOL": _t("results", "v_element_tolerance"),
+    "PROPOSAL": _t("results", "tolerance_proposal"),
+    "PROPOSAL_CUR": _t("results", "v_tolerance_proposal_current"),
     "RULE_CURRENT": _t("config", "v_rule_registry_current"),
     "CDE_CURRENT": _t("config", "v_cde_registry_current"),
 }
@@ -64,15 +66,16 @@ STANDINS = {
     '{", ".join(repr(r) for r in sorted(set(failing.rule_id)))}': "'CTCT_EML_FMT'",
     "{quoted}": "'CTCT_EML_FMT'",
     "{run_id}": "SOME_RUN",
+    "{latest_run}": "SOME_RUN",
     "{SAMPLES_PER_RULE}": "6",
     "{OVERLAP_MIN_RATIO}": "0.5",
 }
 
 # Statements that read something built at run time and so cannot be planned ahead of
-# it. Only one: the INSERT selects from `candidate_cohorts`, a temp view the write
-# cell creates from the model's answers. Skipped by name rather than by silently
+# it: each notebook's INSERT selects from a temp view its write cell creates from the
+# model's answers (`candidate_cohorts`, `candidate_tolerance`). Skipped by name rather than by silently
 # tolerating TABLE_OR_VIEW_NOT_FOUND, which would also hide a real typo.
-RUNTIME_ONLY = ("candidate_cohorts",)
+RUNTIME_ONLY = ("candidate_cohorts", "candidate_tolerance")
 
 # Databricks reports these in the plan text rather than raising.
 IN_PLAN = re.compile(r"(UNRESOLVED_COLUMN|UNRESOLVED_ROUTINE|TABLE_OR_VIEW_NOT_FOUND"
