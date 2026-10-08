@@ -103,7 +103,7 @@ before saying "running" — and the source tables are still the 1000-row mocks.
 | **Blast radius** | Invented. Real values come from Unity Catalog lineage, which was never queried |
 | **The CDE register's criticality tiers** | One person's judgement, one email address, one date. Addendum A lists this as an open question |
 | **The CDE register's tolerances, and its second ten elements** | `tolerance_pct` is set from the criticality tier (`fixtures/cdes.py`: critical 0.0, high 0.5, medium 2.0, low 5.0), and elements 11–20 were registered so that every rule could name one. The same one person's judgement, and every migration row says so |
-| **Every threshold proposal and review** | Nine proposals and two decisions, hand-authored in `fixtures/thresholds.py`. **No model has produced one**: notebook 06 has never run, and the workspace does not yet have the table |
+| **Every threshold review** | The fixture's two decisions are hand-authored in `fixtures/thresholds.py`. The workspace's proposals are real — 86 from three runs of notebook 06 on 2026-10-08 — and **none has been reviewed** |
 
 ### How to state it honestly
 
@@ -1159,10 +1159,45 @@ be pinned: `domain/thresholds.derive_proposal_current` is the labelled copy and
 
 **In the fixture, nine proposals, hand-authored** (`fixtures/thresholds.py`): three move
 a limit, six say keep, one is rejected, one deferred, one left open for the write-path
-test. **No model has produced one**, and notebook 06 has never run: `tools/
-explain_notebook.py` plans it cleanly except for the four statements that touch a
-column or table `migrate_cde_scope.sql` has not yet created. Item 6 in
-`notebooks/README.md` is what to check on the first real run.
+test.
+
+**The first real run — 2026-10-08.** One-off serverless run `281352073661684`, as the
+table's owner, against `system.ai.gpt-oss-120b`: 28 proposals (one `proposal_run_id`)
+over 14 of 19 elements, all open, none reviewed. No job schedules it. What it showed,
+against `notebooks/README.md` item 6:
+
+* **Five elements wrote nothing.** Four are the largest — `CDE_CUST_NAME` (30 rules),
+  `CDE_CUST_EMAIL` (11), `CDE_CUST_DOB` (8), `CDE_CUST_MOBILE` (8) — and every one is
+  truncated JSON. gpt-oss reasons before it answers, and the reasoning counts against
+  `max_output_tokens`, so at 1800 two of them returned no text at all. The fifth,
+  `CDE_CUST_IDENT_DOC`, labelled an unchanged limit `element_tolerance`, and `validate`
+  refuses that. Nothing went over the ceiling.
+* **Fixed the same day, and those five were rerun** (run `360341412642097`, the
+  `only_cde` parameter): `MAX_TOKENS = 8000`, and an element with more than
+  `CHUNK_RULES = 6` rules is asked about in parts, still all-or-nothing per element. A
+  cut-off answer now says so instead of raising a JSON error. DOB, email and mobile
+  wrote 27 proposals. Name and identity document were still refused, both for keeping a
+  limit that already equals the tolerance and calling it `element_tolerance`. The table
+  refuses that too (`threshold_proposal_unchanged_means_unchanged`). So prompt rule 3
+  now says basis describes the change, and both were rerun clean (run
+  `577494181637126`, 31 proposals). **86 proposals over all 19 elements: 30 open, 56
+  no_change.**
+* **No record value reaches this model, and since 2026-10-08 that is checked on the way
+  out.** The brief reads the registers and run statistics, never `violation_sample`.
+  Every literal in the 17 briefs sent so far is a pattern, an enum code, a format or a
+  placeholder date. `_no_values` refuses to send a brief holding anything shaped like
+  an email address, an AU phone number or a 9+ digit identifier, and its refusal names
+  the kind, never the value. Dates are let through on purpose: the placeholder-date rule
+  needs them. An element `definition` typed into the register is the likeliest future
+  way in.
+* **Nine of the 28 move a limit and eight of those loosen it**, almost all from 0% to the
+  element's tolerance. Most still breach at the new limit, but two do not.
+  `SUBS_NTWK_NOT_NULL` goes from 0 to 2.0% while sitting at 1.4–1.7%: within what the
+  register says the business accepts, but the check stops failing. `XREF_OPEN_TS_AGREEMENT`
+  goes to 1.1%, its own observed maximum. That is the `run_history` trap.
+* **The COH-B test is half passed.** `SUBS_PRIM_ACCT_NOT_ZERO` is kept, with the reason
+  given as scope. `SUBS_IMEI_NOT_NULL` is loosened 0 → 2.0% and its explanation never
+  mentions scope. It still breaches at 20%, so nothing is hidden, but the answer is wrong.
 
 ## Rules extracted from the "DQ Queries" folder — 2026-10-05
 
@@ -1630,9 +1665,9 @@ but the DDL does not declare, which fails in a workspace and passes locally.
   `sql/out/fix_cde_email_binding.sql` (one binding — see *Migrations applied*). The
   threshold grants that sat beside it were applied on 2026-10-06 (schema-level `SELECT`
   on `dq_triage`, `MODIFY` on `threshold_review`).
-- **No model has produced a threshold proposal.** Notebook 06 has never run. The first
-  run is the test of the ceiling, of `unchanged` being reached for, and of the figures in
-  the rationale — `notebooks/README.md` item 6.
+- **Notebook 06 has run three times (2026-10-08) and is not scheduled.** Its 86
+  proposals over all 19 elements are unreviewed, 30 of them open. See *The threshold
+  job*.
 - `check_run.scope_fingerprint` is `NULL` everywhere — the spec's open question on pinning
   verification scope.
 - Detective vs preventive control, retention, and who may approve are open questions in
