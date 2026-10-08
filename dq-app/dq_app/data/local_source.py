@@ -29,7 +29,9 @@ _PENDING_RULES_KEY = "_pending_rule_versions"
 _PENDING_REVIEWS_KEY = "_pending_threshold_reviews"
 _PENDING_ONB = {"monitored": "_pending_monitored_tables",
                 "proposal": "_pending_binding_proposals",
-                "review": "_pending_binding_reviews"}
+                "review": "_pending_binding_reviews",
+                "cde_proposal": "_pending_cde_proposals",
+                "cde_review": "_pending_cde_reviews"}
 
 
 # Deployed, only `dq-app/` is shipped — the app source path is the folder holding
@@ -125,6 +127,16 @@ def binding_proposals() -> pd.DataFrame:
 def binding_reviews() -> pd.DataFrame:
     from dq_app.domain.onboarding import REVIEW_COLUMNS
     return _read_optional("config.binding_review", REVIEW_COLUMNS)
+
+
+def cde_proposals() -> pd.DataFrame:
+    from dq_app.domain.elements import PROPOSAL_COLUMNS
+    return _read_optional("config.cde_proposal", PROPOSAL_COLUMNS)
+
+
+def cde_reviews() -> pd.DataFrame:
+    from dq_app.domain.elements import REVIEW_COLUMNS
+    return _read_optional("config.cde_review", REVIEW_COLUMNS)
 
 
 def check_templates() -> pd.DataFrame:
@@ -295,6 +307,33 @@ def write_binding_exclusion(row: dict) -> bool:
     if "approved" not in decisions or "rejected" in decisions:
         return False
     return _append_pending("review", row)
+
+
+def write_cde_proposal(row: dict) -> bool:
+    """Refused if the element already has a change waiting, or a register reuses an id."""
+    from dq_app.domain import elements
+    state = elements.proposal_state(
+        pd.concat([cde_proposals(), pd.DataFrame(pending_onboarding("cde_proposal"))],
+                  ignore_index=True),
+        pd.concat([cde_reviews(), pd.DataFrame(pending_onboarding("cde_review"))],
+                  ignore_index=True),
+        cde_registry())
+    if len(elements.open_for(state, row["cde_id"])):
+        return False
+    if row["change"] == "register" and (
+            row["cde_id"] in set(cde_registry()["cde_id"]) or row["cde_id"] in set(state["cde_id"])):
+        return False
+    return _append_pending("cde_proposal", row)
+
+
+def write_cde_review(row: dict) -> bool:
+    """One decision per proposal: refused if it already has one."""
+    base = cde_reviews()
+    decided = set(base["proposal_id"]) if len(base) else set()
+    decided |= {r["proposal_id"] for r in pending_onboarding("cde_review")}
+    if row["proposal_id"] in decided:
+        return False
+    return _append_pending("cde_review", row)
 
 
 def discard_pending() -> None:

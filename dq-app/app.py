@@ -63,6 +63,8 @@ PAGES = {
                      icon=":material/rule:"),
     "thresholds": st.Page("dq_app/ui/pages/thresholds.py", title="Thresholds",
                           icon=":material/tune:"),
+    "elements": st.Page("dq_app/ui/pages/elements.py", title="Elements",
+                        icon=":material/label_important:"),
     "onboarding": st.Page("dq_app/ui/pages/onboarding.py", title="Onboarding",
                           icon=":material/add_task:"),
     # Drill-downs. Registered so `st.switch_page` can reach them, deliberately absent
@@ -82,7 +84,9 @@ PAGES = {
 SIDEBAR = {
     # `Onboarding` has its own group, first: choosing which tables are checked comes
     # before monitoring them. It sat under Monitor until 2026-10-05.
-    "Onboard": ["onboarding"],
+    # `Elements` leads it since 2026-10-08: an element is registered before any column
+    # can be bound to it -- registration precedes discovery.
+    "Onboard": ["elements", "onboarding"],
     # `Rules` sits under Monitor because the group it used to share — Evidence — held
     # the Register, and with that page gone a group label reading "Evidence" over a
     # single rule-authoring link described nothing. What a rule IS is part of what is

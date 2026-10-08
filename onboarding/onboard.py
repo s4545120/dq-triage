@@ -3,6 +3,8 @@
 
     cd onboarding
     ../.venv/bin/python onboard.py setup      # schema, clones, new tables, mock source, tags
+    #   -> PERSON (app): propose an element; a SECOND person approves it
+    ../.venv/bin/python onboard.py apply_elements  # JOB: approved element proposals -> cde_registry
     ../.venv/bin/python onboard.py discover   # JOB:    propose bindings
     #   -> PERSON: review.sql step 1, approve or reject the proposals
     ../.venv/bin/python onboard.py apply      # JOB:    approved proposals -> cde_registry
@@ -47,6 +49,7 @@ except NameError:
 sys.path.insert(0, str(_HERE))
 import mock_lead
 import discovery
+import elements
 import templates as tpl
 import wh
 from wh import PREFIX, SOURCE_SCHEMA, connect, in_databricks, lit, run, src, t
@@ -78,6 +81,17 @@ TEMPLATE_COLS = ("template_id, template_version, data_class, check_code, title, 
                  "created_at")
 PROPOSAL_COLS = ("proposal_id, proposed_at, target_table, target_column, cde_id, method, "
                  "confidence, evidence, proposed_by")
+# Every version this job writes to config.cde_registry, in sql/ddl/09's order.
+CDE_COLS = ("cde_id, cde_version, cde_name, business_term, data_class, definition, "
+            "expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings, "
+            "business_domain, owner_group, status, effective_from, registered_by, registered_at, "
+            "note")
+# An element with no binding is 'proposed' on the register: 09's
+# cde_registry_registered_has_bindings refuses a 'registered' row with none. The first
+# binding moves it to 'registered'; losing the last moves it back. NEW is the bindings
+# expression of the version being written.
+STATUS_FOR = ("CASE WHEN status = 'retired' THEN status "
+              "WHEN size({new}) = 0 THEN 'proposed' ELSE 'registered' END")
 
 # The one table this test onboards. Re-running setup appends nothing if it exists.
 MONITORED = dict(
@@ -213,8 +227,9 @@ ADOPT_ROW_KEY = {"SUBS_C": ["SUBS_KEY"], "CTCT_C": ["CTCT_KEY"]}
 # The repo's DDL that setup runs, in sql/render.py's order. 15 is the onboarding tables;
 # the views follow it because SELECT * views freeze their columns at creation, so they
 # are re-created after the ALTER above. 08 and 11 also give this schema the triage views.
-DDL_FILES = ["15_config_onboarding.sql", "08_views.sql", "11_views_cde.sql",
-             "14_views_threshold.sql", "16_views_onboarding.sql"]
+DDL_FILES = ["15_config_onboarding.sql", "17_config_cde_onboarding.sql", "08_views.sql",
+             "11_views_cde.sql", "14_views_threshold.sql", "16_views_onboarding.sql",
+             "18_views_cde_onboarding.sql"]
 
 
 def _run_ddl(conn, fname: str) -> None:
@@ -237,10 +252,10 @@ def _seed_templates(conn) -> None:
             run(conn, f"SELECT template_id, template_version FROM {t('config', 'check_template')}")}
     vals = []
     for tp in tpl.TEMPLATES:
-        if (tp.template_id, tpl.TEMPLATE_VERSION) in have:
+        if (tp.template_id, tp.version) in have:
             continue
         vals.append("(" + ", ".join([
-            lit(tp.template_id), lit(tpl.TEMPLATE_VERSION), lit(tp.data_class), lit(tp.check),
+            lit(tp.template_id), lit(tp.version), lit(tp.data_class), lit(tp.check),
             lit(tp.title), lit(tp.input_type), lit(tp.rule_type), lit(tp.rule_expr),
             lit(tp.scope_filter), lit(tp.severity), lit(tp.source_rule),
             "current_user()", "current_timestamp()"]) + ")")
@@ -286,7 +301,8 @@ def _select(conn) -> None:
 
 def discover(conn) -> None:
     elements = run(conn, f"""SELECT cde_id, cde_name, data_class, expected_signature
-        FROM {t('config', 'v_cde_registry_current')} WHERE status = 'registered'""")
+        FROM {t('config', 'v_cde_registry_current')}
+        WHERE status IN ('proposed', 'registered')""")
     known = {e["cde_id"] for e in elements}
     names = {e["cde_id"]: e["cde_name"] for e in elements}
     signed = [e for e in elements if e["expected_signature"]]
@@ -386,7 +402,9 @@ def apply(conn) -> None:
                 FROM {t('config', 'binding_review')}) r
                ON r.proposal_id = p.proposal_id AND r.rn = 1 AND r.decision = 'approved'
         LEFT ANTI JOIN {t('config', 'v_binding_current')} b
-               ON b.target_table = p.target_table AND b.target_column = p.target_column""")
+               ON b.target_table = p.target_table AND b.target_column = p.target_column
+        -- An element retired since the proposal is not bound to anything.
+        LEFT SEMI JOIN {t('config', 'v_cde_registry_current')} e ON e.cde_id = p.cde_id""")
     # THE SECOND APPROVER, again. The app refuses a person approving their own
     # suggestion; this refuses to apply one that reached the table some other way.
     # A waived self-approval (the dq-onboard test app) carries the marker in its reason;
@@ -403,10 +421,6 @@ def apply(conn) -> None:
         by_cde.setdefault(p["cde_id"], []).append(p)
 
     reg = t("config", "cde_registry")
-    cols = ("cde_id, cde_version, cde_name, business_term, data_class, definition, "
-            "expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings, "
-            "business_domain, owner_group, status, effective_from, registered_by, registered_at, "
-            "note")
     for cde, ps in by_cde.items():
         structs = ", ".join(
             f"named_struct('target_table', {lit(p['target_table'])}, 'target_column', "
@@ -418,10 +432,11 @@ def apply(conn) -> None:
         who = ", ".join(sorted({p["reviewed_by"] for p in ps}))
         # ONE new version per element per apply, built from the latest version, so the
         # bindings array is never written from a stale copy.
-        run(conn, f"""INSERT INTO {reg} ({cols})
+        new = f"concat(bindings, array({structs}))"
+        run(conn, f"""INSERT INTO {reg} ({CDE_COLS})
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis, tolerance_pct,
-       concat(bindings, array({structs})), business_domain, owner_group, status,
+       {new}, business_domain, owner_group, {STATUS_FOR.format(new=new)},
        current_timestamp(), 'job:onboard-apply', current_timestamp(),
        {lit(f'Binds {names}: proposals approved by {who}. Nothing else about the element changed.')}
 FROM   {reg}
@@ -430,6 +445,127 @@ WHERE  cde_id = {lit(cde)}
         print(f"{cde}: +{len(ps)} binding(s) ({names})")
     if not by_cde:
         print("nothing approved and unapplied")
+
+
+# ---------------------------------------------------------------------------
+# apply_elements (job): approved element proposals become register versions
+# ---------------------------------------------------------------------------
+
+_EMPTY_BINDINGS = ("CAST(array() AS ARRAY<STRUCT<target_table: STRING, target_column: STRING, "
+                   "populated_when: STRING, expected_scope_filter: STRING, "
+                   "binding_status: STRING, discovered_by: STRING, confidence: DOUBLE>>)")
+
+
+def apply_elements(conn) -> None:
+    """Register, amend or retire an element, one approved proposal at a time.
+
+    A person proposes and a second person decides, both in the app; this is the only
+    writer of the register, as for bindings. Each version written starts its note with
+    `elements.marker(proposal_id)`, which is how v_cde_proposal_current knows a
+    proposal is applied and how this step knows not to apply it twice. What may not be
+    applied is `elements.refusal`, and a refused proposal stays `approved` until someone
+    proposes again -- this job never decides anything.
+
+    A schema `install` has not given sql/ddl/17-18 is skipped, not failed: this step runs
+    first in `steps`, and the jobs' shared code copy serves schemas installed at
+    different times."""
+    if not run(conn, f"""SELECT 1 FROM {wh.CATALOG}.information_schema.tables
+            WHERE table_schema = '{wh.SCHEMA}'
+              AND table_name = '{PREFIX}config_v_cde_proposal_current'"""):
+        print("CDE onboarding is not installed in this schema (sql/ddl/17, 18); skipped")
+        return
+    approved = run(conn, f"""SELECT * FROM {t('config', 'v_cde_proposal_current')}
+        WHERE state = 'approved' ORDER BY proposed_at""")
+    reg = t("config", "cde_registry")
+    if approved:
+        ids = ", ".join(lit(i) for i in sorted({p["cde_id"] for p in approved}))
+        versions: dict[str, list[dict]] = {}
+        for v in run(conn, f"SELECT * FROM {reg} WHERE cde_id IN ({ids})"):
+            versions.setdefault(v["cde_id"], []).append(v)
+    for p in approved:
+        cde, pid = p["cde_id"], p["proposal_id"]
+        why = elements.refusal(p, versions.get(cde, []))
+        if why:
+            print(f"refused: {p['change']} {cde} ({pid}): {why}")
+            continue
+        who = f"proposed by {p['proposed_by']}, approved by {p['reviewed_by']}"
+        if p["change"] == "retire":
+            note = f"{elements.marker(pid)} Retired: {p['reason']} ({who})"
+            run(conn, f"""INSERT INTO {reg} ({CDE_COLS})
+SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
+       expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings,
+       business_domain, owner_group, 'retired', current_timestamp(), 'job:onboard-elements',
+       current_timestamp(), {lit(note)}
+FROM   {reg}
+WHERE  cde_id = {lit(cde)}
+  AND  cde_version = (SELECT max(cde_version) FROM {reg} WHERE cde_id = {lit(cde)})
+  AND  status <> 'retired'""")
+            print(f"{cde}: retired")
+            continue
+        a = {k: p[k] for k in elements.ATTRS}
+        vals = ", ".join(lit(a[k]) for k in ("cde_name", "business_term", "data_class",
+                                             "definition", "expected_signature",
+                                             "criticality", "pii", "regulatory_basis"))
+        tol = "CAST(NULL AS DOUBLE)" if a["tolerance_pct"] is None else \
+            f"CAST({float(a['tolerance_pct'])!r} AS DOUBLE)"
+        tail = f"{lit(a['business_domain'])}, {lit(a['owner_group'])}"
+        if p["change"] == "register":
+            note = f"{elements.marker(pid)} Registered: {p['reason']} ({who})"
+            # status 'proposed': registered with nowhere bound yet -- see STATUS_FOR.
+            run(conn, f"""INSERT INTO {reg} ({CDE_COLS})
+SELECT {lit(cde)}, 1, {vals}, {tol}, {_EMPTY_BINDINGS}, {tail}, 'proposed',
+       current_timestamp(), 'job:onboard-elements', current_timestamp(), {lit(note)}
+WHERE NOT EXISTS (SELECT 1 FROM {reg} WHERE cde_id = {lit(cde)})""")
+            print(f"{cde}: registered, not yet bound")
+        else:
+            latest = max(versions[cde], key=lambda v: v["cde_version"])
+            diff = elements.changed(latest, p)
+            note = f"{elements.marker(pid)} Amended {', '.join(diff)}: {p['reason']} ({who})"
+            run(conn, f"""INSERT INTO {reg} ({CDE_COLS})
+SELECT cde_id, cde_version + 1, {vals}, {tol}, bindings, {tail}, status,
+       current_timestamp(), 'job:onboard-elements', current_timestamp(), {lit(note)}
+FROM   {reg}
+WHERE  cde_id = {lit(cde)}
+  AND  cde_version = {int(latest['cde_version'])}
+  AND  NOT EXISTS (SELECT 1 FROM {reg} WHERE cde_id = {lit(cde)}
+                   AND cde_version > {int(latest['cde_version'])})""")
+            print(f"{cde}: amended {', '.join(diff)}")
+    if not approved:
+        print("no approved element proposals waiting")
+    retire_rules_of_retired_elements(conn)
+
+
+def retire_rules_of_retired_elements(conn) -> None:
+    """A retired version of every rule still naming a retired element.
+
+    The check runner already skips them -- it runs only rules on a current element --
+    so this is the register catching up, not a behaviour change. A separate pass rather
+    than part of the retire, so a run that fails between the two writes finishes the job
+    on the next one."""
+    rr = t("config", "rule_registry")
+    cur = t("config", "v_rule_registry_current")
+    stale = run(conn, f"""
+        WITH latest AS (
+          SELECT cde_id, status, ROW_NUMBER() OVER (PARTITION BY cde_id
+                                                    ORDER BY cde_version DESC) AS rn
+          FROM {t('config', 'cde_registry')})
+        SELECT r.rule_id, r.rule_version, r.cde_id
+        FROM   {cur} r JOIN latest l ON l.cde_id = r.cde_id AND l.rn = 1
+        WHERE  l.status = 'retired' AND r.status <> 'retired'""")
+    for r in stale:
+        note = (f"Retired with its element {r['cde_id']}. Its results and any Triage "
+                "problem it is a member of stay as history.")
+        run(conn, f"""INSERT INTO {rr} ({RULE_COLS})
+SELECT rule_id, rule_version + 1, rule_name, target_table, target_column, cde_id, rule_type,
+       rule_expr, scope_filter, fail_threshold_pct, severity, business_domain, owner_group,
+       source_layer, 'retired', current_timestamp(), 'job:onboard-elements',
+       current_timestamp(), promoted_by, promoted_at, {lit(note)}, join_sql, template_id,
+       template_version
+FROM   {rr}
+WHERE  rule_id = {lit(r['rule_id'])} AND rule_version = {int(r['rule_version'])}
+  AND  NOT EXISTS (SELECT 1 FROM {rr} WHERE rule_id = {lit(r['rule_id'])}
+                   AND rule_version > {int(r['rule_version'])})""")
+        print(f"{r['rule_id']}: retired with {r['cde_id']}")
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +600,7 @@ def next_version(key: tuple, rule_id: str, existing: dict, latest: dict) -> int 
 def generate(conn) -> None:
     targets = run(conn, f"""
         SELECT b.cde_id, b.cde_name, b.data_class, b.tolerance_pct, b.target_table,
-               b.target_column, b.expected_scope_filter, m.table_code,
+               b.target_column, b.expected_scope_filter, m.table_code, e.expected_signature,
                -- The table's own, else the element's: a check with no domain vanished
                -- from every domain filter in the app.
                coalesce(m.owner_group, e.owner_group) AS owner_group,
@@ -480,7 +616,8 @@ def generate(conn) -> None:
                ON concat_ws('.', c.table_catalog, c.table_schema, c.table_name) = b.target_table
               AND c.column_name = b.target_column""")
     existing = {(r["template_id"], r["target_table"], r["target_column"]): r for r in run(conn, f"""
-        SELECT rule_id, rule_version, template_id, template_version, target_table, target_column
+        SELECT rule_id, rule_version, template_id, template_version, target_table, target_column,
+               rule_expr, scope_filter
         FROM {t('config', 'v_rule_registry_current')} WHERE template_id IS NOT NULL""")}
     # Every id ever used, retired ones too, with its latest version: the view above hides
     # a retired rule, and a table decommissioned and selected again keeps its code, so
@@ -508,28 +645,48 @@ def generate(conn) -> None:
 
     vals, skipped = [], []
     for b in targets:
-        if (b["target_table"], b["target_column"]) in handwritten:
-            skipped.append(f"{b['target_column']}: already has hand-written rules; no "
-                           "templates applied")
+        col, dtype = b["target_column"], b["data_type"]
+        if (b["target_table"], col) in handwritten:
+            skipped.append(f"{col}: already has hand-written rules; no templates applied")
             continue
-        for tp in tpl.for_class(b["data_class"]):
-            key = (tp.template_id, b["target_table"], b["target_column"])
-            if key in existing and existing[key]["template_version"] == tpl.TEMPLATE_VERSION:
+        sig = b["expected_signature"]
+        tps = tpl.for_class(b["data_class"], sig, b["cde_id"])
+        # The date format is the column's, measured here (templates.py, "THE DATE FORMAT
+        # IS THE TABLE'S"). One aggregate per STRING date column; a typed column needs none.
+        fmt, fmt_why = None, ""
+        if dtype == "STRING" and any(tp.takes_date_format for tp in tps):
+            fmt, fmt_why = tpl.choose_date_format(run(conn, (
+                f"SELECT {tpl.date_format_probe(col)} FROM {b['target_table']}"))[0])
+            print(f"  {b['target_table'].split('.')[-1]}.{col}: date format "
+                  f"{fmt or 'not decided'} -- {fmt_why}")
+        for tp in tps:
+            key = (tp.template_id, b["target_table"], col)
+            if not tp.accepts(dtype):
+                skipped.append(f"{col}: {tp.template_id} expects {tp.input_type}"
+                               f"{' or a date type' if tp.dates_too else ''}, column is {dtype}")
                 continue
+            if dtype in tpl.DATE_TYPES:
+                col_expr, col_fmt = tpl.date_column(col)
+            else:
+                col_expr, col_fmt = col, fmt
+                if tp.takes_date_format and not fmt:
+                    skipped.append(f"{col}: {tp.template_id} not generated -- {fmt_why}")
+                    continue
             missing = sorted(set(tpl.helpers(tp)) - deployed)
             if missing:
-                skipped.append(f"{b['target_column']}: {tp.template_id} calls "
+                skipped.append(f"{col}: {tp.template_id} calls "
                                f"{', '.join(missing)}, not deployed in this workspace")
                 continue
-            if b["data_type"] != tp.input_type:
-                skipped.append(f"{b['target_column']}: {tp.template_id} expects "
-                               f"{tp.input_type}, column is {b['data_type']}")
-                continue
-            expr, scope = tp.instantiate(b["target_column"])
+            expr, scope = tp.instantiate(col_expr, sig, col_fmt)
             if b["expected_scope_filter"]:
                 scope = f"({scope}) AND ({b['expected_scope_filter']})" if scope \
                     else b["expected_scope_filter"]
-            rule_id = f"{b['table_code']}_{b['target_column']}_{tp.check}"
+            # Written again only when what it measures would change: an element's new
+            # signature, a column's new date format, a template that changed its logic.
+            again = tpl.restated(existing.get(key), expr, scope)
+            if key in existing and not again:
+                continue
+            rule_id = f"{b['table_code']}_{col}_{tp.check}"
             version = next_version(key, rule_id, existing, latest)
             if version is None:
                 skipped.append(f"{rule_id}: id already used by a rule not from this template")
@@ -537,17 +694,25 @@ def generate(conn) -> None:
             # The element's tolerance is the ceiling on any rule's limit; the generated
             # rule starts AT the ceiling and the threshold job may tighten it in shadow.
             limit = float(b["tolerance_pct"]) if b["tolerance_pct"] is not None else 0.0
-            name = tp.title.replace("{element}", b["cde_name"]) + f" ({b['target_column']})"
-            note = (f"Generated from {tp.template_id} v{tpl.TEMPLATE_VERSION} (lifted from "
-                    f"{tp.source_rule}) on the binding {b['target_column']} -> {b['cde_id']}. "
+            name = tp.title.replace("{element}", b["cde_name"]) + f" ({col})"
+            note = (f"Generated from {tp.template_id} v{tp.version} (lifted from "
+                    f"{tp.source_rule}) on the binding {col} -> {b['cde_id']}. "
                     f"Limit set to the element's tolerance.")
+            if tp.is_pattern:
+                note += f" Pattern is {b['cde_id']}'s expected_signature {sig}."
+            if tp.takes_date_format:
+                note += (f" Date format {col_fmt}: {fmt_why}." if dtype == "STRING"
+                         else f" The column is {dtype}, read as text in {col_fmt}.")
+            if again:
+                note += (" Written again because what it measures changed: back in shadow "
+                         "until a person promotes it.")
             vals.append("(" + ", ".join([
                 lit(rule_id), lit(version), lit(name), lit(b["target_table"]),
-                lit(b["target_column"]), lit(b["cde_id"]), lit(tp.rule_type), lit(expr),
+                lit(col), lit(b["cde_id"]), lit(tp.rule_type), lit(expr),
                 lit(scope), repr(limit), lit(tp.severity), lit(b["business_domain"]),
                 lit(b["owner_group"]), "'L2'", "'shadow'", "current_timestamp()",
                 "'job:onboard-generate'", "current_timestamp()", "NULL", "NULL", lit(note),
-                "NULL", lit(tp.template_id), lit(tpl.TEMPLATE_VERSION)]) + ")")
+                "NULL", lit(tp.template_id), lit(tp.version)]) + ")")
     if vals:
         run(conn, f"INSERT INTO {t('config', 'rule_registry')} ({RULE_COLS}) VALUES\n"
                   + ",\n".join(vals))
@@ -627,18 +792,16 @@ def unbind_retired(conn) -> None:
     by_cde: dict[str, list[str]] = {}
     for h in hits:
         by_cde.setdefault(h["cde_id"], []).append(f"{h['target_table'].split('.')[-1]}.{h['target_column']}")
-    cols = ("cde_id, cde_version, cde_name, business_term, data_class, definition, "
-            "expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings, "
-            "business_domain, owner_group, status, effective_from, registered_by, registered_at, "
-            "note")
     gone_list = ", ".join(lit(g) for g in sorted(gone))
     for cde, names in by_cde.items():
         note = f"Unbinds {', '.join(names)}: the table was decommissioned. Nothing else changed."
-        run(conn, f"""INSERT INTO {reg} ({cols})
+        new = f"filter(bindings, b -> NOT array_contains(array({gone_list}), b.target_table))"
+        run(conn, f"""INSERT INTO {reg} ({CDE_COLS})
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis, tolerance_pct,
-       filter(bindings, b -> NOT array_contains(array({gone_list}), b.target_table)),
-       business_domain, owner_group, status, current_timestamp(), 'job:onboard-unbind',
+       {new},
+       business_domain, owner_group, {STATUS_FOR.format(new=new)}, current_timestamp(),
+       'job:onboard-unbind',
        current_timestamp(), {lit(note)}
 FROM   {reg}
 WHERE  cde_id = {lit(cde)}
@@ -681,20 +844,18 @@ def unbind_excluded(conn) -> None:
     for h in hits:
         by_cde.setdefault(h["cde_id"], []).append((h["target_table"], h["target_column"]))
     reg = t("config", "cde_registry")
-    cols = ("cde_id, cde_version, cde_name, business_term, data_class, definition, "
-            "expected_signature, criticality, pii, regulatory_basis, tolerance_pct, bindings, "
-            "business_domain, owner_group, status, effective_from, registered_by, registered_at, "
-            "note")
     for cde, pairs in by_cde.items():
         names = ", ".join(f"{tb.split('.')[-1]}.{c}" for tb, c in pairs)
         keys = ", ".join(lit(f"{tb}|{c}") for tb, c in pairs)
         note = f"Unbinds {names}: excluded at promotion. Nothing else changed."
-        run(conn, f"""INSERT INTO {reg} ({cols})
+        new = (f"filter(bindings, b -> NOT array_contains(array({keys}), "
+               f"concat(b.target_table, '|', b.target_column)))")
+        run(conn, f"""INSERT INTO {reg} ({CDE_COLS})
 SELECT cde_id, cde_version + 1, cde_name, business_term, data_class, definition,
        expected_signature, criticality, pii, regulatory_basis, tolerance_pct,
-       filter(bindings, b -> NOT array_contains(array({keys}),
-                                                concat(b.target_table, '|', b.target_column))),
-       business_domain, owner_group, status, current_timestamp(), 'job:onboard-unbind',
+       {new},
+       business_domain, owner_group, {STATUS_FOR.format(new=new)}, current_timestamp(),
+       'job:onboard-unbind',
        current_timestamp(), {lit(note)}
 FROM   {reg}
 WHERE  cde_id = {lit(cde)}
@@ -741,7 +902,8 @@ def measure_shadow(conn) -> None:
 def steps(conn) -> None:
     """What the event-triggered job runs when a table is submitted or a binding decided:
     every step that needs no person, then a shadow-only measurement of anything new."""
-    print("== discover"); discover(conn)
+    print("== apply element proposals"); apply_elements(conn)
+    print("\n== discover"); discover(conn)
     print("\n== apply"); apply(conn)
     print("\n== unbind decommissioned tables"); unbind_retired(conn)
     print("\n== unbind columns excluded at promotion"); unbind_excluded(conn)
@@ -752,7 +914,8 @@ def steps(conn) -> None:
 def pipeline(conn) -> None:
     """What the Lakeflow job runs before the check runner: every step that needs no
     person, in order. Each is idempotent, so a run with nothing new does nothing."""
-    print("== discover"); discover(conn)
+    print("== apply element proposals"); apply_elements(conn)
+    print("\n== discover"); discover(conn)
     print("\n== apply"); apply(conn)
     print("\n== generate"); generate(conn)
 
@@ -767,7 +930,8 @@ def _try(conn, sql: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=["setup", "install", "adopt", "discover", "apply",
+    ap.add_argument("step", choices=["setup", "install", "adopt", "apply_elements",
+                                     "discover", "apply",
                                      "generate", "run", "status", "pipeline", "steps"])
     ap.add_argument("--schema", default=wh.TEST_SCHEMA,
                     help=f"schema to act on (default {wh.TEST_SCHEMA}, the test schema)")
@@ -794,7 +958,8 @@ def main() -> int:
             print(f"templates do not reproduce their source rules: {miss}")
             return 1
     with connect() as conn:
-        {"setup": setup, "install": install, "adopt": adopt, "discover": discover,
+        {"setup": setup, "install": install, "adopt": adopt,
+         "apply_elements": apply_elements, "discover": discover,
          "apply": apply, "generate": generate, "run": run_checks, "status": status,
          "pipeline": pipeline, "steps": steps}[step](conn)
     return 0

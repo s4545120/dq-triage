@@ -7,13 +7,16 @@ resources:
       name: dq ${var.schema} onboard steps
       description: >-
         Event-triggered onboarding in ${var.catalog}.${var.schema}: when a table is
-        submitted (monitored_table) or bindings are decided (binding_review), discover
+        submitted (monitored_table), bindings are decided (binding_review) or an element
+        proposal is decided (cde_review), apply approved element changes, discover
         bindings, apply approved ones, unbind decommissioned or excluded columns, generate
         shadow checks and measure only new shadow checks. Writes nothing that raises a
         problem: active results come from the daily checks job.
 
-      # The app starts no job; this watches the two tables only the app writes. The job
-      # itself never writes either one, so it cannot trigger itself.
+      # The app starts no job; this watches three tables only the app writes. The job
+      # itself never writes any of them, so it cannot trigger itself. cde_review is
+      # NEW (2026-10-08) and not on the live hand-made job: add it there too, or an
+      # approved element waits for the next table submission or binding decision.
       trigger:
         pause_status: ${var.steps_trigger}
         table_update:
@@ -21,6 +24,7 @@ resources:
           table_names:
             - ${var.catalog}.${var.schema}.${var.prefix}config_monitored_table
             - ${var.catalog}.${var.schema}.${var.prefix}config_binding_review
+            - ${var.catalog}.${var.schema}.${var.prefix}config_cde_review
           min_time_between_triggers_seconds: 60
           wait_after_last_change_seconds: 61
 

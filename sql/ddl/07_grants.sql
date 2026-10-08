@@ -15,11 +15,11 @@
 --
 -- The claim is still achievable, but it takes two mechanisms rather than one:
 --
---   (a) MODIFY on named tables only (six since 2026-10-05, listed below) — never on
---       the schema.
+--   (a) MODIFY on named tables only (six since 2026-10-05, eight since 2026-10-08,
+--       listed below) — never on the schema.
 --       Schema-level MODIFY would silently extend to every table added later.
---   (b) delta.appendOnly = true on every one of those tables (set in 01, 06, 13 and
---       15), which
+--   (b) delta.appendOnly = true on every one of those tables (set in 01, 06, 13, 15
+--       and 17), which
 --       makes UPDATE and DELETE fail for every principal, owner included.
 --
 -- Clearing (b) requires ALTER TABLE, which the app's SP cannot run (it is not the
@@ -36,7 +36,7 @@
 -- detective control. It is not preventive, and the spec says so.
 
 -- ---------------------------------------------------------------
--- 1. The app service principal — read everything in dq, append to six tables
+-- 1. The app service principal — read everything in dq, append to eight tables
 -- ---------------------------------------------------------------
 
 GRANT USE CATALOG ON CATALOG {catalog} TO `{app_sp}`;
@@ -69,6 +69,17 @@ GRANT MODIFY ON TABLE {catalog}.results.threshold_review  TO `{app_sp}`;
 GRANT MODIFY ON TABLE {catalog}.config.monitored_table    TO `{app_sp}`;
 GRANT MODIFY ON TABLE {catalog}.config.binding_proposal   TO `{app_sp}`;
 GRANT MODIFY ON TABLE {catalog}.config.binding_review     TO `{app_sp}`;
+
+-- CDE onboarding, since 2026-10-08: two more, and AGAIN A DECISION, NOT A DEPLOY. Not
+-- granted in any schema yet. Comment them out to deploy without it, and the Elements
+-- page lists the register and refuses every proposal.
+--   * cde_proposal -- a person proposing to register, amend or retire an element
+--   * cde_review   -- a second person approving or rejecting that proposal
+-- The register itself is still NOT granted: an approved change reaches
+-- config.cde_registry through the onboarding job's apply_elements step, as an
+-- approved binding does. See 17_config_cde_onboarding.sql.
+GRANT MODIFY ON TABLE {catalog}.config.cde_proposal       TO `{app_sp}`;
+GRANT MODIFY ON TABLE {catalog}.config.cde_review         TO `{app_sp}`;
 
 -- Deliberately NOT granted, and each omission is load-bearing:
 --   * anything at all on any prod catalog          -> the headline claim
@@ -117,10 +128,11 @@ GRANT SELECT ON SCHEMA {catalog}.results TO `{approver_group}`;
 -- and on a schedule; save the results with the control documentation.
 
 -- 3a. Everything the app SP can write, anywhere in the metastore.
---     EXPECTED: exactly six rows — dq.results.disposition, dq.config.rule_registry,
---     dq.results.threshold_review, and the onboarding three: dq.config.monitored_table,
---     dq.config.binding_proposal, dq.config.binding_review. Three if onboarding was
---     not granted. Any other row is a control failure.
+--     EXPECTED: exactly eight rows — dq.results.disposition, dq.config.rule_registry,
+--     dq.results.threshold_review, the onboarding three: dq.config.monitored_table,
+--     dq.config.binding_proposal, dq.config.binding_review, and the CDE onboarding two:
+--     dq.config.cde_proposal, dq.config.cde_review. Six if CDE onboarding was not
+--     granted, three if no onboarding was. Any other row is a control failure.
 SELECT table_catalog, table_schema, table_name, privilege_type
 FROM   system.information_schema.table_privileges
 WHERE  grantee = '{app_sp}'
@@ -142,13 +154,15 @@ WHERE  grantee = '{app_sp}'
   AND  privilege_type IN ('MODIFY', 'ALL_PRIVILEGES');
 
 -- 3d. appendOnly is still set on every app-written table.
---     EXPECTED: all six report true. Run DESCRIBE DETAIL and read the properties map.
+--     EXPECTED: all eight report true. Run DESCRIBE DETAIL and read the properties map.
 DESCRIBE DETAIL {catalog}.results.disposition;
 DESCRIBE DETAIL {catalog}.config.rule_registry;
 DESCRIBE DETAIL {catalog}.results.threshold_review;
 DESCRIBE DETAIL {catalog}.config.monitored_table;
 DESCRIBE DETAIL {catalog}.config.binding_proposal;
 DESCRIBE DETAIL {catalog}.config.binding_review;
+DESCRIBE DETAIL {catalog}.config.cde_proposal;
+DESCRIBE DETAIL {catalog}.config.cde_review;
 
 -- 3e. Has anyone rewritten the register? Non-INSERT operations on an appendOnly
 --     table should be impossible; this proves it stayed that way.

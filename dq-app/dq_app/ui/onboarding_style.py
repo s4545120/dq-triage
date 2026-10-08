@@ -39,6 +39,23 @@ _CSS = f"""
   padding-left: 1rem; padding-right: 1rem; box-sizing: border-box; }}
 [class*="st-key-onbcard_rows"] .st-key-dqrows_onb {{ padding: 0; }}
 
+/* The Elements page's list and detail: wrap rather than squeeze. The list's fixed
+   columns need about 16rem beside the name, so below 26rem of card it would crush the
+   name to nothing; the two cards stack instead (the Rules page's dq_rsplit, the same
+   way). Child combinators, so the form's own two-column rows are left alone. */
+.st-key-onb_elsplit > [data-testid="stHorizontalBlock"],
+.st-key-onb_elsplit > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{
+  flex-wrap: wrap; row-gap: .8rem; align-items: flex-start; }}
+.st-key-onb_elsplit > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+.st-key-onb_elsplit > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"]
+  > [data-testid="stColumn"] {{
+  flex: 1 1 18rem !important; min-width: min(18rem, 100%); }}
+.st-key-onb_elsplit > [data-testid="stHorizontalBlock"]
+  > [data-testid="stColumn"]:has(.st-key-onbcard_rows_el),
+.st-key-onb_elsplit > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"]
+  > [data-testid="stColumn"]:has(.st-key-onbcard_rows_el) {{
+  flex: 1.5 1 26rem !important; min-width: min(26rem, 100%); }}
+
 .onb-kpi {{ border: 1px solid {N["border"]}; border-radius: 10px; background: {N["surface"]};
   padding: .85rem 1rem; height: 100%; box-sizing: border-box;
   /* Asked for, not inherited: Streamlit's -1rem on a markdown container cancels the

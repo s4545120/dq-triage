@@ -26,10 +26,11 @@ proposal since — and returns False otherwise, which this module turns into a
 rejection the page shows. Appending blind would let two stewards put two events at
 one `event_seq`, and an append-only table cannot take either back.
 
-The CDE register is read-only here for the same reason. Registering an element is an
-append to `config.cde_registry` and would be that third write, which is a decision
-about the app's Unity Catalog grants rather than a UI change. Until it is taken, the
-register is seeded and this module only reads it.
+The CDE register is read-only here, still. Since 2026-10-08 a person can PROPOSE a
+change to it (`propose_element`, an append to `config.cde_proposal`) and a second person
+decide it (`review_element`, `config.cde_review`) -- the seventh and eighth writes in
+07_grants.sql -- but the register version is written by the onboarding job's
+apply_elements step, never from here.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ import streamlit as st
 
 from dq_app.data import identity
 from dq_app.data import notify as _notify_transport
-from dq_app.domain import coverage, lifecycle, onboarding, slices, thresholds
+from dq_app.domain import coverage, elements, lifecycle, onboarding, slices, thresholds
 
 APP_VERSION = "dq-triage-app/1.0.0"
 
@@ -233,6 +234,31 @@ def get_monitored_tables() -> pd.DataFrame:
     """Every version of every row in config.monitored_table, including selections made
     in this session. Empty where the catalog has no onboarding tables."""
     return _with_pending(_base_monitored_tables(), "monitored")
+
+
+@st.cache_data(**_CACHE)
+def _base_cde_proposals() -> pd.DataFrame:
+    return _impl.cde_proposals()
+
+
+@st.cache_data(**_CACHE)
+def _base_cde_reviews() -> pd.DataFrame:
+    return _impl.cde_reviews()
+
+
+def get_cde_proposals() -> pd.DataFrame:
+    return _with_pending(_base_cde_proposals(), "cde_proposal")
+
+
+def get_cde_reviews() -> pd.DataFrame:
+    return _with_pending(_base_cde_reviews(), "cde_review")
+
+
+def get_cde_proposal_current() -> pd.DataFrame:
+    """Every element proposal with its decision and state -- the Python twin of
+    v_cde_proposal_current, so a decision made in this session moves the page."""
+    return elements.proposal_state(get_cde_proposals(), get_cde_reviews(),
+                                   get_cde_registry())
 
 
 def get_binding_proposals() -> pd.DataFrame:
@@ -590,6 +616,81 @@ def review_binding(proposal_id: str, decision: str, reason: str | None = None) -
     return row
 
 
+# --- CDE onboarding writes ---------------------------------------------------------------
+# A proposal and a decision, each an append signed with the platform identity. The
+# register version is the onboarding job's (apply_elements), so neither of these can
+# change what the scorecard counts until a second person has approved and the job run.
+
+def _element_write(write, row: dict) -> bool:
+    """A CDE onboarding append, with the two ways a schema can be not ready for it said
+    in words: tables `install` has not created yet, or grants nobody has given (07)."""
+    try:
+        return write(row)
+    except Exception as exc:  # noqa: BLE001 -- re-raised unless it is one of the two
+        msg = str(exc)
+        if "TABLE_OR_VIEW_NOT_FOUND" in msg:
+            raise OnboardingRejected(
+                "CDE onboarding is not installed in this schema yet (sql/ddl/17 and 18, "
+                "`onboard.py install`). Nothing was written.") from exc
+        if "PERMISSION_DENIED" in msg or "INSUFFICIENT_PERMISSIONS" in msg:
+            raise OnboardingRejected(
+                "The app has no grant to write element proposals here yet -- the two "
+                "CDE onboarding grants in 07_grants.sql are a decision nobody has taken "
+                "for this schema. Nothing was written.") from exc
+        raise
+
+
+def propose_element(change: str, cde_id: str, attrs: dict, reason: str,
+                    based_on_version: int | None = None) -> dict:
+    who = identity.current()
+    _require_platform_identity(who, "Proposing a change to the element register",
+                               OnboardingRejected)
+    attrs = {} if change == "retire" else {k: attrs.get(k) for k in elements.ATTRS}
+    elements.validate_proposal(change, cde_id, attrs, reason, registry=get_cde_registry(),
+                               state=get_cde_proposal_current(),
+                               based_on_version=based_on_version)
+    clean = elements.attrs_of(attrs) if attrs else {k: None for k in elements.ATTRS}
+    if clean["tolerance_pct"] is not None:
+        clean["tolerance_pct"] = float(clean["tolerance_pct"])
+    if clean["pii"] is not None:
+        clean["pii"] = bool(clean["pii"])
+    row = {"proposal_id": str(uuid.uuid4()), "proposed_at": datetime.now(),
+           "cde_id": cde_id, "change": change,
+           "based_on_version": None if change == "register" else int(based_on_version),
+           **clean, "proposed_by": who.email, "reason": reason.strip()}
+    if not _element_write(_impl.write_cde_proposal, row):
+        clear_cache()
+        raise OnboardingRejected(f"{cde_id} gained a change, or its id was taken, since you "
+                                 "opened the page. It has been refreshed.")
+    clear_cache()
+    return row
+
+
+def review_element(proposal_id: str, decision: str, reason: str | None = None) -> dict:
+    who = identity.current()
+    _require_platform_identity(who, "Deciding an element proposal", OnboardingRejected)
+    state = get_cde_proposal_current()
+    match = state[(state["proposal_id"] == proposal_id) & (state["state"] == "open")] \
+        if len(state) else state
+    if match.empty:
+        raise OnboardingRejected("That proposal is already decided.")
+    proposal = match.iloc[0].to_dict()
+    waived = self_approval_waived()
+    elements.validate_review(proposal, who.email, decision, reason, allow_self=waived)
+    reason = (reason or "").strip() or None
+    if (waived and decision == "approved"
+            and str(proposal["proposed_by"]).lower() == who.email.lower()):
+        reason = f"{onboarding.WAIVER_MARK} {reason or ''}".strip()
+    row = {"proposal_id": proposal_id, "decision": decision, "reviewed_by": who.email,
+           "reviewed_at": datetime.now(), "reason": reason}
+    if not _element_write(_impl.write_cde_review, row):
+        clear_cache()
+        raise OnboardingRejected("Someone decided this proposal since you opened it. "
+                                 "The page has been refreshed.")
+    clear_cache()
+    return row
+
+
 # The reads every page shares. Against the warehouse each one is a fresh connection
 # and a statement -- about two seconds -- and a page asking for them one after another
 # took over half a minute cold, then again after every write. `warm` asks for all of
@@ -599,6 +700,7 @@ _SHARED_READS = (
     _base_rule_registry, get_playbook, get_cde_registry, get_cde_profile,
     get_threshold_proposals, _base_threshold_reviews, _base_monitored_tables,
     _base_binding_proposals, _base_binding_reviews, get_check_templates,
+    _base_cde_proposals, _base_cde_reviews,
 )
 _WARM_LOCK = threading.Lock()
 _warmed_at = 0.0

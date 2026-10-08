@@ -16,6 +16,8 @@ Most of the rules below exist to keep that claim true.
 Still exactly two writes after the CDE work: the register is seeded and read-only in
 the app, so `sql/ddl/07_grants.sql` is unchanged. If someone asks for in-app CDE
 registration, that is a third `MODIFY` grant and a decision, not a UI change.
+**(Superseded 2026-10-08: in-app registration exists as two more writes, not a write
+to the register. See *CDE onboarding* below.)**
 
 **Still two writes after the notification work too, but the app now has an outward
 side effect and that is new.** `DQ_NOTIFY` (off by default) lets an accepted review
@@ -55,6 +57,7 @@ labelled as that decision: running the file as written takes it.
 | `fixtures/` | Current. Local Parquet dataset generated from the pilot CSVs. Verified. |
 | `dq-app/` | Current. Spec v1.0, redesigned 2026-09-16; scorecard redrawn around targets 2026-10-01. Runs on the fixture **and** against Unity Catalog; deployed as the Databricks App `dq-triage`. |
 | `sql/ddl/15_config_onboarding.sql`, `16_views_onboarding.sql` | Current, 2026-10-06. The onboarding tables and views as DDL. **Applied to `dq_onboard`** (`onboard.py setup`) **and to `dq_triage`** (`onboard.py --schema dq_triage install`, 2026-10-06, with `01`'s two template columns). |
+| `sql/ddl/17_config_cde_onboarding.sql`, `18_views_cde_onboarding.sql`, `dq-app/.../pages/elements.py` | **Built 2026-10-08, applied to no schema and granted in none.** CDE onboarding: propose / second-person review / `onboard.py apply_elements`. See *CDE onboarding*. |
 | `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app carries the Onboarding pages since 2026-10-06 (deployment `01f1c110…`). See *Onboarding in dq_triage*. |
 | `databricks.yml` + `resources/` | **Draft, never deployed** (2026-10-06). The two jobs above as a bundle: run as a job service principal (not yet created), code from git, failure email, timeouts. `resources/README.md` has the cutover — bind to the existing job ids, never deploy beside them. `onboard.py` takes `--catalog` and `--fn-prefix` since the same day (call-time in `wh`, like `--schema`); still one schema in the sandpit layout, so no `prod` target yet. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
@@ -1465,6 +1468,132 @@ app's user-authorization scope); `CTCT_BRTH_PLAUSIBLE`'s `year(BRTH_TS)` fails o
 `'31-02-1988'` under ANSI (the runner now records the missing sample instead of failing);
 number-typed key columns get no checks until templates accept them; and the precomputed
 catalog inventory that would judge readability by the check job's identity.
+
+## CDE onboarding — 2026-10-08
+
+**The element register changes through the app now, and the app still does not write
+it.** A person proposes to register, amend or retire an element
+(`config.cde_proposal`), a SECOND person approves or rejects it (`config.cde_review`),
+and the onboarding job's `apply_elements` step writes the approved change onto
+`config.cde_registry`. Same shape as a binding. Those two tables are the seventh and
+eighth `MODIFY` in `07_grants.sql`, labelled as a decision like the onboarding three.
+The page is **Elements**, first in the Onboard group: an element is registered before
+any column can be bound to it.
+
+**State: DDL, job step, app page and tests are done; nothing is applied anywhere.**
+`render.py` appends 17 and 18 to its order. `onboard.py install` runs both. The two
+`CREATE TABLE`s were `EXPLAIN`ed against `dq_onboard`, every constraint parsed as a
+SELECT, and the view's regex, the empty typed bindings array and the status CASE were
+run as read-only SELECTs. No table was created and no row written. To make it real in a
+schema:
+1. `install`.
+2. Grant the two tables.
+3. Add `cde_review` to the live steps job's table-update trigger (it is in
+   `resources/dq_jobs.yml`, not on the hand-made jobs).
+4. Redeploy.
+
+Things to know:
+
+* **A new element lands as register status `proposed`, with no binding.** 09's
+  `cde_registry_registered_has_bindings` refuses a `registered` row with none, and its
+  comment already named this state. Discovery now reads `proposed` elements too. The
+  first applied binding moves one to `registered`, and unbinding its last column moves
+  it back (`STATUS_FOR` in `onboard.py`). **That last part fixes a latent bug:**
+  decommissioning the only table an element was bound to would have violated that
+  constraint. The page says "not yet bound", never "proposed".
+* **Applied is read off the register.** Every version `apply_elements` writes starts its
+  note with `[cde_proposal <id>]`. `v_cde_proposal_current` reads that back as
+  `applied`, and the job reads it to stay idempotent. States: open / approved /
+  applied / rejected.
+* **What the job refuses** (`onboarding/elements.refusal`, twinned in
+  `dq_app/domain/elements.refusal`; a test runs both over the same cases):
+  * an id ever used before, retired included;
+  * an amend or retire written against a version whose ATTRIBUTES have changed since
+    (binding-only versions do not count);
+  * an amendment that changes nothing;
+  * changing the data class of a bound element (its checks were generated for the old
+    class);
+  * an unmarked self-approval.
+
+  A refused proposal stays `approved`. The page shows the job's reason before anyone
+  approves.
+* **One change per element at a time**, enforced in the adapter and in the guarded
+  INSERT, so one amendment can never be applied over another. An amendment carries
+  the whole attribute set, not a diff.
+* **Retiring takes the element's rules with it**: `retire_rules_of_retired_elements`
+  writes a retired version of every rule still naming a retired element. It is a
+  separate pass, so a failure between the two writes heals on the next run. The runner
+  had already stopped running them (it joins `v_cde_registry_current`).
+* **Lowering a tolerance changes no rule.** The amend form lists checks whose
+  `fail_threshold_pct` is now looser than the ceiling; the threshold job advises on
+  them.
+* **Only a person proposes an element** (`cde_proposal_signed_by_a_person`): discovery
+  binds registered elements and never invents one. `data_class` is a closed enum on the
+  proposal. A new class is DDL plus a template, and the form says when no template
+  covers a class.
+* `signature_problem` refuses POSIX classes in a value pattern, for the reason the DQ
+  Queries section records.
+* Not built: UC tag write-back (Addendum A's open question, deferred), and template
+  authoring, which is the agreed next step.
+
+**The pattern template (same day).** A class template has one fixed expression, so it
+cannot say what a value of THIS element looks like. `TPL_PATTERN` (`onboarding/
+templates.py`, data_class `*`) checks `{col} NOT RLIKE <the element's
+expected_signature>` over non-blank rows. It is lifted from `CTCT_PHN_FMT`, and
+`equivalence()` rebuilds that rule from it. The signature goes in through `wh.lit`,
+because one backslash in a Spark literal is dropped. Three gates decide where it
+applies:
+
+* **The element is in `CONFIRMED_SIGNATURES`**: the four the migration queries cover
+  (customer name, date of birth, email, phone). Every other signature in the register
+  was profiled from the 1000-row pilot. The identity document's `^\d{7}$` would flag
+  real passports, and IMEI's `^\d{7}$` is wrong outright (IMEIs are 15 digits). Adding
+  an element is a reviewed code change until confirmation is a register field.
+* **The element declares a signature.** `CDE_CUST_NAME` deliberately has none. The
+  queries' name-structure regex matched 100% of `PREF_LANG_NM`, `CTCT_TYPE_CD`,
+  `EML_STTS_CD` and `PHN_NUMB_TYPE_NM`, so as a signature it would have discovery
+  propose every one of them as a name. `TPL_NAME_STRUCTURE` is its check.
+* **The class has no format check of its own** (`checks_format`: email FMT, phone
+  AU_FMT, name STRUCTURE, ID NUMERIC, DOB PARSEABLE). Those came from the migration
+  queries and say more than one regex can; the phone check washes formatting first.
+
+**So today it generates for none of the four.** It is the mechanism for the next
+element whose signature is confirmed. On `PHN_NO` it reproduces `CTCT_PHN_FMT`'s 24.
+
+**The DOB date format was hardcoded, and is now the column's (same day).** The DOB
+rules parse with `yyyy-MM-dd HH:mm:ss`, because the mock table stores dates that way.
+Lifted as they were, a column stored as `dd/MM/yyyy` put zero rows in scope of every
+DOB check, so each passed silently: measured, 0 of 1002. And a DATE-typed column got no
+DOB checks at all.
+
+Now the templates carry a `{datefmt}` slot (FUTURE, OVER_110 and PLACEHOLDER are v2).
+`generate` measures each STRING DOB column against `templates.DATE_FORMATS` in one
+aggregate and takes the best format if:
+* at least 95% of values parse in it, and
+* no format with the fields in a different order also passes (ambiguous day and month).
+
+Otherwise no date check is generated, and the run says why.
+
+A DATE or TIMESTAMP column goes through `date_format(col, 'yyyy-MM-dd HH:mm:ss')` and
+gets no parse check. `TPL_DOB_PARSEABLE` (lifted from `CTCT_BRTH_PARSEABLE`) is the
+class's format check, which is why the pattern template no longer generates for DOB.
+
+Proven read-only on the mock DOBs plus three planted values (future, placeholder,
+over 110), in three forms: as stored, re-rendered `dd/MM/yyyy`, and typed DATE. All three
+gave the same counts: FUTURE 1, OVER_110 2, PLACEHOLDER 1, and PARSEABLE 14 on the text
+forms. The typed column instead reports its 14 NULLs as NOT_NULL.
+
+`templates.restated` replaced the template-version comparison. A generated rule is
+written again (in shadow) when its expression or scope would come out different, and
+never just because a template's version moved. So v2 rewrites nothing on a column
+already in the source format.
+
+A changed signature (an approved amendment) writes the pattern rule again at its next
+version, in shadow, for a person to promote. The Elements and table onboarding pages now
+name the checks a bound column gets, through `elements.templates_for`. That function's
+copies of `checks_format` and the confirmed list are pinned to the job's by tests.
+Nothing is seeded yet: `install` adds `TPL_PATTERN` to a schema's `check_template` on
+its next run.
 
 ## Data slices — 2026-10-06
 

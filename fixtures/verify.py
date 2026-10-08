@@ -12,7 +12,9 @@
      here, so a column added to one and not the other is a break nothing else sees.
   5. The notebook's PRIOR_STATES against the states v_cohort_current can return.
   6. The onboarding writers' column lists -- the job's and the app's -- against
-     15_config_onboarding.sql and the template columns on rule_registry.
+     15_config_onboarding.sql and the template columns on rule_registry; since
+     2026-10-08 also the CDE onboarding writers against 17, and the job's CDE_COLS
+     against 09.
   7. No notebook's code reads violation_sample.sample_row: row values carry PII and
      never go into a model brief.
 
@@ -166,7 +168,7 @@ for nb in sorted((Path(__file__).parent.parent / "notebooks").glob("*.ipynb")):
         findings.append(f"pii_to_model: {nb.name} reads violation_sample.sample_row -- "
                         "row values must not be put in a model brief")
 
-# --- 6. The onboarding writers against 15_config_onboarding.sql ---------------
+# --- 6. The onboarding writers against 15 and 17 -------------------------------
 # No fixture stands in for the onboarding tables; two writers do the real thing. The
 # onboarding job (onboarding/onboard.py) and the app (dq_app/domain/onboarding.py, whose
 # lists are the columns its adapter writes). Their column lists are read from source
@@ -201,6 +203,9 @@ ONBOARDING_WRITERS = [
     ("dq-app/dq_app/domain/onboarding.py", "MONITORED_COLUMNS", "config.monitored_table", "15_config_onboarding.sql"),
     ("dq-app/dq_app/domain/onboarding.py", "PROPOSAL_COLUMNS", "config.binding_proposal", "15_config_onboarding.sql"),
     ("dq-app/dq_app/domain/onboarding.py", "REVIEW_COLUMNS", "config.binding_review", "15_config_onboarding.sql"),
+    ("onboarding/onboard.py", "CDE_COLS", "config.cde_registry", "09_config_cde_registry.sql"),
+    ("dq-app/dq_app/domain/elements.py", "PROPOSAL_COLUMNS", "config.cde_proposal", "17_config_cde_onboarding.sql"),
+    ("dq-app/dq_app/domain/elements.py", "REVIEW_COLUMNS", "config.cde_review", "17_config_cde_onboarding.sql"),
 ]
 _consts: dict[str, dict] = {}
 for src, name, tbl, fname in ONBOARDING_WRITERS:

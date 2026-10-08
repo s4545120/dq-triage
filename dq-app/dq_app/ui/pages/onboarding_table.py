@@ -25,7 +25,7 @@ import pandas as pd
 import streamlit as st
 
 from dq_app.data import adapter, identity
-from dq_app.domain import onboarding
+from dq_app.domain import elements, onboarding
 from dq_app.ui import components, slice_card, theme
 from dq_app.ui import onboarding_style as ui
 from dq_app.ui.components import opt
@@ -89,12 +89,9 @@ def _checks_for(cde_id: str) -> list[str]:
     """What a column bound to this element would be checked for, in words."""
     if templates.empty or cde_id not in cde:
         return []
-    t = templates[templates["data_class"] == cde[cde_id]["data_class"]]
-    out = []
-    for title in t["title"]:
-        words = str(title).replace("{element}", "").strip()
-        out.append(words.removeprefix("is ").strip())
-    return out
+    t = elements.templates_for(templates, cde[cde_id]["data_class"],
+                               cde[cde_id].get("expected_signature"), cde_id)
+    return [w.removeprefix("is ").strip() for w in elements.check_words(t)]
 
 
 def _element_cell(cde_id: str) -> str:

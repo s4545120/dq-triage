@@ -407,6 +407,16 @@ def binding_reviews() -> pd.DataFrame:
     return _q_optional(_t("config", "binding_review"), REVIEW_COLUMNS)
 
 
+def cde_proposals() -> pd.DataFrame:
+    from dq_app.domain.elements import PROPOSAL_COLUMNS
+    return _q_optional(_t("config", "cde_proposal"), PROPOSAL_COLUMNS)
+
+
+def cde_reviews() -> pd.DataFrame:
+    from dq_app.domain.elements import REVIEW_COLUMNS
+    return _q_optional(_t("config", "cde_review"), REVIEW_COLUMNS)
+
+
 def check_templates() -> pd.DataFrame:
     return _q_optional(_t("config", "check_template"),
                        ["template_id", "template_version", "data_class", "check_code", "title"])
@@ -601,6 +611,42 @@ def write_binding_exclusion(row: dict) -> bool:
         guard_params={"proposal_id": row["proposal_id"]},
         readback={"proposal_id": row["proposal_id"], "reviewed_by": row["reviewed_by"],
                   "decision": "rejected"},
+    )
+
+
+# --- CDE onboarding: two appends (sql/ddl/17). The register itself is the job's. ------------
+
+def write_cde_proposal(row: dict) -> bool:
+    """A proposed register / amend / retire. Refused if the element already has a change
+    nobody has decided or the job has not applied -- one at a time, so an amendment is
+    never written over another's -- or if a register would reuse an id."""
+    from dq_app.domain import elements
+    prop, rev, reg = (_t("config", "cde_proposal"), _t("config", "cde_review"),
+                      _t("config", "cde_registry"))
+    waiting = (f"SELECT 1 FROM {prop} p LEFT JOIN {rev} r ON r.proposal_id = p.proposal_id "
+               f"WHERE p.cde_id = :g_cde_id AND (r.decision IS NULL OR (r.decision = "
+               f"'approved' AND NOT EXISTS (SELECT 1 FROM {reg} x WHERE x.cde_id = p.cde_id "
+               f"AND x.note LIKE concat('[cde_proposal ', p.proposal_id, ']%'))))")
+    guard = f"NOT EXISTS ({waiting})"
+    if row["change"] == "register":
+        guard += (f" AND NOT EXISTS (SELECT 1 FROM {reg} WHERE cde_id = :g_cde_id)"
+                  f" AND NOT EXISTS (SELECT 1 FROM {prop} WHERE cde_id = :g_cde_id)")
+    return _guarded_insert(
+        prop, row, elements.PROPOSAL_COLUMNS, guard=guard,
+        guard_params={"cde_id": row["cde_id"]},
+        readback={"proposal_id": row["proposal_id"]},
+    )
+
+
+def write_cde_review(row: dict) -> bool:
+    """One decision per proposal. Refused if the proposal already has one."""
+    from dq_app.domain import elements
+    table = _t("config", "cde_review")
+    return _guarded_insert(
+        table, row, elements.REVIEW_COLUMNS,
+        guard=f"NOT EXISTS (SELECT 1 FROM {table} WHERE proposal_id = :g_proposal_id)",
+        guard_params={"proposal_id": row["proposal_id"]},
+        readback={"proposal_id": row["proposal_id"], "reviewed_by": row["reviewed_by"]},
     )
 
 
