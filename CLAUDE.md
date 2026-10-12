@@ -329,6 +329,19 @@ until now nothing could tell you it had fallen behind the DDL. Add a column to
 
 **The Register page was deleted on 2026-09-17; the register was not.**
 `results.disposition` is still the append-only audit artefact and still the app's
+**A violation sample is no longer the whole row (2026-10-12).** The runner's sample
+query is still `SELECT *` (it is also the rule logic the Rules page prints), but
+`run_checks.sample_keep` projects its result onto the table's key columns and the
+columns the rule reads before anything is stored; a malformed-email sample keeps the
+key and the address, not the DOB beside it. Until then the DDL comment claimed this
+redaction and nothing did it. `tests/test_sample_columns.py` pins it, including that
+every registered rule keeps its own target column. Verified on `dq_onboard` by a
+one-off run (`910538978025405`): the same 569 samples over the same 17 rules as the
+previous scheduled run, each now 2–4 columns where it was 35–36 (68 for the
+cross-table rule), key always present. The shared `dq-onboard-jobs` copy was updated
+the same day, so both schemas' scheduled checks jobs store the trimmed rows. Samples
+written before then hold whole rows, and the live table keeps its old column comment.
+
 primary write. Every event chain is still readable on the problem it belongs to, under
 `Decisions` on the detail page — what went is the cross-cohort browsing view, for the
 same reason the CDE page went: nobody browses a register.

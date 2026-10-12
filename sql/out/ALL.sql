@@ -279,10 +279,16 @@ ALTER TABLE workspace.dq_triage.dq_results_check_run
 --
 -- Substitute {catalog} before execution.
 --
--- The cap is a boundary, not a performance tweak. The AI layer sees aggregated
--- results and these samples and nothing else (parent architecture doc). Raising the
--- cap widens what a model endpoint sees of production data, so it is a governance
--- change, not a config change.
+-- The cap is a boundary, not a performance tweak. It bounds how much production data
+-- is copied out of its source table. No sample value goes to a model endpoint (since
+-- 2026-10-08: notebook 03 reads row_key only), but raising the cap still widens the
+-- copy, so it is a governance change, not a config change.
+--
+-- A sample row is not the whole source row. jobs/run_checks.sample_keep stores the
+-- table's key columns and the columns the rule reads (its expression, scope, join and
+-- target column) and drops the rest, so a malformed-email sample carries the key and
+-- the address, not the contact's date of birth or ID number (since 2026-10-12; samples
+-- captured before then hold whole rows).
 --
 -- sample_row is JSON rather than a struct on purpose: the shape differs per target
 -- table, and a struct would force a schema migration every time a new table is
@@ -299,7 +305,7 @@ CREATE TABLE IF NOT EXISTS workspace.dq_triage.dq_results_violation_sample (
   rule_id      STRING    NOT NULL COMMENT 'denormalised for the workbench lookup',
   target_table STRING    NOT NULL COMMENT 'denormalised; also tells the renderer which key columns to expect',
   row_key      STRING             COMMENT 'primary key of the offending row, so a steward can find it in the source',
-  sample_row   STRING    NOT NULL COMMENT 'JSON object of the offending row, redacted per the columns the rule needs',
+  sample_row   STRING    NOT NULL COMMENT 'JSON object: the offending row''s key columns and the columns the rule reads, nothing else',
   captured_ts  TIMESTAMP NOT NULL COMMENT 'when the sample was taken'
 )
 USING DELTA

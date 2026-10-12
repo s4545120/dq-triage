@@ -290,6 +290,24 @@ def sample_sql(r: Rule, table: str, resolve: dict[str, str], cap: int = SAMPLE_C
     return f"SELECT * FROM {src}\nWHERE  {pred}{scope}\nLIMIT  {cap}"
 
 
+def sample_keep(r: Rule, columns: list[str], keys: list[str] | None) -> list[int]:
+    """Which columns of a sample row are stored: the row's key and the columns the rule
+    reads, never the rest of the row. Positions, not names, because a join's `SELECT *`
+    can return the same name twice.
+
+    `sample_sql` stays `SELECT *` -- it is also the rule logic the app prints -- and the
+    projection is applied to its result instead. "Reads" is a whole-word, case-insensitive
+    match of the column name in the expression, scope, join and target column. That
+    over-includes rather than under-includes: a column whose name happens to be an alias
+    is kept, a column the rule tests is never dropped."""
+    text = " ".join(str(v) for v in (r.rule_expr, r.scope_filter, r.join_sql, r.target_column)
+                    if not _blank(v))
+    key_set = {k.lower() for k in (keys or ["SUBS_KEY", "CTCT_KEY"])}
+    return [i for i, c in enumerate(columns)
+            if c.lower() in key_set
+            or re.search(rf"(?<!\w){re.escape(c)}(?!\w)", text, re.IGNORECASE)]
+
+
 # ---------------------------------------------------------------------------
 # The verdict — the one place status is decided
 # ---------------------------------------------------------------------------
@@ -519,7 +537,13 @@ def main(argv: list[str] | None = None) -> int:
             # count succeeded. The verdict stands; the missing sample is said in the
             # message instead of taking every other table's verdicts down with it.
             try:
-                rows = spark.sql(sample_sql(r, tgt, resolve, slices=slices)).limit(SAMPLE_CAP).toPandas()
+                df = spark.sql(sample_sql(r, tgt, resolve, slices=slices))
+                keep = sample_keep(r, df.columns, row_keys.get(r.target_table))
+                # Renamed by position first: a join's duplicate names cannot be selected.
+                names = [f"{c}#{i}" for i, c in enumerate(df.columns)]
+                rows = (df.toDF(*names).select(*[f"`{names[i]}`" for i in keep])
+                          .toDF(*[df.columns[i] for i in keep])
+                          .limit(SAMPLE_CAP).toPandas())
             except Exception as exc:                # noqa: BLE001 -- recorded, not hidden
                 verdicts[-1]["message"] += f" | samples not captured: {_first_line(exc)}"
                 continue
