@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1190 880" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2f5d73"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3b6fd8"/>
+    </marker>
+    <style>
+      .layer { fill: #eef4f6; stroke: #cddde3; stroke-width: 1.5; }
+      .box   { fill: #ffffff; stroke: #c6d5dc; stroke-width: 1.5; }
+      .new   { fill: #ffffff; stroke: #3b6fd8; stroke-width: 1.5; }
+      .badge { fill: #3f7f8f; }
+      .num   { fill: #ffffff; font-size: 22px; font-weight: 700; text-anchor: middle; }
+      .lt    { fill: #1d2b4f; font-size: 21px; font-weight: 700; }
+      .ls    { fill: #4f6475; font-size: 14px; }
+      .bt    { fill: #1d2b4f; font-size: 16px; font-weight: 600; }
+      .bs    { fill: #4f6475; font-size: 13px; }
+      .bc    { text-anchor: middle; }
+      .lbl   { fill: #2f5d73; font-size: 13px; }
+      .lblb  { fill: #3b6fd8; font-size: 13px; font-weight: 600; }
+      .arr   { stroke: #2f5d73; stroke-width: 1.8; fill: none; marker-end: url(#a); }
+      .loop  { stroke: #3b6fd8; stroke-width: 1.8; fill: none; stroke-dasharray: 6 4; marker-end: url(#b); }
+    </style>
+  </defs>
+
+  <rect width="1190" height="880" fill="#f7f9f8"/>
+
+  <!-- Title -->
+  <text x="595" y="52" text-anchor="middle" fill="#1d2b4f" font-size="34" font-weight="800">Data Quality Triage POC</text>
+  <text x="595" y="88" text-anchor="middle" fill="#3f6577" font-size="20">Deterministic checks with notebook-based AI triage</text>
+
+  <!-- Layer 4 -->
+  <rect class="layer" x="25" y="115" width="1140" height="90" rx="10"/>
+  <circle class="badge" cx="45" cy="138" r="22"/><text class="num" x="45" y="146">4</text>
+  <text class="lt" x="90" y="155">Layer 4 — Cross-cutting Controls</text>
+  <text class="ls" x="90" y="182">Applies across all layers</text>
+  <rect class="box" x="475" y="132" width="210" height="58" rx="8"/><text class="bt bc" x="580" y="167">Audit &amp; Logging</text>
+  <rect class="box" x="705" y="132" width="210" height="58" rx="8"/><text class="bt bc" x="810" y="167">Security &amp; Access Control</text>
+  <rect class="box" x="935" y="132" width="210" height="58" rx="8"/><text class="bt bc" x="1040" y="167">Data Minimization</text>
+
+  <!-- Layer 3 -->
+  <rect class="layer" x="25" y="225" width="1140" height="160" rx="10"/>
+  <circle class="badge" cx="45" cy="250" r="22"/><text class="num" x="45" y="258">3</text>
+  <text class="lt" x="90" y="267">Layer 3 — AI Layer</text>
+  <rect class="box" x="320" y="250" width="300" height="110" rx="8"/>
+  <text class="bt" x="340" y="282">Triage Notebook</text>
+  <text class="bs" x="340" y="306">Retrieve failure details, rule</text>
+  <text class="bs" x="340" y="324">context, history and prior</text>
+  <text class="bs" x="340" y="342">decisions</text>
+  <rect class="box" x="870" y="250" width="275" height="110" rx="8"/>
+  <text class="bt" x="890" y="290">Single LLM Model</text>
+  <text class="bs" x="890" y="314">Approved model serving</text>
+  <text class="bs" x="890" y="332">endpoint</text>
+  <path class="arr" d="M620 288 H866"/><text class="lbl" x="743" y="279" text-anchor="middle">Summary + context</text>
+  <path class="arr" d="M866 326 H624"/><text class="lbl" x="743" y="346" text-anchor="middle">Hypotheses + recommendations</text>
+
+  <!-- Layer 2 -->
+  <rect class="layer" x="25" y="405" width="1140" height="160" rx="10"/>
+  <circle class="badge" cx="45" cy="430" r="22"/><text class="num" x="45" y="438">2</text>
+  <text class="lt" x="90" y="447">Layer 2 — Experience</text>
+  <rect class="box" x="320" y="440" width="380" height="95" rx="8"/>
+  <text class="bt" x="340" y="475">Databricks App</text>
+  <text class="bs" x="340" y="499">Onboard tables • View failures</text>
+  <text class="bs" x="340" y="517">Request analysis • Decide on recommendations</text>
+  <rect class="new" x="845" y="440" width="300" height="95" rx="8"/>
+  <text class="bt" x="865" y="475">Decision Register</text>
+  <text class="bs" x="865" y="499">Append-only: accept / reject / defer,</text>
+  <text class="bs" x="865" y="517">who, and why</text>
+
+  <!-- App <-> Notebook -->
+  <path class="arr" d="M420 440 V364"/><text class="lbl" x="412" y="405" text-anchor="end">Manual Analyze request</text>
+  <path class="arr" d="M520 364 V436"/>
+  <!-- Triage write-back loop -->
+  <path class="loop" d="M700 487 H841"/><text class="lblb" x="772" y="478" text-anchor="middle">Decision + reason</text>
+  <path class="loop" d="M995 440 V395 H585 V364"/><text class="lblb" x="790" y="425" text-anchor="middle">Prior decisions → next brief</text>
+
+  <!-- Layer 1 -->
+  <rect class="layer" x="25" y="600" width="1140" height="170" rx="10"/>
+  <circle class="badge" cx="45" cy="625" r="22"/><text class="num" x="45" y="633">1</text>
+  <text class="lt" x="90" y="642">Layer 1 — DQ Foundation</text>
+  <text class="ls" x="1145" y="642" text-anchor="end">At-rest deterministic checks</text>
+
+  <rect class="new" x="40" y="665" width="171" height="88" rx="8"/>
+  <text class="bt bc" x="125" y="693">Onboarding Job</text>
+  <text class="bs bc" x="125" y="716">Bind columns, generate</text>
+  <text class="bs bc" x="125" y="734">shadow checks</text>
+  <rect class="box" x="247" y="665" width="171" height="88" rx="8"/><text class="bt bc" x="332" y="714">Rule Repository</text>
+  <rect class="box" x="430" y="665" width="171" height="88" rx="8"/><text class="bt bc" x="515" y="714">Check Runner</text>
+  <rect class="box" x="613" y="665" width="171" height="88" rx="8"/><text class="bt bc" x="698" y="705">Reusable</text><text class="bt bc" x="698" y="725">Check Functions</text>
+  <rect class="box" x="796" y="665" width="171" height="88" rx="8"/><text class="bt bc" x="881" y="714">DQ Results Store</text>
+  <rect class="box" x="979" y="665" width="171" height="88" rx="8"/><text class="bt bc" x="1064" y="714">Failure Detail Store</text>
+  <path class="arr" d="M211 709 H243"/>
+
+  <!-- App -> Layer 1 -->
+  <path class="arr" d="M650 535 V582 H881 V661"/><text class="lbl" x="765" y="575" text-anchor="middle">Read DQ evidence</text>
+  <!-- Onboarding -->
+  <path class="loop" d="M385 535 V582 H78 V661"/><text class="lblb" x="372" y="575" text-anchor="end">Select table • approve bindings • promote</text>
+
+  <!-- Footer -->
+  <rect x="25" y="790" width="1140" height="62" rx="10" fill="#e6edf0"/>
+  <text x="595" y="827" text-anchor="middle" fill="#1d2b4f" font-size="17">DQ pass/fail remains deterministic. A person chooses what is checked; AI proposes; a person decides — and that decision informs the next brief.</text>
+</svg>

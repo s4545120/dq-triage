@@ -213,7 +213,7 @@ _element_scores = tolerance.element_scores
 # that ran on no registered element is still not something to hide. Since 2026-09-28
 # every rule names its element, so on the fixture the entry has nothing to list and
 # does not appear.
-UNATTACHED = "Not on a registered element"
+UNATTACHED = "Not on a registered attribute"
 
 
 # The drawer and the Sample rows tab both draw failed rows; so does the Tables
@@ -307,12 +307,12 @@ def _check_panel(rule_id: str, tagged_now: pd.DataFrame, registry: pd.DataFrame,
         st.caption(
             f"Watching **{w['cde_name']}** · {w['criticality']} criticality · "
             f"{'PII' if w['pii'] else 'not PII'}",
-            help="Registered critical data element. This check is attached to it, "
+            help="Registered key attribute. This check is attached to it, "
                  "which is why it moves the quality figure on this page.",
         )
     else:
         st.caption(
-            "Not attached to any registered critical data element, so this check does "
+            "Not attached to any registered key attribute, so this check does "
             "not move the quality figure above.",
             help="It still runs, still raises cohorts, and is still worked from "
                  "Triage. What it does not do is change a number whose denominator "
@@ -366,8 +366,7 @@ registry = adapter.get_rule_registry_current()
 # reads every run through today's register, so they leave the score, the trend and
 # the element list together. Without this they would surface under "Not on a
 # registered element", which is for a check that names none -- not one withdrawn.
-_all_versions = adapter.get_rule_registry().sort_values("rule_version")
-_retired = set(_all_versions.groupby("rule_id").tail(1).query("status == 'retired'").rule_id)
+_retired = metrics.retired_rule_ids(adapter.get_rule_registry())
 runs = runs[~runs["rule_id"].isin(_retired)]
 cde_cov = adapter.get_cde_coverage()
 
@@ -379,7 +378,7 @@ def _page_head(sub: str = "") -> str:
 
 if runs.empty:
     st.markdown(_page_head(), unsafe_allow_html=True)
-    st.caption("No check runs available.")
+    components.no_runs_yet()
     st.stop()
 
 # --- Title, and the two controls ----------------------------------------------
@@ -416,15 +415,14 @@ with st.container(key="dq_pillbar"):
         )
     head.markdown(
         _page_head(("All domains" if choice == "All" else choice)
-                   + " · targets are the tolerances the CDE register declares"),
+                   + " · targets are the tolerances the key attribute register declares"),
         unsafe_allow_html=True)
 
 cde_rules = coverage.attached_rule_ids(cde_cov)
 if not cde_rules:
-    st.caption(
-        "No critical data elements are registered, so there is nothing to score. "
-        "This page measures the rule set against the register, not against itself."
-    )
+    # Attributes registered with every check still in shadow is the usual reason, not
+    # an empty register: say which.
+    components.no_runs_yet()
     st.stop()
 
 # `in_domain` is the whole run the reader asked for; `scoped` is the part the score is
@@ -432,7 +430,7 @@ if not cde_rules:
 # set; a registry that predates that can still tell them apart.
 scoped = in_domain[in_domain["rule_id"].isin(cde_rules)]
 if scoped.empty:
-    st.caption("No checks on registered elements in the selected domains.")
+    st.caption("No checks on registered attributes in the selected domains.")
     st.stop()
 
 run_index = _run_index(scoped)
@@ -507,7 +505,7 @@ hero, cov_col = st.columns([1.9, 1])
 
 with hero:
     if overall_target is None:
-        against = "No target — the register declares no tolerance on these elements."
+        against = "No target — the register declares no tolerance on these attributes."
     elif targets.meets(score, overall_target):
         against = f"Target {_target_text(overall_target)} · met"
     else:
@@ -520,9 +518,9 @@ with hero:
             "Rows that passed their checks, over rows evaluated, on the run shown. "
             "Weighted by rows, so a check over 2,000 rows counts for more than a "
             "check over 40. Shadow checks are in neither half. The target is each "
-            "element's own — 100 minus the tolerance the CDE register declares on "
+            "attribute's own — 100 minus the tolerance the key attribute register declares on "
             "it — weighted by the same rows, so it is the figure this would read if "
-            "every element sat exactly on its tolerance. The line is the score per "
+            "every attribute sat exactly on its tolerance. The line is the score per "
             f"run over {TREND_DAYS} days.", side="right")
         + '<span class="dq-lg"><i></i>Pass rate<i class="dash"></i>Target</span></div>'
         f'<div class="val"><span>{theme.pct_text(score, 1)}'
@@ -552,6 +550,9 @@ _gapc = _elements["coverage_gap"].value_counts().to_dict()
 n_elements = coverage.coverage_summary(cde_cov)["elements"]
 
 current = adapter.get_cohort_current()
+# Problems raised only on checks since retired are history, as on Triage.
+current = current[~current["cohort_id"].isin(
+    metrics.history_cohort_ids(adapter.get_cohorts(), _retired))]
 open_now = current[current["lifecycle_state"].isin(lifecycle.OPEN_STATES)]
 waiting_on_a_person = open_now[
     open_now["lifecycle_state"].isin(["reopened", "awaiting_review", "awaiting_approval"])
@@ -575,15 +576,15 @@ with cov_col, st.container(key="dq_covcard"):
         '<div class="dq-card dq-cov">'
         '<div class="ttl">Monitoring coverage'
         + theme.hint(
-            theme.CDE_ONE_LINER + " Counted by element and by its worst finding: an "
-            "element bound to three columns, none of them validated, is one gap. "
+            theme.CDE_ONE_LINER + " Counted by attribute and by its worst finding: an "
+            "attribute bound to three columns, none of them validated, is one gap. "
             "Covered: a rule examines the values themselves. Not validated: something "
             "watches it, but only that a value is present or agrees with another. "
             f"Out of scope: nothing checks it ({_gapc.get('no_rule', 0)}), or a rule "
             f"contradicts the register's scope ({_gapc.get('scope_mismatch', 0)}).")
         + "</div>"
         f'<div class="val">{COVERAGE_SHARES[0][1]}'
-        f'<span class="of">of {n_elements} CDEs covered</span></div>'
+        f'<span class="of">of {n_elements} key attributes covered</span></div>'
         '<div class="dq-cov3">'
         + "".join(f'<span style="flex:{n} 1 0;background:{colour}"></span>'
                   for _, n, colour in COVERAGE_SHARES if n)
@@ -674,7 +675,7 @@ def _elements_and_pane() -> None:
             line = (f"{_pts(targets.shortfall(el_score, target))} below target · "
                     f"{_target_text(target)}")
         el_rows.append({
-            "key": cid, "Element": r["cde_name"], "Criticality": r["criticality"],
+            "key": cid, "Attribute": r["cde_name"], "Criticality": r["criticality"],
             "Kind": theme.data_class_label(r["data_class"]), "Coverage": coverage_word,
             "Score": el_score, "Target": target, "Assessed": is_assessed, "Met": met,
             "Line": line, "Change": _change_words(el_score, el_before.get(cid)),
@@ -694,7 +695,7 @@ def _elements_and_pane() -> None:
     extra_rows = []
     if unattached_ids:
         extra_rows.append({
-            "key": NONE_SCOPE, "Element": UNATTACHED, "Criticality": None, "Kind": "",
+            "key": NONE_SCOPE, "Attribute": UNATTACHED, "Criticality": None, "Kind": "",
             "Coverage": "", "Score": None, "Target": None, "Assessed": False, "Met": False,
             "Line": f"{len(unattached_ids & failing_ids)} of {len(unattached_ids)} failing "
                     "· not scored",
@@ -717,16 +718,16 @@ def _elements_and_pane() -> None:
         figure_colour = BELOW if row["Colour"] == BELOW else (
             theme.NEUTRAL["text"] if row["Assessed"] else theme.NEUTRAL["text_2"])
         return _row_markup(
-            row["Element"], "—" if row["Score"] is None else _pct(row["Score"]),
+            row["Attribute"], "—" if row["Score"] is None else _pct(row["Score"]),
             figure_colour, theme.target_bar(row["Score"], row["Target"], row["Colour"]),
             row["Line"], row["Change"], dot)
 
 
     def _el_tip(row) -> list:
         if not row["Criticality"]:
-            return [row["Element"], row["Line"]]
+            return [row["Attribute"], row["Line"]]
         cols = columns_of.get(row["key"], [])
-        return [row["Element"],
+        return [row["Attribute"],
                 f"{str(row['Criticality']).capitalize()} criticality · {row['Kind']} · "
                 f"{row['Coverage']}",
                 (" · ".join(cols), "mono") if cols else None]
@@ -739,11 +740,11 @@ def _elements_and_pane() -> None:
 
     with left, st.container(key="dq_elcard"):
         st.markdown(
-            '<div class="dq-elcard-hd"><div class="t">Critical data elements'
+            '<div class="dq-elcard-hd"><div class="t">Key attributes'
             + theme.hint(
                 "A score is read against its target only where something validates the "
-                "element's values and no rule on it contradicts the register's scope. "
-                "An element nothing validates can score 100% on a presence check, and a "
+                "attribute's values and no rule on it contradicts the register's scope. "
+                "An attribute nothing validates can score 100% on a presence check, and a "
                 "scope mismatch scores low because of the rule, not the data — both "
                 "keep their figure, in grey, and are counted as unassessed.", side="right")
             + "</div>"
@@ -757,7 +758,7 @@ def _elements_and_pane() -> None:
         st.session_state.setdefault("_elist_show", "priority")
         n_priority = min(PRIORITY, len(el_rows))
         show = st.segmented_control(
-            "Elements shown", ["priority", "all"], key="_elist_show",
+            "Attributes shown", ["priority", "all"], key="_elist_show",
             label_visibility="collapsed",
             format_func=lambda v: (f"Priority {n_priority}" if v == "priority"
                                    else f"All {len(el_rows)}"))
@@ -769,7 +770,7 @@ def _elements_and_pane() -> None:
                           key="dqrows_elist"):
             components.clickable_rows(
                 listed, ROW_GRID, _el_cells, "el", "key",
-                lambda row: f"Show {row['Element']}", picked=scope, tip=_el_tip,
+                lambda row: f"Show {row['Attribute']}", picked=scope, tip=_el_tip,
                 # A check picked under the old element is not in the new one's breakdown,
                 # and a drawer left open over a list that no longer shows its check reads
                 # as a bug.
@@ -847,7 +848,7 @@ def _elements_and_pane() -> None:
                 "cohort_id": cohort_id,
                 "Problem": components.problem_title(cohort, elements, registry),
                 "State": None if state is None else state["lifecycle_state"],
-                "Line": f"{len(held)} of this element's failing "
+                "Line": f"{len(held)} of this attribute's failing "
                         f"{'check' if len(held) == 1 else 'checks'}"
                         + (f" · waiting on {waiting}" if waiting != "\u2014" else ""),
                 "Raised": cohort["raised_ts"],
@@ -914,8 +915,8 @@ def _elements_and_pane() -> None:
 
         # Above the tabs, on all four: which element, and its figure against its target.
         st.markdown(
-            '<div class="dq-elhd"><div class="k">Selected element</div>'
-            f'<div class="n">{html.escape(sel["Element"])}</div>'
+            '<div class="dq-elhd"><div class="k">Selected attribute</div>'
+            f'<div class="n">{html.escape(sel["Attribute"])}</div>'
             f'<div class="b">{badges}</div>'
             f'<div class="w">{html.escape(where)}</div>'
             + ('<div class="sr">'
@@ -969,7 +970,7 @@ def _elements_and_pane() -> None:
                         tip=_check_tip, on_pick=components.pick_into("_check_pick"))
             else:
                 with st.container(height=TAB_BODY, border=False, key="dq_eltab_nochecks"):
-                    st.caption("No active check ran on this element on the run shown.")
+                    st.caption("No active check ran on this attribute on the run shown.")
 
         # The rows behind the counts, one check at a time: each check's sample has its
         # own columns, and stacking nine tables is what the detail page stopped doing.
@@ -977,7 +978,7 @@ def _elements_and_pane() -> None:
         # tab does not widen the one PII surface, it gives it a second door.
         with tab_rows, st.container(height=TAB_BODY, border=False, key="dq_eltab_rows"):
             if not with_rows:
-                st.caption("No row failed a check on this element on the run shown.")
+                st.caption("No row failed a check on this attribute on the run shown.")
             else:
                 by_id = {c["Rule id"]: c for c in with_rows}
                 shown_check = st.selectbox(
@@ -1001,9 +1002,9 @@ def _elements_and_pane() -> None:
             else:
                 with st.container(height=TAB_BODY, border=False, key="dq_eltab_notriage"):
                     st.caption(
-                        "No problem has been raised for this element's failing checks yet."
+                        "No problem has been raised for this attribute's failing checks yet."
                         if scope_rules & failing_ids else
-                        "Nothing on this element is failing, so there is no problem to open.")
+                        "Nothing on this attribute is failing, so there is no problem to open.")
 
 
     # Held in session rather than read straight off the click, so the panel survives a

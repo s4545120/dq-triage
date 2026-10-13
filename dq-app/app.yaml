@@ -29,6 +29,13 @@ env:
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: sql-warehouse
 
+  # TEMPORARY (2026-10-09): waives the second-approver rule on binding suggestions
+  # and slice changes, because this workspace has one person in it. Every waived
+  # approval's reason starts `[second approver waived]`, and the apply job accepts a
+  # self-approval only with that mark. Remove once a second steward exists.
+  - name: DQ_ONBOARD_ALLOW_SELF_APPROVAL
+    value: "1"
+
   # --- Outbound notification. OFF unless DQ_NOTIFY is set. -------------------
   #
   # Triggered by one event only: `reviewed` with `decision = 'accepted'`, authored

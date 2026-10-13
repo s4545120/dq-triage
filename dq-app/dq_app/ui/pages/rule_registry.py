@@ -52,6 +52,10 @@ CDE_PAGE = 7
 CDE_BODY = 456
 RULE_BODY = 576
 TAB_BODY = 420
+# The rule the 33 / 34 verification figure is about, and the mark a universe rule's id
+# carries (key_attributes/universe.py).
+VERIFIED_RULE = "XREF_NAME_AGREEMENT"
+UNIVERSE_MARK = "_UNIV_"
 ROW_GRID = "minmax(0,1fr)"
 
 BELOW, MET, UNASSESSED = (theme.TONE["critical"]["fg"], theme.ACCENT,
@@ -172,7 +176,7 @@ def _rule_cards() -> None:
 
     def _el_row(cid, er) -> dict:
         mine = by_el.get(cid, [])
-        return {"key": cid, "Element": er["cde_name"], "Domain": er["business_domain"],
+        return {"key": cid, "Attribute": er["cde_name"], "Domain": er["business_domain"],
                 "Criticality": er["criticality"], "N": len(mine),
                 "Failing": sum(x["Failing"] for x in mine), "Gap": worst_gap.get(cid),
                 "Hay": " ".join([str(er["cde_name"]), cid, *columns_of.get(cid, []),
@@ -180,7 +184,7 @@ def _rule_cards() -> None:
 
 
     all_el = [_el_row(cid, er) for cid, er in el_by_id.iterrows()]
-    all_el.sort(key=lambda e: (-e["Failing"], _crit_rank.get(e["Criticality"], 9), e["Element"]))
+    all_el.sort(key=lambda e: (-e["Failing"], _crit_rank.get(e["Criticality"], 9), e["Attribute"]))
     if scope not in {e["key"] for e in all_el}:
         scope = all_el[0]["key"] if all_el else None
 
@@ -206,7 +210,7 @@ def _rule_cards() -> None:
 
     crumb = ['<span class="dq-crumb"><b>Rules</b>']
     if sel_el:
-        crumb.append(f'&nbsp;&nbsp;/&nbsp;&nbsp;{html.escape(sel_el["Element"])}')
+        crumb.append(f'&nbsp;&nbsp;/&nbsp;&nbsp;{html.escape(sel_el["Attribute"])}')
     if sel:
         crumb.append(f'&nbsp;&nbsp;/&nbsp;&nbsp;{html.escape(sel["Name"])}')
     st.markdown("".join(crumb) + "</span>", unsafe_allow_html=True)
@@ -215,13 +219,38 @@ def _rule_cards() -> None:
     # detail card's heading, and printing it twice side by side was the page's loudest
     # line saying nothing new. The four figures are the registry at a glance, in the
     # Tables and Triage pages' strip.
+    # The fourth figure. "Expressions verified, 33 / 34" was a claim about the mock
+    # register's rules, measured by sql/out/checkrun.sql; it stays only while those
+    # rules are current. Otherwise: how many attributes rest on universe rules alone.
+    if VERIFIED_RULE in set(current["rule_id"]):
+        _fourth_figure = (
+            '<div class="f"><div class="l">Expressions verified'
+            + theme.hint(
+                "Each rule_expr was run against the mock tables in workspace.dq_triage and "
+                "its count diffed against the fixture's Python evaluator. 33 agree. "
+                "XREF_NAME_AGREEMENT does not: its <> comparison is not null-safe, so it "
+                "reports 0 where the evaluator reports 2. That figure is the result of "
+                "sql/out/checkrun.sql, not something this page computes.", side="left")
+            + '</div><div class="v">33<span class="of"> / 34</span></div>'
+            '<div class="c">against the evaluator · one not null-safe</div></div>')
+    else:
+        _is_univ = current["rule_id"].str.contains(UNIVERSE_MARK, regex=False)
+        _only_univ = set(current.loc[_is_univ, "cde_id"]) - set(current.loc[~_is_univ, "cde_id"])
+        _fourth_figure = (
+            '<div class="f"><div class="l">On universe rules'
+            + theme.hint(
+                "A key attribute with no migration rule of its own gets the generic checks "
+                "(present, no stray whitespace, no control characters, not a placeholder) "
+                "so it is never unmonitored. Their ids carry _UNIV_.", side="left")
+            + f'</div><div class="v">{len(_only_univ)}</div>'
+            '<div class="c">attributes with no rule of their own</div></div>')
     n_failing = sum(x["Failing"] and not x["Disputed"] for x in rows)
     n_disputed = sum(x["Failing"] and x["Disputed"] for x in rows)
     _red = f' style="color:{BELOW}"' if n_failing else ""
     st.markdown(
         '<div class="dq-page-hd"><div class="t">Rules</div>'
-        '<div class="s">Every rule names the critical data element it watches. Pick an '
-        "element, then a rule.</div></div>"
+        '<div class="s">Every rule names the key attribute it watches. Pick an '
+        "attribute, then a rule.</div></div>"
         '<div class="dq-tmkpi">'
         f'<div class="f"><div class="l">Active rules</div><div class="v">{n_active}</div>'
         '<div class="c">raise breaches to Triage</div></div>'
@@ -232,16 +261,7 @@ def _rule_cards() -> None:
         + (f" · {n_disputed} more with scope disputed" if n_disputed else "") + "</div></div>"
         f'<div class="f"><div class="l">In shadow</div><div class="v">{n_shadow}</div>'
         '<div class="c">measured, raising nothing</div></div>'
-        '<div class="f"><div class="l">Expressions verified'
-        + theme.hint(
-            "Each rule_expr was run against the mock tables in workspace.dq_triage and "
-            "its count diffed against the fixture's Python evaluator. 33 agree. "
-            "XREF_NAME_AGREEMENT does not: its <> comparison is not null-safe, so it "
-            "reports 0 where the evaluator reports 2. That figure is the result of "
-            "sql/out/checkrun.sql, not something this page computes.", side="left")
-        + '</div><div class="v">33<span class="of"> / 34</span></div>'
-        '<div class="c">against the evaluator · one not null-safe</div></div>'
-        "</div>",
+        + _fourth_figure + "</div>",
         unsafe_allow_html=True)
 
 
@@ -253,10 +273,10 @@ def _rule_cards() -> None:
 
     # Left: the elements.
     with c_el, st.container(key="dq_rcde"):
-        st.markdown(f'<div class="dq-rcard-hd"><span class="t">CDEs</span>'
+        st.markdown(f'<div class="dq-rcard-hd"><span class="t">Key attributes</span>'
                     f'<span class="dq-count">{len(all_el)}</span></div>',
                     unsafe_allow_html=True)
-        term = st.text_input("Search CDEs", placeholder="Search CDEs, columns or rules",
+        term = st.text_input("Search key attributes", placeholder="Search key attributes, columns or rules",
                              label_visibility="collapsed", icon=":material/search:",
                              key="_rule_cde_search").strip().lower()
         domains = sorted({str(e["Domain"]) for e in all_el if opt(e["Domain"])})
@@ -286,12 +306,12 @@ def _rule_cards() -> None:
             fail = (f' · <span class="dq-below">{e["Failing"]} failing</span>'
                     if e["Failing"] else "")
             return (f'<span class="dq-rr dq-rr2"><span class="a"><span class="nm">'
-                    f'{html.escape(e["Element"])}</span>'
+                    f'{html.escape(e["Attribute"])}</span>'
                     f'<span class="q">{status}{n}{fail}</span></span></span>')
 
         def _el_tip(e) -> list:
             cols = columns_of.get(e["key"], [])
-            return [e["Element"],
+            return [e["Attribute"],
                     f"{str(e['Criticality']).capitalize()} criticality · "
                     + theme.COVERAGE_GAP_MEANING.get(e["Gap"], ""),
                     (" · ".join(cols), "mono") if cols else None]
@@ -300,10 +320,10 @@ def _rule_cards() -> None:
             if shown:
                 components.clickable_rows(
                     shown, ROW_GRID, _el_cells, "rc", "key",
-                    lambda e: f"Show rules on {e['Element']}", picked=scope, tip=_el_tip,
+                    lambda e: f"Show rules on {e['Attribute']}", picked=scope, tip=_el_tip,
                     on_pick=components.pick_into("_rule_el", clear=("_rule_pick",)))
             else:
-                st.markdown('<div class="dq-tmempty">No element matches.</div>',
+                st.markdown('<div class="dq-tmempty">No attribute matches.</div>',
                             unsafe_allow_html=True)
 
         with st.container(key="dq_rpager", horizontal=True, vertical_alignment="center"):
@@ -354,7 +374,7 @@ def _rule_cards() -> None:
             else:
                 st.markdown('<div class="dq-tmempty">'
                             + ("No rule matches." if el_rules else
-                               "No rule watches this element. The register knows the column "
+                               "No rule watches this attribute. The register knows the column "
                                "matters; the rule set does not yet.")
                             + "</div>", unsafe_allow_html=True)
 
@@ -435,7 +455,7 @@ def _rule_cards() -> None:
     with c_detail, st.container(key="dq_rdetail"):
         if sel is None:
             st.markdown('<div class="dq-rdet-hd"><div class="k">Rule details</div>'
-                        f'<div class="n">{html.escape(sel_el["Element"]) if sel_el else "—"}</div>'
+                        f'<div class="n">{html.escape(sel_el["Attribute"]) if sel_el else "—"}</div>'
                         "</div>", unsafe_allow_html=True)
             st.markdown('<div class="dq-tmempty">No rule to show. '
                         + html.escape(theme.COVERAGE_GAP_MEANING.get(sel_el["Gap"], "")
@@ -506,7 +526,7 @@ def _rule_cards() -> None:
                        f"every row of the join, driven by {html.escape(sel['Table'])}"
                        if sel["Column"] == "join" else f"all rows in {html.escape(sel['Table'])}")
                     + f'</span><span>Allowed failure rate: ≤ {_pct(sel["Limit"], 2)}</span></div>'
-                    + (f'<div class="dq-rwarn">The CDE register disputes this scope: the binding '
+                    + (f'<div class="dq-rwarn">The key attribute register disputes this scope: the binding '
                        f"says the column is only populated where "
                        f'<code>{html.escape(str(expected_scope.get(pick)))}</code>, and this rule '
                        "measures every row. The rule is wrong, not the data.</div>"
@@ -542,7 +562,7 @@ def _rule_cards() -> None:
                               type="tertiary", key="_rule_to_rows",
                               icon=":material/arrow_forward:", icon_position="right",
                               on_click=_to_tab, args=(TAB_LABELS[1],))
-                st.button(f"About {sel_el['Element']}", type="tertiary",
+                st.button(f"About {sel_el['Attribute']}", type="tertiary",
                           key="_rule_el_details", icon=":material/open_in_new:",
                           on_click=lambda: st.session_state.update(_rule_cde_pick=scope))
 

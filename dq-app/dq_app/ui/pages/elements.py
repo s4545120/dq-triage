@@ -30,6 +30,7 @@ components.page_chrome()
 ui.inject()
 
 PICK, MODE, DRAFT, REV = "_el_pick", "_el_mode", "_el_draft", "_el_rev"
+RULES = "dq_app/ui/pages/rule_registry.py"
 me = identity.current().email
 waived = adapter.self_approval_waived()
 
@@ -54,12 +55,12 @@ waiting_job = state[state["state"] == "approved"] if len(state) else state
 # --- Header and figures -------------------------------------------------------------------
 head, act = st.columns([4, 1], vertical_alignment="bottom")
 with head:
-    st.title("Critical data elements")
-    st.markdown('<div class="onb-cap">What is checked starts here: an element is registered, '
+    st.title("Key attributes")
+    st.markdown('<div class="onb-cap">What is checked starts here: an attribute is registered, '
                 'then bound to columns, then checked. A second person approves every change '
                 'to the register.</div>', unsafe_allow_html=True)
 with act:
-    st.button("Propose an element", key="el_new", type="primary", icon=":material/add:",
+    st.button("Propose an attribute", key="el_new", type="primary", icon=":material/add:",
               use_container_width=True, on_click=_set_mode("register"))
 
 n_unbound = int((current["status"] == "proposed").sum()) if len(current) else 0
@@ -81,6 +82,15 @@ if waived:
 
 
 # --- Helpers ------------------------------------------------------------------------------
+def _open_in_rules(cde_id: str) -> None:
+    # The Rules page opens on `_rule_el`. Its search, domain and pager are cleared so
+    # the attribute is on the page it lands on, not filtered off it.
+    st.session_state["_rule_el"] = cde_id
+    for k in ("_rule_pick", "_rule_cde_search", "_rule_domain", "_rule_cde_page"):
+        st.session_state.pop(k, None)
+    st.switch_page(RULES)
+
+
 def _crit(c) -> str:
     c = str(opt(c) or "")
     return theme.badge(c.capitalize() or "—", theme.CRITICALITY_TONE.get(c, "neutral"))
@@ -110,7 +120,7 @@ def _template_line(data_class, signature=None, cde_id=None) -> str:
                         'business, so no pattern check is generated from it.</div>')
     if not words:
         return (f'<div class="onb-note">No check template covers <b>{html.escape(str(data_class))}'
-                '</b> and the element declares no value pattern: a column bound to it gets no '
+                '</b> and the attribute declares no value pattern: a column bound to it gets no '
                 'checks generated. Its rules are written by hand.</div>' + unconfirmed)
     return ('<div class="onb-ev"><b>A bound column is checked that it</b>'
             + ui.items([html.escape(w) for w in words], limit=12) + "</div>" + unconfirmed)
@@ -126,8 +136,8 @@ def _status_of(cde_id, status) -> tuple[str, str]:
 split = st.container(key="onb_elsplit")
 left, right = split.columns([1.5, 1])
 with left, st.container(key="onbcard_rows_el"):
-    ui.head(f"Elements · {len(current)}", "Click one to see it, amend it or retire it")
-    q = st.text_input("Search elements", key="_el_q", placeholder="Name, id or domain",
+    ui.head(f"Attributes · {len(current)}", "Click one to see it, amend it or retire it")
+    q = st.text_input("Search attributes", key="_el_q", placeholder="Name, id or domain",
                       label_visibility="collapsed")
     view = current.copy()
     if q.strip() and len(view):
@@ -157,10 +167,10 @@ with left, st.container(key="onbcard_rows_el"):
                 f'<span>{theme.badge(m["St"], m["Tone"])}</span>')
 
     if not rows:
-        st.markdown('<div class="onb-ev" style="padding:.4rem 0 1rem">No element matches.'
+        st.markdown('<div class="onb-ev" style="padding:.4rem 0 1rem">No attribute matches.'
                     '</div>', unsafe_allow_html=True)
     else:
-        components.row_head(["Element", "Criticality", ("Cols", "n"), "Status"], GRID)
+        components.row_head(["Attribute", "Criticality", ("Cols", "n"), "Status"], GRID)
         with st.container(key="dqrows_el"):
             components.clickable_rows(
                 rows, GRID, _cells, "el", "Id", lambda m: f"Open {m['Name']}",
@@ -177,7 +187,7 @@ def _attr_form(prefix: str, base: dict) -> dict:
     out["cde_name"] = st.text_input("Name", value=opt(base.get("cde_name")) or "", key=k("name"))
     out["definition"] = st.text_area(
         "Definition", value=opt(base.get("definition")) or "", key=k("def"), height=80,
-        help="What the element means in business terms -- what a reviewer agrees to.")
+        help="What the attribute means in business terms -- what a reviewer agrees to.")
     a, b = st.columns(2)
     dc = opt(base.get("data_class")) or "other"
     out["data_class"] = a.selectbox("Data class", elements.DATA_CLASSES,
@@ -192,9 +202,9 @@ def _attr_form(prefix: str, base: dict) -> dict:
     out["tolerance_pct"] = a.number_input(
         "Tolerance, % of rows", min_value=0.0, max_value=100.0, step=0.5,
         value=None if tol is None else float(tol), key=k("tol"),
-        help="How many violating rows the business accepts. The element's target is 100 "
+        help="How many violating rows the business accepts. The attribute's target is 100 "
              "minus this, and no check on it may have a looser limit. Empty is 'not "
-             "declared': the element then has no target.")
+             "declared': the attribute then has no target.")
     pii = elements._norm(base.get("pii"))
     out["pii"] = b.toggle("Personal data", value=bool(pii), key=k("pii"),
                           help="Its profile then stores no values.")
@@ -237,13 +247,13 @@ if pick and latest is None:
 with right:
     if mode == "register":
         with st.container(key="onbcard_el_new"):
-            ui.head("Propose an element", "A second person approves it; the onboarding job "
+            ui.head("Propose an attribute", "A second person approves it; the onboarding job "
                                           "then registers it")
             attrs = _attr_form("new", {})
             taken = set(registry["cde_id"]) | (set(state["cde_id"]) if len(state) else set())
-            cid = st.text_input("Element id", key="_el_new_id",
+            cid = st.text_input("Attribute id", key="_el_new_id",
                                 placeholder=elements.suggest_id(attrs["cde_name"], taken),
-                                help="Never reused, retired elements included. Left empty, "
+                                help="Never reused, retired attributes included. Left empty, "
                                      "the suggestion is used.").strip().upper() \
                 or elements.suggest_id(attrs["cde_name"], taken)
             st.markdown(_template_line(attrs["data_class"],
@@ -285,9 +295,13 @@ with right:
                     + f'</div><div class="onb-ev"><b>Checks</b> · {n_act} active, {n_sh} in shadow</div>'
                     + _template_line(el["data_class"], el.get("expected_signature"), pick),
                     unsafe_allow_html=True)
+                if n_act or n_sh:
+                    st.button(f"Open {n_act + n_sh} {'check' if n_act + n_sh == 1 else 'checks'} in Rules",
+                              key="el_open_rules", icon=":material/open_in_new:",
+                              use_container_width=True, on_click=_open_in_rules, args=(pick,))
                 waiting = elements.open_for(state, pick)
                 if len(waiting):
-                    st.markdown('<div class="onb-note">A change to this element is waiting '
+                    st.markdown('<div class="onb-note">A change to this attribute is waiting '
                                 'below. Only one at a time.</div>', unsafe_allow_html=True)
                 else:
                     a, b = st.columns(2)
@@ -302,7 +316,7 @@ with right:
                 diff = elements.changed(el, attrs)
                 if "data_class" in diff and elements.is_bound(el):
                     st.markdown('<div class="onb-note" style="color:#b91c1c">The data class of '
-                                'an element with bound columns cannot change: their checks '
+                                'an attribute with bound columns cannot change: their checks '
                                 'were generated for the old class.</div>',
                                 unsafe_allow_html=True)
                 loose = elements.over_tolerance(rule_current, pick, attrs["tolerance_pct"]) \
@@ -349,7 +363,7 @@ with right:
                     _submit("retire", pick, {}, reason, int(el["cde_version"]))
     else:
         with st.container(key="onbcard_el_how"):
-            ui.head("How an element is registered")
+            ui.head("How an attribute is registered")
             st.markdown(
                 '<div class="onb-hw">'
                 '<i>1</i><span><b>You propose it</b>: what it means, how critical, how much '
@@ -360,7 +374,7 @@ with right:
                 '<i>5</i><span><b>Its owner approves</b> each binding; checks follow</span>'
                 '</div><div class="onb-rule" style="margin-top:.4rem"></div>'
                 '<div class="onb-cap">Amending and retiring take the same two people. '
-                'Retiring takes the element\'s checks with it.</div>',
+                'Retiring takes the attribute\'s checks with it.</div>',
                 unsafe_allow_html=True)
 
 

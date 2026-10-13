@@ -11,3 +11,5 @@ fixtures/out_bad/
 
 # `databricks sync` state. Local to whoever ran the deploy, not repo content.
 .databricks/
+key_attributes/out/
+sql/out/mock_source.sql

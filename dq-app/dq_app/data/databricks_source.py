@@ -545,10 +545,11 @@ def _sizes_on_one_connection(fqns: list[str]) -> dict[str, float | None]:
     return out
 
 
-def table_sizes(fqns: tuple[str, ...], workers: int = 4) -> dict[str, float | None]:
+def table_sizes(fqns: tuple[str, ...], workers: int = 8) -> dict[str, float | None]:
     """Delta size of each table: one DESCRIBE DETAIL apiece, but on a few connections
     reused across the batch rather than a new one per statement -- opening the
-    connection, not the statement, was most of each probe's cost."""
+    connection, not the statement, was most of each probe's cost. Eight connections, not
+    four: a DESCRIBE DETAIL is about 0.8s, so on four a 36-table schema took 9s."""
     fqns = list(fqns)
     if not fqns:
         return {}
@@ -648,6 +649,69 @@ def write_cde_review(row: dict) -> bool:
         guard_params={"proposal_id": row["proposal_id"]},
         readback={"proposal_id": row["proposal_id"], "reviewed_by": row["reviewed_by"]},
     )
+
+
+# --- Consistency checks: two appends (sql/ddl/22). The rule is the job's. --------------------
+
+def consistency_proposals() -> pd.DataFrame:
+    from dq_app.domain.consistency import PROPOSAL_COLUMNS
+    return _q_optional(_t("config", "consistency_proposal"), PROPOSAL_COLUMNS)
+
+
+def consistency_reviews() -> pd.DataFrame:
+    from dq_app.domain.consistency import REVIEW_COLUMNS
+    return _q_optional(_t("config", "consistency_review"), REVIEW_COLUMNS)
+
+
+def table_populations() -> pd.DataFrame:
+    """config.table_population (sql/ddl/21), where it exists."""
+    return _q_optional(_t("config", "table_population"),
+                       ["target_table", "population_version", "record_key", "version_by",
+                        "deleted_column", "deleted_value"])
+
+
+def write_consistency_proposal(row: dict) -> bool:
+    """Refused if the rule id is taken, or the same check (by fingerprint) is already
+    proposed and waiting -- decided against the table as it stands."""
+    from dq_app.domain.consistency import PROPOSAL_COLUMNS
+    prop, rev = _t("config", "consistency_proposal"), _t("config", "consistency_review")
+    reg = _t("config", "rule_registry")
+    guard = (f"NOT EXISTS (SELECT 1 FROM {reg} WHERE rule_id = :g_rule_id) "
+             f"AND NOT EXISTS (SELECT 1 FROM {prop} WHERE rule_id = :g_rule_id) "
+             f"AND NOT EXISTS (SELECT 1 FROM {prop} p LEFT JOIN {rev} r "
+             f"ON r.proposal_id = p.proposal_id WHERE p.fingerprint = :g_fingerprint "
+             f"AND (r.decision IS NULL OR (r.decision = 'approved' AND NOT EXISTS "
+             f"(SELECT 1 FROM {reg} x WHERE x.rule_id = p.rule_id))))")
+    return _guarded_insert(
+        prop, row, PROPOSAL_COLUMNS, guard=guard,
+        guard_params={"rule_id": row["rule_id"], "fingerprint": row["fingerprint"]},
+        readback={"proposal_id": row["proposal_id"]})
+
+
+def write_consistency_review(row: dict) -> bool:
+    """One decision per proposal. Refused if it already has one."""
+    from dq_app.domain.consistency import REVIEW_COLUMNS
+    table = _t("config", "consistency_review")
+    return _guarded_insert(
+        table, row, REVIEW_COLUMNS,
+        guard=f"NOT EXISTS (SELECT 1 FROM {table} WHERE proposal_id = :g_proposal_id)",
+        guard_params={"proposal_id": row["proposal_id"]},
+        readback={"proposal_id": row["proposal_id"], "reviewed_by": row["reviewed_by"]})
+
+
+def run_consistency_test(queries: dict) -> dict:
+    """Run a proposal's read-only test (domain.consistency.test_queries). Every statement
+    is a SELECT built from the spec; a failure is raised for the page to say."""
+    c = _q(queries["count"]).iloc[0]
+    hops = []
+    for h in queries["hops"]:
+        m = _q(h["match"]).iloc[0]
+        f = _q(h["fanout"]).iloc[0]
+        hops.append({"from": h["from"], "to": h["to"], "total": int(m["total"] or 0),
+                     "matched": int(m["matched"] or 0), "fanout": int(f["keys"] or 0)})
+    sample = _q(queries["sample"]) if int(c["failing"] or 0) else pd.DataFrame()
+    return {"compared": int(c["compared"] or 0), "failing": int(c["failing"] or 0),
+            "hops": hops, "sample": sample}
 
 
 def threshold_proposals() -> pd.DataFrame:

@@ -1,0 +1,55 @@
+-- The population — which rows of a table are the records a check is about
+--
+-- Substitute {catalog} before execution. Reads nothing; read by jobs/run_checks.py.
+--
+-- WHAT THIS IS (2026-10-12). Most source tables here are HISTORY tables: one row per
+-- version of a record, stamped with a change sequence and an operation type. A check
+-- that reads such a table raw counts every old version, and a uniqueness check flags
+-- every record that was ever changed (CLAUDE.md, LATEST_RECORD_GAP). A cross-table check
+-- is worse: it matches an old version on one side against an old version on the other.
+--
+-- A row here tells the runner how to find the record: the CURRENT version of each
+-- `record_key`, by `version_by` (newest is highest), dropped when that version is a
+-- deletion. The runner applies it before the table's slice and before any rule, on
+-- every table of a join -- unlike the slice, which only narrows the driving table.
+-- The order is load-bearing: the latest version is chosen FIRST and a deleted one is
+-- dropped AFTER. Filtering deletions first would resurrect a deleted record's previous
+-- version as its current one.
+--
+-- NOT ON monitored_table, ON PURPOSE. Six writers append monitored_table versions and
+-- the app copies its columns forward on every pause and resume; a column there that one
+-- of them forgot would silently put a table back on its raw history. This table has one
+-- writer (a migration or onboard.py, signed by whoever runs it), no app write and no
+-- grant. A table with no row here is read whole, which is every table before this file.
+--
+-- APPEND-ONLY. A changed declaration is a new population_version, the latest is in
+-- force, and the runner stamps it on every verdict as check_run.population_version. A
+-- version with nothing declared puts the table back on all its rows.
+
+CREATE TABLE IF NOT EXISTS {catalog}.config.table_population (
+  target_table       STRING        NOT NULL COMMENT 'catalog.schema.table as config.rule_registry names it',
+  population_version INT           NOT NULL COMMENT 'incremented on every change; the latest is in force',
+  record_key         ARRAY<STRING>          COMMENT 'the column(s) identifying one record across its versions. Required with version_by',
+  version_by         ARRAY<STRING>          COMMENT 'the column(s) ordering a record''s versions, newest highest, compared left to right. Declare enough to break ties: tied versions are picked arbitrarily. A STRING column sorts as text. NULL: one row per record already',
+  deleted_column     STRING                 COMMENT 'a record whose CURRENT version holds deleted_value here is not in the population. NULL: no deletions recorded',
+  deleted_value      STRING                 COMMENT 'the value in deleted_column marking a deletion, e.g. D for OP_TYPE',
+  effective_from     TIMESTAMP     NOT NULL COMMENT 'when this version took effect',
+  declared_by        STRING        NOT NULL COMMENT 'who wrote this version',
+  note               STRING        NOT NULL COMMENT 'why, and what the declaration was checked against'
+)
+USING DELTA
+CLUSTER BY (target_table)
+COMMENT 'How to find the current record in a history table. Read by the check runner before the slice and before any rule. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE {catalog}.config.table_population
+  ADD CONSTRAINT table_population_version_positive
+  CHECK (population_version >= 1);
+
+ALTER TABLE {catalog}.config.table_population
+  ADD CONSTRAINT table_population_versions_need_a_key
+  CHECK (version_by IS NULL OR (size(version_by) >= 1 AND size(record_key) >= 1));
+
+ALTER TABLE {catalog}.config.table_population
+  ADD CONSTRAINT table_population_deleted_pair
+  CHECK ((deleted_column IS NULL) = (deleted_value IS NULL));

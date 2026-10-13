@@ -61,9 +61,11 @@ PAGES = {
                       icon=":material/inbox:"),
     "rules": st.Page("dq_app/ui/pages/rule_registry.py", title="Rules",
                      icon=":material/rule:"),
+    "consistency": st.Page("dq_app/ui/pages/consistency.py", title="Consistency",
+                           icon=":material/compare_arrows:"),
     "thresholds": st.Page("dq_app/ui/pages/thresholds.py", title="Thresholds",
                           icon=":material/tune:"),
-    "elements": st.Page("dq_app/ui/pages/elements.py", title="Elements",
+    "elements": st.Page("dq_app/ui/pages/elements.py", title="Key attributes",
                         icon=":material/label_important:"),
     "onboarding": st.Page("dq_app/ui/pages/onboarding.py", title="Onboarding",
                           icon=":material/add_task:"),
@@ -78,6 +80,10 @@ PAGES = {
                               icon=":material/add_task:"),
     "onboarding_table": st.Page("dq_app/ui/pages/onboarding_table.py", title="Onboarding",
                                 icon=":material/add_task:"),
+    "consistency_new": st.Page("dq_app/ui/pages/consistency_new.py", title="New check",
+                               icon=":material/compare_arrows:"),
+    "consistency_review": st.Page("dq_app/ui/pages/consistency_review.py",
+                                  title="Review check", icon=":material/compare_arrows:"),
 }
 
 # Group → the pages linked under it. The only list that decides what the sidebar shows.
@@ -94,14 +100,17 @@ SIDEBAR = {
     # `Thresholds` is under Monitor with `Rules` because a limit is a property of
     # a rule and of what is being watched -- detection, not triage. The decisions
     # made there are about rules, never about problems.
-    "Monitor": ["scorecard", "tables", "rules", "thresholds"],
+    # `Consistency` (2026-10-13) next to `Rules`: its checks are rules, gathered by
+    # what they compare across tables.
+    "Monitor": ["scorecard", "tables", "rules", "consistency", "thresholds"],
     "Work": ["triage"],
 }
 
 
 # A drill-down lights the link of the page it was opened from.
 PARENT = {"table_detail": "tables", "triage_detail": "triage",
-          "onboarding_add": "onboarding", "onboarding_table": "onboarding"}
+          "onboarding_add": "onboarding", "onboarding_table": "onboarding",
+          "consistency_new": "consistency", "consistency_review": "consistency"}
 
 
 def _sidebar_nav(current) -> None:

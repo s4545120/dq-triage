@@ -32,7 +32,9 @@ _PENDING_ONB = {"monitored": "_pending_monitored_tables",
                 "proposal": "_pending_binding_proposals",
                 "review": "_pending_binding_reviews",
                 "cde_proposal": "_pending_cde_proposals",
-                "cde_review": "_pending_cde_reviews"}
+                "cde_review": "_pending_cde_reviews",
+                "cs_proposal": "_pending_consistency_proposals",
+                "cs_review": "_pending_consistency_reviews"}
 
 
 # Deployed, only `dq-app/` is shipped — the app source path is the folder holding
@@ -350,6 +352,55 @@ def write_cde_review(row: dict) -> bool:
     if row["proposal_id"] in decided:
         return False
     return _append_pending("cde_review", row)
+
+
+def consistency_proposals() -> pd.DataFrame:
+    from dq_app.domain.consistency import PROPOSAL_COLUMNS
+    return _read_optional("config.consistency_proposal", PROPOSAL_COLUMNS)
+
+
+def consistency_reviews() -> pd.DataFrame:
+    from dq_app.domain.consistency import REVIEW_COLUMNS
+    return _read_optional("config.consistency_review", REVIEW_COLUMNS)
+
+
+def table_populations() -> pd.DataFrame:
+    return _read_optional("config.table_population",
+                          ["target_table", "population_version", "record_key", "version_by",
+                           "deleted_column", "deleted_value"])
+
+
+def write_consistency_proposal(row: dict) -> bool:
+    """Refused if the rule id is taken or the same check is already waiting."""
+    from dq_app.domain import consistency
+    props = pd.concat([consistency_proposals(), pd.DataFrame(pending_onboarding("cs_proposal"))],
+                      ignore_index=True)
+    revs = pd.concat([consistency_reviews(), pd.DataFrame(pending_onboarding("cs_review"))],
+                     ignore_index=True)
+    reg = rule_registry()
+    if row["rule_id"] in set(reg["rule_id"]) or (len(props) and row["rule_id"] in set(props["rule_id"])):
+        return False
+    state = consistency.proposal_state(props, revs, reg)
+    if len(state) and ((state["fingerprint"] == row["fingerprint"])
+                       & state["state"].isin(["open", "approved"])).any():
+        return False
+    return _append_pending("cs_proposal", row)
+
+
+def write_consistency_review(row: dict) -> bool:
+    """One decision per proposal: refused if it already has one."""
+    base = consistency_reviews()
+    decided = set(base["proposal_id"]) if len(base) else set()
+    decided |= {r["proposal_id"] for r in pending_onboarding("cs_review")}
+    if row["proposal_id"] in decided:
+        return False
+    return _append_pending("cs_review", row)
+
+
+def run_consistency_test(queries: dict) -> None:
+    """The fixture carries no source rows, so a check cannot be tested locally. The page
+    says so rather than inventing a figure."""
+    return None
 
 
 def discard_pending() -> None:

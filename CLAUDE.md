@@ -58,6 +58,22 @@ that advice is the ninth write (`results.tolerance_review`). Accepting changes n
 else: the register still changes only through the Elements page. The app no longer
 writes `threshold_review`. See *Element tolerance decides escalation*.
 
+**Since 2026-10-13 a person can propose a consistency check, and that is two more writes,
+the tenth and eleventh** (`config.consistency_proposal`, `config.consistency_review`,
+`sql/ddl/22`). Both are labelled in `07_grants.sql` as a decision. **Applied to
+`dq_triage`, deployed and granted on 2026-10-13.** The app now holds nine `MODIFY`s
+there: `07_grants.sql`'s eleven, less the two CDE onboarding tables. The rule register still gains no app write: an
+approved check reaches it through the onboarding job's `apply_consistency` step, in
+shadow. See *Proposing consistency checks*.
+
+**Since 2026-10-12 the register is the key attributes, not mock data.** CDEs are
+called *key attributes* in the app (wording only: the tables still say `cde`). The 22
+attributes come from the in-scope rows of `DQ_ATTR_PRIORI.xlsx`, and their 119 rules
+from the migration-scope DQ analysis PDF. All of them point at the real `prod.*`
+source tables, which this workspace cannot read. The mock elements, rules and
+monitored tables are retired, not deleted. See *Key attributes replace the mock
+register*.
+
 ## Current state — read before editing anything
 
 | Path | Status |
@@ -70,6 +86,10 @@ writes `threshold_review`. See *Element tolerance decides escalation*.
 | `sql/ddl/19_results_tolerance.sql`, `20_views_tolerance.sql` | Current, 2026-10-08. Two tables and three views for element tolerance. **Applied to `dq_triage`, granted and deployed** (deployment `01f1c2db…`); not applied to `dq_onboard`. See *Element tolerance decides escalation*. |
 | `onboarding/` + `jobs/run_checks.py` | Current. **Running on a schedule in both schemas.** `dq_onboard`: `dq-checks` (daily 03:00 Sydney) and the table-update-triggered `dq-onboard steps`, app `dq-onboard`. `dq_triage` since 2026-10-06: `dq-triage checks` (568071030107709, daily 03:00) and `dq-triage onboard steps` (906515649279596), same code with `--schema dq_triage`. The `dq-triage` app carries the Onboarding pages since 2026-10-06 (deployment `01f1c110…`). See *Onboarding in dq_triage*. |
 | `databricks.yml` + `resources/` | **Draft, never deployed** (2026-10-06). The two jobs above as a bundle: run as a job service principal (not yet created), code from git, failure email, timeouts. `resources/README.md` has the cutover — bind to the existing job ids, never deploy beside them. `onboard.py` takes `--catalog` and `--fn-prefix` since the same day (call-time in `wh`, like `--schema`); still one schema in the sandpit layout, so no `prod` target yet. |
+| `key_attributes/` + `sql/migrate_key_attributes.py` | **Applied to `dq_triage` 2026-10-12** (not to `dq_onboard`); the app with the rename is not yet redeployed. The real register, its migration rules and universe rules, the migration that retires the mock register, a pandas copy of it (`frames.py`) and a warehouse probe (`probe.py`). See *Key attributes replace the mock register*. |
+| `sql/ddl/21_config_population.sql` + `jobs/run_checks.py` | **Built 2026-10-12, applied to no schema.** A history table's current record (`config.table_population`) applied under the slice and on every side of a join, and cross-table rules sharing a join run as one query. See *The runner reads current records*. |
+| `sql/ddl/22_config_consistency.sql`, `dq-app/.../pages/consistency_new.py`, `consistency_review.py`, `onboard.py apply_consistency` | **Applied to `dq_triage`, deployed (latest `01f1c6aa…`) and granted 2026-10-13.** Propose a consistency check as a spec, a second person reviews it, the job writes it in shadow. See *Proposing consistency checks*. |
+| `onboarding/consistency.py` | **Built 2026-10-13, nothing registered.** Orphan / agreement / reconciliation specs rendered to rule rows, and the `<>` lint `verify.py` runs. See *Consistency checks from a spec*. |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
 
 **There is a real workspace and it is LOADED — which is not the same as having been
@@ -139,8 +159,9 @@ moved. Nothing about the data model, the grants or the write path changed.
 | `cde_registry.py` | **deleted** — folded into two panels on the scorecard |
 | `register.py` | **deleted** 2026-09-17 — the chain is read on the problem it belongs to |
 
-**`app.py` registers ten pages and links six.** `table_detail`, `triage_detail`,
-`onboarding_add` and `onboarding_table` are drill-downs: none means anything without a
+**`app.py` registers fourteen pages and links eight.** `table_detail`, `triage_detail`,
+`onboarding_add`, `onboarding_table`, `consistency_new` and `consistency_review` are
+drill-downs: none means anything without a
 selection made on the page above it, so none is in the sidebar. They stay registered because `st.switch_page` can only
 reach a page `st.navigation` knows about — which is why the nav is asked to render
 nothing (`position="hidden"`) and `app.py` builds the sidebar itself from
@@ -320,15 +341,6 @@ off the values, and a model without them can only say a steward should look. The
 cohorts already written hold samples in `model_input_payload`; this does not touch them.
 Steward `reason` text is still sent and may name a customer.
 
-**`fixtures/verify.py` now diffs the notebook too.** It already compared every fixture
-table's columns against the `CREATE TABLE`; check 4 does the same for the cell in
-`03_group_and_advise.ipynb` that builds the cohort row, anchored on the
-`candidate_cohorts` temp view. The notebook is what will really write this table, and
-until now nothing could tell you it had fallen behind the DDL. Add a column to
-`results.cohort` and you must add it in both places or `verify.py` exits 1.
-
-**The Register page was deleted on 2026-09-17; the register was not.**
-`results.disposition` is still the append-only audit artefact and still the app's
 **A violation sample is no longer the whole row (2026-10-12).** The runner's sample
 query is still `SELECT *` (it is also the rule logic the Rules page prints), but
 `run_checks.sample_keep` projects its result onto the table's key columns and the
@@ -340,8 +352,18 @@ one-off run (`910538978025405`): the same 569 samples over the same 17 rules as 
 previous scheduled run, each now 2–4 columns where it was 35–36 (68 for the
 cross-table rule), key always present. The shared `dq-onboard-jobs` copy was updated
 the same day, so both schemas' scheduled checks jobs store the trimmed rows. Samples
-written before then hold whole rows, and the live table keeps its old column comment.
+written before then hold whole rows. The `sample_row` column comment was altered to
+match in both schemas the same day.
 
+**`fixtures/verify.py` now diffs the notebook too.** It already compared every fixture
+table's columns against the `CREATE TABLE`; check 4 does the same for the cell in
+`03_group_and_advise.ipynb` that builds the cohort row, anchored on the
+`candidate_cohorts` temp view. The notebook is what will really write this table, and
+until now nothing could tell you it had fallen behind the DDL. Add a column to
+`results.cohort` and you must add it in both places or `verify.py` exits 1.
+
+**The Register page was deleted on 2026-09-17; the register was not.**
+`results.disposition` is still the append-only audit artefact and still the app's
 primary write. Every event chain is still readable on the problem it belongs to, under
 `Decisions` on the detail page — what went is the cross-cohort browsing view, for the
 same reason the CDE page went: nobody browses a register.
@@ -360,7 +382,7 @@ a group label reading "Evidence" over a single rule-authoring link described not
 What a rule *is* forms part of what is being watched, which is what Monitor already
 means here. Three groups now: Onboard (Onboarding, first — choosing what is checked
 comes before monitoring it, since 2026-10-05), Monitor (Scorecard, Tables, Rules,
-Thresholds) and Work (Triage). `Thresholds` joined Monitor on 2026-09-28 for the same reason: a limit is a
+Consistency, Thresholds) and Work (Triage). `Thresholds` joined Monitor on 2026-09-28 for the same reason: a limit is a
 property of a rule, and the decisions made there are about rules, never problems.
 
 **A Streamlit container measures 1rem shorter than what is inside it.** Worth knowing
@@ -394,9 +416,10 @@ the table can never disagree. Two consequences that look like bugs: a problem so
 closed whose checks are breaching again is **in** the queue with its closed state
 showing, because that is exactly what should be put in front of a steward; and a rule
 regrouped into a newer problem is counted once, under the newer one, which is why
-`CTCT_PHN_FMT` does not drag its August cohort back into the list. Six rows, 18
-breaching checks, 3.0 : 1. That leaves out three more breaching checks, held back
-because their element is within its tolerance (21 and 3.5 : 1 before 2026-10-08). The
+`CTCT_PHN_FMT` does not drag its August cohort back into the list. Six rows, 17
+breaching checks, 2.8 : 1. That leaves out three more breaching checks, held back
+because their element is within its tolerance (21 and 3.5 : 1 before 2026-10-08), and
+the retired variance rule, which Triage drops since 2026-10-12 (18 and 3.0 : 1 before). The
 `Show` dropdown widens to Open / Waiting on me /
 Closed / All for anyone who wants the lifecycle view instead.
 
@@ -1530,7 +1553,10 @@ rows by `result_id` — and a shadow-only run never replaces a scheduled one.
   the rule register had no CHECK constraint doing what the register's do.
 * **Add tables reads readability from the privilege views in one query per schema**, not
   a SELECT per table, and sizes on a few reused connections; the catalog is cached an
-  hour. It lists what the *app's service principal* can see, not the user.
+  hour. Since 2026-10-13 the readability query and the schema's column listing run
+  together (`adapter.fetch_parallel`), sizes on eight connections, a pick reads its
+  columns off the schema listing, the catalog listing joins the warm wave, and an
+  empty column listing is held 30s on the warehouse rather than re-asked every rerun. Deployed to `dq-triage` as `01f1c6b6…`. It lists what the *app's service principal* can see, not the user.
 
 **The onboarding schema is DDL since 2026-10-06.** `sql/ddl/15_config_onboarding.sql`
 declares the four tables with 14 CHECK constraints and `appendOnly`;
@@ -1584,8 +1610,12 @@ dq_triage"), in this order:
   tolerates a missing table, not a missing privilege, deliberately, so the new code
   before the grants breaks the Scorecard and Tables pages. The threshold_review grant
   is the one *Known gaps* listed as written and unapplied; it is applied now.
-* There is no self-approval waiver in `dq-triage`: a person's binding suggestion needs a
-  second person. Job proposals can be approved by anyone.
+* **The self-approval waiver is ON in `dq-triage` since 2026-10-09** (deployment
+  `01f1c389…`, `DQ_ONBOARD_ALLOW_SELF_APPROVAL=1` in the committed `app.yaml`), as a
+  stopgap: the workspace has one person, and `sales_transactions` sat at "review
+  bindings" on a suggestion nobody else could approve. Waived approvals are marked
+  `[second approver waived]`. Remove it once a second steward exists. Job proposals
+  can be approved by anyone.
 
 **Open, and decisions rather than code:** who may approve a binding (the element's `owner_group` is shown, not enforced —
 those groups do not exist in this workspace); browsing as the signed-in user (needs the
@@ -1789,6 +1819,503 @@ after; it treats missing columns as unsliced. **Not built**: discovery's value-p
 match still reads the whole table, and the Scorecard's element trend does not mark a
 slice change (an element can span tables, so "the slice changed" has no single date there).
 
+## Key attributes replace the mock register — 2026-10-12
+
+Decided with the user: no more mock data for attributes and rules. Four choices were
+made, and each holds the rest of this section together:
+
+* **Register the real tables.** Bindings and rules name `prod.udp_brnz_nrt_tech_view.*`
+  (`table_contact_hist`, `table_address_hist`, `table_bus_org_hist`,
+  `table_contact_role_hist`, `table_customer_hist`). This workspace has no `prod`
+  catalog, so every check on them is recorded as an error until it runs somewhere that
+  does.
+* **The spreadsheet's in-scope rows only.** 22 attributes: every row of the '#1 - DQ
+  Issues' sheet not marked Out of scope. The PDF also covers about 13 more bus_org and
+  con_bus_role columns, and they are not registered.
+* **Retire the mock content and keep its history.** Every element, rule and monitored
+  table that is not a key attribute gets a retired version. Check runs, cohorts and
+  decisions are untouched.
+* **Rename in the UI only.** "Critical data element" is now "key attribute" in every
+  string a reader sees: the Elements page is **Key attributes**, and the scorecard card
+  is **Key attributes**. Identifiers, session keys, tables and columns still say
+  `cde`/`element`. The rename was done by a tokenizer pass over prose string literals,
+  skipping docstrings and CSS. Five tests pinned old strings and were updated.
+
+**`key_attributes/`** is a package, not a fixture:
+
+* `register.py` holds the 22 attributes. Criticality is `high` for every one because
+  the sheet ranks none; changing it is one person's call per attribute. **Tolerance is
+  a placeholder since 2026-10-13** (`register.TOLERANCE`), set by attribute kind, not
+  by the business: keys 0, first/last/role name 0.5, DOB and address-from 1.0, email,
+  phone, ARBN, G-NAF id and address-to 2.0, the nine optional or descriptive fields
+  5.0. See *Placeholder tolerances*.
+* `rules.py` has one rule per validation category in the PDF, 119 in all and all
+  shadow. The PDF is masked, so the numbers come from the unmasked queries in the
+  sheet ('#1 - DQ Issues' Query column, DEVIATION sheet) and from the 'DQ Queries'
+  lists `fixtures/rules.py` already held. Where no source gives a number, the rule is
+  left out and `NOT_REGISTERED` says why: an employee-count digit limit, the
+  implausibly-old date range, the hard-bounce list, the eml_stts_cd values. The
+  source bugs fixed on the way in are the same ones as before (POSIX classes), plus a
+  new one: the email query's `''` inside a literal is two adjacent literals in Spark,
+  so its regex silently lost the apostrophe.
+* `universe.py` covers an attribute no migration rule names: it gets four generic P3
+  checks (present, whitespace, control characters, placeholder), ids carrying `_UNIV_`.
+  **Today that is none**: every one of the 22 has migration rules. The Rules page's
+  fourth figure counts attributes on universe rules only.
+* `frames.py` is the migration applied to a local fixture directory, and the app tests
+  render every page against it. Build it and view it with:
+
+  ```bash
+  .venv/bin/python key_attributes/frames.py
+  ```
+
+  The launch config is `dq-app-key-attributes` (port 8515). The preview pane could not
+  start it on 2026-10-12, because of a macOS permission on `.venv/pyvenv.cfg`.
+* `probe.py` runs every rule on the warehouse over about 130 values written in the
+  file, each with the exact set of its attribute's rules expected to flag it. It
+  reads nothing and writes nothing. **130 of 130 agree** (2026-10-12).
+
+**Things that will look wrong when the rules first run on prod, and why:**
+
+* **The counts will be higher than the PDF's.** The analysis took the latest
+  non-deleted version of each record in migration scope (`migration_scope_flag = 1`,
+  via `sf_mig_attribs_analytics.contact_id_migrate`, which is pipe-delimited). The
+  runner reads the whole history table. A slice cannot express either part yet: the
+  membership slice has no "split on |", and there is no latest-record population.
+  `register.LATEST_RECORD_GAP` says this and the monitored-table notes carry it.
+  Until it is fixed, the three **uniqueness** rules flag every record with two
+  versions.
+* **The categories were mutually exclusive and the rules are not.** A name with a
+  title and a trailing space fails two rules where the analysis counted it once.
+* **The two estate rules read `STATUS = '5'` as deceased**, the value the 'DQ Queries'
+  exploration used. The PDF masks it. Confirm it before promoting them.
+* Epoch dates go through `to_date(timestamp_millis(...))`, as the analysis queries
+  did, so they land in the session time zone. The 1753 placeholder on
+  `ESTABLISH_DATE` is compared raw (`-6847840800000`) so no time zone can move it.
+
+**What changed in the app:**
+
+* `metrics.retired_rule_ids` is now the one definition. The Scorecard, the Tables
+  pages and Triage all drop retired rules' runs.
+* **Triage now drops a problem whose every check is retired**, from every view
+  including "All", and says how many are kept as history. On the fixture's own state
+  this moves the live queue from 18 failing checks to 17, because the retired variance
+  rule leaves it. It is still six problems.
+* **Thresholds lists advice only for registered attributes.**
+* A page with no measured run now says what is registered and why nothing is scored
+  (`components.no_runs_yet`), instead of "No check runs available".
+* The Rules page's "Expressions verified · 33 / 34" figure was about the mock rules,
+  so it now shows only while `XREF_NAME_AGREEMENT` is current.
+
+**`onboard.py discover` skips a selected table it cannot read** instead of stopping.
+One missing `prod` catalog would otherwise have stopped discovery for every table. The
+jobs run a copy uploaded to `dq-onboard-jobs`, so this takes effect only when that copy
+is updated.
+
+**Applied to `dq_triage` on 2026-10-12.** The probe gave 130 of 130. All 157
+statements were `EXPLAIN`ed clean (every INSERT planned as an append, read from the
+plan text). It retired 19 elements, 86 rules (43 active, 43 shadow) and 4 tables: the
+two mock tables and `samples.bakehouse.sales_customers` / `sales_transactions`. Then
+it added 22 attributes, 119 shadow rules and the 5 `prod.*` tables. Checks 7a–7e
+read as expected: coverage is `no_rule` 22, because shadow rules do not cover.
+
+The jobs' copy of `onboard.py` in `dq-onboard-jobs` was updated the same day. It had
+been older than the repo: it still copied an element's tolerance onto every generated
+rule's limit, the pre-2026-10-08 behaviour. **The app is not redeployed yet**, so the
+deployed `dq-triage` still has the old wording and still lists the mock problems in
+Triage.
+
+The order this was done in:
+
+1. Run `key_attributes/probe.py`.
+2. `EXPLAIN` every statement in `sql/out/migrate_key_attributes.sql`, reading the plan
+   text.
+3. Apply it. There are 149 guarded INSERTs, and re-running inserts nothing.
+4. Update the jobs' copy of `onboard.py`.
+5. Redeploy the app.
+
+None of the three grants changes: the migration writes `cde_registry`, `rule_registry`
+and `monitored_table`, signed by whoever runs it, and the app writes nothing new.
+
+### The key attributes read MOCK source tables since 2026-10-12
+
+Asked for by the user once the register was applied: "mock up some tables in Unity
+Catalog and onboard these tables to do DQ checks". Two decisions:
+
+* **The mock tables use the real schema and table names.** They live in the
+  `workspace` catalog, `workspace.udp_brnz_nrt_tech_view.table_*_hist`, because the
+  account has no CREATE CATALOG privilege and so cannot make a `prod` catalog.
+* **The rules stay in shadow.** The checks are measured, but nothing scores until a
+  person promotes it.
+
+The pieces:
+
+* **`key_attributes/mocksource.py --apply`** builds the five tables plus
+  `workspace.sdpt_sfmig.sf_mig_attribs_analytics`, the migration-scope table with a
+  pipe-delimited `contact_id_migrate`. Nothing reads that table yet.
+  * Every table and schema comment starts MOCK. The values are generated from a
+    fixed seed.
+  * Each record has 1 to 3 versions with ECF_NSRT_TS / SCN / offset / OP_TYPE, and
+    about 2% end deleted.
+  * Every failing value in `probe.py` is planted into 3 to 40 latest versions, and a
+    sixth of address EFF_DT are the 1753 sentinel. So every rule has something to
+    find, and the probe already proved what each planted value does.
+  * Epoch dates are BIGINT and everything else is STRING.
+  * The SQL (1.5 MB) is written to `sql/out/mock_source.sql`, which is gitignored.
+  * Row counts as built: contact 3616, address 2734, bus_org 1086, contact_role 3586,
+    customer 2134, scope 1590.
+* **`sql/migrate_key_attributes_source.py --source-catalog <catalog>`** moves only the
+  catalog. `register.py` keeps the canonical `prod.*` names, the way `sql/seed.py`
+  rewrites `prod.customer.*`. The run with `--source-catalog workspace` is APPLIED
+  (2026-10-12; all 41 statements `EXPLAIN`ed first). It appended:
+  * a new version of all 22 attributes, with the binding on the `workspace` table;
+  * a new version of all 119 rules, `target_table` rewritten and status carried, so
+    they are still shadow;
+  * a decommission of the 5 `prod.*` tables;
+  * a selection of the 5 mock tables, under their own codes `KAW_*`, because table
+    codes are never reused.
+
+  **Going back to the real data is the same script with `--source-catalog prod`.** It
+  selects the prod tables again under their old `KA_*` codes. The file is generated,
+  and not run.
+* **`frames.py` and the local app still show the prod names.** It applies the first
+  migration only.
+
+What runs on them: the `dq-triage onboard steps` job starts on the `monitored_table`
+change. Its `--shadow-only` measure step and the daily `dq-triage checks` job then
+write shadow verdicts to `check_run`, and the Rules page shows each rule's own latest
+measurement.
+
+**First measured 2026-10-12 13:35 Sydney** by the triggered steps run: all 119 rules
+ran on the mock tables with no errors, as shadow verdicts (`status = 'skipped'`, the
+violation count kept). The largest counts are the three uniqueness rules: CONTACT_ID
+2837 of 3609, CUSTOMER_ID 1605 of 2108, ORG_ID 839 of 1078.
+
+**The counts are inflated by history, deliberately.** The planted defects sit on the
+latest versions, but the runner reads every version (LATEST_RECORD_GAP). So
+uniqueness on CONTACT_ID, ORG_ID and CUSTOMER_ID flags every multi-version record.
+This is the data to build the latest-record population against.
+
+### Placeholder tolerances — 2026-10-13
+
+Asked for by the user, after agreeing that the threshold model adds little: the
+decision that changes behaviour is the 22 numbers, so declare them now and replace
+them when the business decides. `sql/migrate_key_attribute_tolerance.py` writes one
+`cde_version` per attribute whose tolerance differs (guarded, re-runnable), every note
+starting `Tolerance N%. Placeholder tolerance, not business-approved`. **Applied to
+`dq_triage`**: all 23 statements `EXPLAIN`ed and the plan text read, 22 appended (v3),
+a re-run inserted 0. Not applied to `dq_onboard`. No rule's `fail_threshold_pct`
+changed; still 0.
+
+On the 2026-10-13 03:12 run, of the active contact attributes, DOB (0.62%), last name,
+middle name and phone sit within tolerance, so **16 breaches are held from Triage and
+22 escalate** (contact ID 16.75%, inflated by history until `table_population`
+lands; email 2.01%; first name 0.70%). The other tables' rules are shadow, so their
+tolerances do nothing yet. `key_attributes/frames.py` carries the same values.
+
+Notebook 06 is deliberately not run on them: history on mock tables advises on the
+generator's planted rates. If advice is wanted later, a deterministic view (p90
+against tolerance, runs outside) comes before the model.
+
+## The runner reads current records — 2026-10-12
+
+Asked for by the user, as the first two steps of cross-table consistency checks (the
+mockup is the Claude artifact "Consistency checks mockup"). Both are in
+`jobs/run_checks.py`; **nothing is applied to any schema yet.**
+
+**The current record is declared in `config.table_population`** (`sql/ddl/21`), not on
+`monitored_table`. That table has six writers and the app copies its columns forward on
+every pause and resume, so one writer forgetting a column would silently put a table
+back on raw history. This table has one writer (a migration), no app write and no
+grant. A row names `record_key`, `version_by` (newest highest, left to right) and an
+optional `deleted_column` / `deleted_value`. A table with no row is read whole, and
+every builder then emits exactly the SQL it did before, so `domain/rule_sql.py`'s diff
+still holds.
+
+* **Latest first, deletions after.** `current()` nests them. A WHERE beside the QUALIFY
+  runs first and brings a deleted record's previous version back. On the mock tables
+  that would have kept 19 deleted contacts and 29 deleted roles.
+* **A row with a NULL key is kept, every one.** The window put all keyless rows in one
+  partition and kept one, which hid 6 of the 7 contact rows with no `CONTACT_ID`. Found on
+  the warehouse, not by a test.
+* **Under the slice, on every side of a join.** The slice still narrows only the
+  driving table. The population goes on both sides, because an old version of a parent
+  is not evidence the parent exists. On the mock tables, orphan roles go from 18 to 50
+  once deleted contacts drop out.
+* **Stamped**: `check_run.population_version` / `population_rows`, after `slice_rows`
+  in `03`. The counts nest: table_rows ≥ population_rows ≥ slice_rows. `slice_rows` is
+  now counted on current records. The app does not show `population_rows` yet.
+
+**Cross-table rules sharing a join run as one query** (`plan()['joined']`,
+`batch_cross_table`), with the same two `count_if`s per rule as row-level batching. A
+rule whose scope holds a subquery, and a join only one rule reads, keep the single
+query they had.
+
+**Proved read-only on the warehouse, 2026-10-12,** on the five mock key-attribute
+tables:
+* The current-record count equals an independent `max_by` fold on all five tables
+  (contact 3616 rows → 1957 records).
+* Uniqueness on `CONTACT_ID` goes from 2837 flagged to 0. `CUSTOMER_ID` (32) and
+  `ORG_ID` (14) still flag: those are planted, since the record key is `OBJID`.
+* Three rules on one contact_role → contact join gave identical counts batched and
+  single, both raw and on current records.
+
+To make it real in `dq_triage`:
+1. `onboard.py --schema dq_triage install`, which now renders 21 and adds the two
+   `check_run` columns.
+2. `sql/out/migrate_table_population_workspace.sql`, from
+   `sql/migrate_table_population.py`.
+3. Update the jobs' copy of `run_checks.py` in `dq-onboard-jobs`.
+
+The key-attribute shadow counts will then drop to current records. `production/` is
+generated by `tools/build_production.py` and was not re-run.
+
+## Consistency checks from a spec — 2026-10-13
+
+The user picked two of the ideas from the DQ-tool comparison (DQX, Ataccama, Soda,
+dbt). Both are in `onboarding/consistency.py`, a pure module. Each spec renders the
+fields of one `rule_registry` row and runs on the runner's existing cross-table path.
+**No new runner shape, no DDL, no grant, and no rule registered anywhere yet:** the
+relationship map they need is still unconfirmed for the real tables.
+
+* **`Orphan`.** A LEFT JOIN with no parent. `null_key` (`ignore` | `fail`) is required
+  with no default: the tools disagree, and so do the cases.
+* **`Agreement`.** `NOT (L <=> R)` over two values passed through one named
+  comparison:
+  * `text`: trim, collapse whitespace, lower-case, blank = NULL;
+  * `phone_au`: `au_phone_digits_v1`;
+  * `day`: `try_cast` to DATE;
+  * `number`: `try_cast` to DECIMAL, with an optional absolute tolerance;
+  * `exact`.
+
+  `empty_one_side` (`differs` | `skip`) is required. It uses `try_cast`, never `CAST`:
+  the warehouse is in ANSI mode, where one bad value raises and takes the whole shared
+  join down.
+* **`Reconcile`.** One aggregate per side, optionally grouped and filtered per side,
+  rendered as a FULL OUTER JOIN (CROSS JOIN when ungrouped). Groups match null-safely.
+  The tolerance is max(abs, rel × |right|), so the right side is the reference. The
+  runner counts GROUPS: `rows_scanned` is the groups on either side, and a violation
+  is a group out of tolerance **or on one side only**, which DQX's
+  `aggr_matches_dataset` does not report. A sample row is a group carrying both
+  sides' values; its `row_key` is empty, because a group is not a record.
+
+**The lint (`unsafe_comparisons`)** finds `<>` / `!=` in a cross-table `rule_expr`,
+outside string literals. It is `fixtures/verify.py` check 8. `XREF_NAME_AGREEMENT` and
+`XREF_OPEN_TS_AGREEMENT` are listed as known (fixing them is still a decision), and any
+third rule fails the gate; tested with the allowlist emptied.
+
+**Proved read-only on the warehouse, 2026-10-13,** on adversarial values in session
+temp views, through `cross_table_sql` and the shared-join batch: 12 of 12 specs gave
+their expected counts. On the same names, the old `<>` form found 2 differences and
+missed `Jack` against NULL. 15 tests in `onboarding/test_consistency.py`.
+
+## The Consistency page — 2026-10-13
+
+Monitor group, between Rules and Thresholds, built from the mockup on the local
+fixture (`dq_app/ui/pages/consistency.py`, folding in `domain/consistency.py`, 11
+tests in `tests/test_consistency_page.py`). It lists every current rule with a
+`join_sql`, the relationships they read, the checks by kind, and the picked check:
+* how the two sides are matched, in plain words;
+* the failed rows (`components.failed_rows`, same surface and cap);
+* the stored join and predicate;
+* "Open in Rules" for versions, history and promotion.
+
+It writes nothing.
+
+* **Relationships are read off the checks**, because no relationship register
+  exists. A relationship nothing checks does not appear. When a register exists,
+  `consistency.checks` / `relationships` are what to replace.
+* **Kind is read off the rule's shape:** `referential` → orphans, a join of two
+  aggregates (`__present`) → totals, anything else → agreement.
+* `unsafe_comparisons` is a copy of the onboarding lint, since only `dq-app/` ships.
+  A test runs both over the same expressions.
+* **The fixture gained one rule, `XREF_SUBS_CTCT_COUNT`.** It is a totals
+  reconciliation rendered by `Reconcile` (distinct contact keys on subs_c vs ctct_c,
+  exact), in shadow and passing, so the page has one check of each kind.
+  * It has its own rng (`recon_rng`): sharing `added_rng` moved every DQ Queries
+    rule's duration and DBU.
+  * Every other fixture table is byte-identical apart from its rows. The shadow count
+    is 37 (`test_metrics`).
+* **On the fixture the page reads:** 1 relationship (subs_c → ctct_c), 4 checks
+  (3 active, 1 shadow), 2 failing, ≥ 11 rows in disagreement, and a warning that the
+  two XREF agreement rules compare with `<>`. Their failed rows are exactly the pairs
+  with a name on one side only: the fixture's pandas evaluator counts them, and the
+  stored SQL would not.
+
+## Proposing consistency checks — 2026-10-13
+
+Built from the mockup's screens 3 and 4, at the user's go-ahead for two new writes.
+
+**Applied to `dq_triage` on 2026-10-13, at the user's request ("apply it to dq_triage").**
+1. Only `sql/ddl/22` was run, not `onboard.py install`, which would also have created
+   the CDE onboarding tables (17/18) and the population table (21) there. Both
+   `CREATE TABLE`s were `EXPLAIN`ed first. 11 statements: two append-only tables (5 and 3
+   constraints) and the view, which returned 0 rows.
+2. `onboarding/onboard.py` and `consistency.py` were uploaded to `dq-onboard-jobs`
+   (both schemas' jobs run that copy). Before the upload, the live `onboard.py` differed
+   from the repo only by this feature. `apply_consistency` was run once against
+   `dq_triage` from a laptop: "no approved consistency proposals waiting". On
+   `dq_onboard` it skips: 22 is not installed there.
+3. The live `dq-triage onboard steps` job (906515649279596) trigger now also watches
+   `dq_config_consistency_review`. `cde_review` was not added: that table does not
+   exist in `dq_triage`.
+4. The app was synced and deployed as `01f1c6a3…`, then again as `01f1c6a7…` for the New check spacing fix. **This also shipped every app change
+   since the last deploy**, including the key-attribute rename and Triage dropping
+   retired problems. Before the deploy, ten pages were rendered headlessly against
+   `dq_triage` with no exceptions.
+
+**Granted by the user on 2026-10-13**, each checked afterwards with `SHOW GRANTS` and
+the 3a proof query (nine writable tables, all in `dq_triage`):
+* `MODIFY` on `dq_config_consistency_proposal` and `dq_config_consistency_review`.
+* `USE SCHEMA` + `SELECT` on `workspace.udp_brnz_nrt_tech_view`, so the builder lists
+  every column and the test can read source rows. This is a new read of source data
+  by the app (up to 10 sample rows per test).
+
+**First real proposal, end to end, 2026-10-13.**
+1. `CS_BBCE703D` was proposed and approved in the deployed app. It was a
+   self-approval, marked `[second approver waived]`. It is a Same value check of
+   `OP_TYPE` between table_contact_hist and table_contact_role_hist on CONTACT_ID: a
+   pipeline test, since OP_TYPE is the change-capture operation, not a business value.
+2. The review row triggered `dq-triage onboard steps` (run `236715890192150`,
+   SUCCESS), whose `apply_consistency` wrote it at v1 in shadow (`job:onboard-consistency`).
+3. `measure_shadow` measured it in the same run: 6,424 compared, 3,259 failing,
+   `skipped`. This is exactly what the proposer's test showed. The proposal reads
+   `applied`.
+
+A shadow verdict stores no samples (they are captured on a breach only), so the check's
+Sample rows stay empty until it is promoted and fails. The 57 key-attribute rules on
+table_contact_hist are active by then (promoted since 2026-10-12), so the shadow run
+measured one rule.
+
+**Propose says what is missing before the click** (deployed `01f1c6b0…`). The first
+real proposal was refused twice inside the dialog (no reason, then fan-out not
+acknowledged; both in the app log). Now `_still_to_do` lists what is left under "Before
+you propose", and the button stays disabled until the list is empty. It applies the same
+rules `validate_proposal` enforces at write time, which still runs. Pinned by
+`test_propose_stays_disabled_and_says_what_is_missing_until_it_can_be_written`.
+
+**What blocked real use until those grants (kept for the record):**
+* `MODIFY` on the two tables (`07_grants.sql`). Without it, Propose and Submit say "no
+  grant" and write nothing.
+* `USE SCHEMA` + `SELECT` on `workspace.udp_brnz_nrt_tech_view` (the mock source).
+  The test reads source rows as the app's principal, and on the warehouse a proposal
+  needs a test. This is a new read of source data by the app, up to 10 sample rows
+  shown, so it is a decision too. Without it, Run test shows a permission error.
+* **The live test on dq_triage found a real effect of history.** contact_role →
+  contact: 99% match, 18 orphans, and **1,218 contact keys matching more than one
+  record**, because `dq_triage` has no `table_population` (21 and its migration are
+  not applied). Until it is, every link on the history tables reports fan-out, and a
+  proposal needs "compare every pair" ticked.
+
+**Why the deployed builder offered only `ROLE_NAME` on contact_role** (found
+2026-10-13). The app's principal has no access to `udp_brnz_nrt_tech_view`, so Unity
+Catalog lists no columns to it. The builder then falls back to the register's knowledge
+of the table: bindings, rule target columns and the samples of single-table rules. For
+contact_role that is one bound column. The fix is the read grant above. Locally, the
+page now names the tables it cannot list (a warning, `UNLISTED`), and the fallback
+includes the table's declared row key. Pinned by
+`test_a_table_the_app_cannot_list_is_said_and_offers_its_row_key`. Deployed as
+`01f1c6a9…`.
+
+**CONTACT_ID still missing after the read grant** (2026-10-13): the column listing is
+cached for an hour (`_CATALOG_CACHE`), and the empty pre-grant answer was cached with it.
+`adapter.get_catalog_columns` no longer keeps an empty listing (it clears that entry),
+so a grant shows on the next load on every page that lists columns. Pinned by
+`test_an_empty_column_listing_is_asked_again_next_time`. Deployed as `01f1c6ac…`.
+
+**Two more found on the deployed app (2026-10-13), fixed and deployed as `01f1c6aa…`:**
+* **Choosing Same total crashed the page** (`TypeError: unhashable type: 'dict'`, from
+  the app log). The summary used `spec["left"]` as a column name to suggest a key
+  attribute, but for totals it is a dict. Now `_suggested_cde` reads the column out of
+  it. No test had built a totals check through the page;
+  `test_every_kind_renders_and_can_be_finished` now builds all three.
+* **"The test could not run"** in the deployed app is the app's principal having no
+  read access to the source schema. The page now says so in words
+  (`consistency.test_error_words`) instead of printing the warehouse error.
+
+**A bug found on the warehouse, fixed before the deploy:** the key pickers kept the
+previous tables' column after a table changed (`OBJID` offered as contact_role's link
+to contact, 0% match). Every picker is now keyed on its tables, which is pinned by
+`test_changing_a_table_picks_its_key_afresh`. Propose is also disabled under 50% match.
+
+**The flow.**
+1. On the Consistency page, **New check** (`consistency_new.py`) builds a SPEC: kind
+   (Missing record / Same value / Same total), the two tables, at most one "via" table,
+   one key pair per link, the compared columns or aggregates, and the policies. There is
+   no SQL box.
+2. **Run test** runs read-only SELECTs (`domain/consistency.test_queries`) on current
+   records, every table read through the runner's `current()` (twinned, and pinned by a
+   test). It reports match rate per link, keys matching more than one record, failing
+   pairs and up to 10 sample rows.
+3. **Propose…** asks first, then writes one `consistency_proposal` row. That row holds
+   the spec, the rule the app rendered from it, its fingerprint and the test figures.
+4. A second person opens it from the Proposals card (`consistency_review.py`). The test
+   is run again on open, and both figures are shown. The page also shows what the job
+   would refuse, before anyone approves. Approve or reject (a rejection needs a reason)
+   is one `consistency_review` row.
+5. `onboard.py apply_consistency` (in `steps`, before discovery) re-renders the spec with
+   `onboarding/consistency.py` and writes the rule at v1 in **shadow**. Its note starts
+   `[consistency_proposal <id>]`, which the view reads back as `applied`. Promotion is
+   the Rules page, as ever.
+
+**What is refused, and where.**
+* **At proposal** (`validate_proposal`, and the guarded INSERT):
+  * no name, no reason, no severity, or no registered key attribute;
+  * a spec that does not render;
+  * the same logic as a current rule, or as a waiting proposal (by fingerprint);
+  * on the warehouse, no test of exactly what is proposed;
+  * fewer than 50% of rows finding a match (`MIN_MATCH_PCT`);
+  * fan-out not acknowledged.
+* **At review:** the proposer, unless `DQ_ONBOARD_ALLOW_SELF_APPROVAL` marks it; a
+  rejection without a reason; a second decision.
+* **By the job** (`consistency.refusal`):
+  * an unmarked self-approval;
+  * a rule id already used;
+  * a key attribute no longer registered;
+  * a spec it renders differently from what the app stored;
+  * a check some current rule already does.
+
+**Things to know.**
+* **`dq_app/domain/consistency_spec.py` is a byte copy of `onboarding/consistency.py`**,
+  because only `dq-app/` ships. `test_the_apps_renderer_is_the_jobs_byte_for_byte`
+  fails if they differ: change one, copy it over the other.
+* **Locally nothing is tested:** the fixture has no source rows (`run_consistency_test`
+  returns None). The pages say so, and proposing is allowed untested, session-only.
+  Off the catalog, a table's columns come from what the register shows: bindings, rule
+  target columns, sample-row columns of single-table rules, and columns named in
+  existing joins. They have no types.
+* **The test reads source tables as the app's principal.** On a schema where it cannot,
+  the page shows the error and nothing is written.
+* **Not built:** a link filter (e.g. "primary contact only"), more than one key pair per
+  link, "use the newest" for fan-out, and the CHECK that a reviewer is not the proposer
+  (it spans two tables; the app and the job enforce it, as for bindings).
+* **Kinds were renamed in the app**: Missing record / Same value / Same total.
+  `domain/consistency.KIND_LABEL` maps them from orphan / agreement / totals.
+
+**Verified.**
+* 22 app tests (`tests/test_consistency_proposals.py`) and 7 more in
+  `onboarding/test_consistency.py`. The end-to-end AppTest proposes, has the proposer
+  refused, has a second persona reject without and then with a reason, and finds the
+  result on the Consistency page.
+* The same flow was clicked through in the browser on the local app. That run caught
+  two bugs, both fixed:
+  * "Open the proposal" vanished on its own click;
+  * the default name and key attribute went stale.
+* **Read-only on the warehouse:**
+  * the orphan test on the mock key-attribute tables gave 50 of 1,955 roles with no
+    contact (97.4% match), the runner's figure;
+  * the totals test ran;
+  * both `CREATE TABLE`s `EXPLAIN` clean (the ALTERs and the view need the tables first);
+  * the five proposal constraints refused exactly the bad rows they target.
+
+**To make it real in a schema:**
+1. `onboard.py --schema <s> install`, which now renders 22.
+2. Grant the two tables (`07_grants.sql`).
+3. Add `consistency_review` to the steps job's table trigger. It is in
+   `resources/dq_jobs.yml`, but not on the hand-made jobs.
+4. Update the jobs' copy of `onboard.py` and `consistency.py` in `dq-onboard-jobs`.
+5. Redeploy.
+
 ## Invariants — things that look like bugs and are not
 
 **Execution is the defining non-goal.** No `UPDATE`/`MERGE`/`DELETE` on business data, no
@@ -1864,8 +2391,8 @@ permits `UPDATE`/`DELETE` too. The enforceable equivalent is table-level `MODIFY
 named tables only plus `delta.appendOnly` — the register, the rule registry, since
 2026-09-28 the threshold review, since 2026-10-05 onboarding's monitored_table,
 binding_proposal and binding_review (granted in both `dq_onboard` and `dq_triage`), the
-two CDE onboarding tables, and since 2026-10-08 the tolerance review. Nine in
-`07_grants.sql`. See `sql/README.md`.
+two CDE onboarding tables, since 2026-10-08 the tolerance review, and since 2026-10-13
+the consistency proposal and review. Eleven in `07_grants.sql`. See `sql/README.md`.
 
 ## Commands
 

@@ -15,10 +15,10 @@
 --
 -- The claim is still achievable, but it takes two mechanisms rather than one:
 --
---   (a) MODIFY on named tables only (six since 2026-10-05, nine since 2026-10-08,
+--   (a) MODIFY on named tables only (six since 2026-10-05, nine since 2026-10-08, eleven since 2026-10-13,
 --       listed below) — never on the schema.
 --       Schema-level MODIFY would silently extend to every table added later.
---   (b) delta.appendOnly = true on every one of those tables (set in 01, 06, 13, 15,
+--   (b) delta.appendOnly = true on every one of those tables (set in 01, 06, 13, 15, 22,
 --       17 and 19), which
 --       makes UPDATE and DELETE fail for every principal, owner included.
 --
@@ -88,6 +88,17 @@ GRANT MODIFY ON TABLE {catalog}.config.cde_review         TO `{app_sp}`;
 -- itself changes through cde_proposal / cde_review like any register change.
 GRANT MODIFY ON TABLE {catalog}.results.tolerance_review   TO `{app_sp}`;
 
+-- Consistency checks, since 2026-10-13: the tenth and eleventh, AND A DECISION, NOT A
+-- DEPLOY. Not granted in any schema yet. Comment them out to deploy without it, and the
+-- Consistency page lists checks but refuses every proposal.
+--   * consistency_proposal -- a person proposing a check across two tables, as a spec
+--   * consistency_review   -- a second person approving or rejecting it
+-- The rule register gains nothing: an approved check reaches config.rule_registry
+-- through the onboarding job's apply_consistency step, in shadow. See
+-- 22_config_consistency.sql.
+GRANT MODIFY ON TABLE {catalog}.config.consistency_proposal TO `{app_sp}`;
+GRANT MODIFY ON TABLE {catalog}.config.consistency_review   TO `{app_sp}`;
+
 -- Deliberately NOT granted, and each omission is load-bearing:
 --   * anything at all on any prod catalog          -> the headline claim
 --   * MODIFY on results.cohort / check_run         -> the app cannot fabricate a finding
@@ -136,11 +147,13 @@ GRANT SELECT ON SCHEMA {catalog}.results TO `{approver_group}`;
 -- and on a schedule; save the results with the control documentation.
 
 -- 3a. Everything the app SP can write, anywhere in the metastore.
---     EXPECTED: exactly nine rows — dq.results.disposition, dq.config.rule_registry,
+--     EXPECTED: up to eleven rows — dq.results.disposition, dq.config.rule_registry,
 --     dq.results.threshold_review, the onboarding three: dq.config.monitored_table,
 --     dq.config.binding_proposal, dq.config.binding_review, the CDE onboarding two:
---     dq.config.cde_proposal, dq.config.cde_review, and dq.results.tolerance_review.
---     Seven if CDE onboarding was not granted. Any other row is a control failure.
+--     dq.config.cde_proposal, dq.config.cde_review, dq.results.tolerance_review, and
+--     the consistency two: dq.config.consistency_proposal, dq.config.consistency_review.
+--     Eleven in all; two fewer for each of those decisions not taken. Any other row is
+--     a control failure.
 SELECT table_catalog, table_schema, table_name, privilege_type
 FROM   system.information_schema.table_privileges
 WHERE  grantee = '{app_sp}'
@@ -162,7 +175,7 @@ WHERE  grantee = '{app_sp}'
   AND  privilege_type IN ('MODIFY', 'ALL_PRIVILEGES');
 
 -- 3d. appendOnly is still set on every app-written table.
---     EXPECTED: all nine report true. Run DESCRIBE DETAIL and read the properties map.
+--     EXPECTED: all eleven report true. Run DESCRIBE DETAIL and read the properties map.
 DESCRIBE DETAIL {catalog}.results.disposition;
 DESCRIBE DETAIL {catalog}.config.rule_registry;
 DESCRIBE DETAIL {catalog}.results.threshold_review;
@@ -172,6 +185,8 @@ DESCRIBE DETAIL {catalog}.config.binding_review;
 DESCRIBE DETAIL {catalog}.config.cde_proposal;
 DESCRIBE DETAIL {catalog}.config.cde_review;
 DESCRIBE DETAIL {catalog}.results.tolerance_review;
+DESCRIBE DETAIL {catalog}.config.consistency_proposal;
+DESCRIBE DETAIL {catalog}.config.consistency_review;
 
 -- 3e. Has anyone rewritten the register? Non-INSERT operations on an appendOnly
 --     table should be impossible; this proves it stayed that way.

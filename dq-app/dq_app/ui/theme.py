@@ -204,7 +204,7 @@ def data_class_label(data_class) -> str:
 
 
 CDE_ONE_LINER = (
-    "A critical data element is a field the business has registered as mattering — "
+    "A key attribute is a field the business has registered as mattering — "
     "date of birth, name, email, identity document — named before any rule was "
     "written against it, so coverage has a denominator that does not move when the "
     "rule set does."
@@ -319,7 +319,7 @@ DEFECT_MEANING = {
 # common case and is labelled as a verdict rather than as an absence: the model
 # was asked and said keep it, with a reason, which is not the same as not asking.
 THRESHOLD_BASIS_LABEL = {
-    "element_tolerance": "Element tolerance",
+    "element_tolerance": "Attribute tolerance",
     "run_history": "Run history",
     "both": "Tolerance and history",
     "unchanged": "Keep as is",
@@ -350,10 +350,10 @@ THRESHOLD_STATE_TONE = {
     "no_change": "neutral",
 }
 THRESHOLD_BASIS_MEANING = {
-    "element_tolerance": "Set from the tolerance the CDE register declares on the "
-                         "element this check watches.",
+    "element_tolerance": "Set from the tolerance the key attribute register declares on the "
+                         "attribute this check watches.",
     "run_history": "Set from where the violation rate has sat across the run history.",
-    "both": "Set from the element's declared tolerance, with the run history saying "
+    "both": "Set from the attribute's declared tolerance, with the run history saying "
             "where the data sits against it.",
     "unchanged": "The model was asked and advises keeping the current limit.",
 }
@@ -372,7 +372,7 @@ TOLERANCE_ADVICE_MEANING = {
     "keep": "The tolerance stands. The rationale says why in figures.",
     "tighten": "Every run sat well inside the tolerance, so it is looser than the data "
                "has needed and a regression up to it would not reach Triage.",
-    "review": "The element sits outside its tolerance. Either the data gets fixed or "
+    "review": "The attribute sits outside its tolerance. Either the data gets fixed or "
               "the business accepts more failure; the job never raises a tolerance "
               "itself.",
 }
@@ -2303,21 +2303,21 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 
 /* The table card (and Triage's queue card, which is built the same way): a keyed container, because its header holds a search field and a
    switch and its body is clickable rows. Same construction as `dq_elcard`. */
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) {{ border: 1px solid var(--dq-border); border-radius: 10px;
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) {{ border: 1px solid var(--dq-border); border-radius: 10px;
   background: {NEUTRAL["surface"]}; gap: 0; padding: 0; overflow: hidden; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) > [data-testid="stLayoutWrapper"]:first-child,
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) > [data-testid="stHorizontalBlock"]:first-child {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) > [data-testid="stLayoutWrapper"]:first-child,
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) > [data-testid="stHorizontalBlock"]:first-child {{
   padding: clamp(.8rem, 1.2vw, 1.05rem) 1rem .7rem; }}
 /* The header row wraps the same way: title, then search and switch, each with a floor. */
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .5rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .5rem; }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
   flex: 1 1 13rem !important; min-width: 13rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
   flex: 1.6 1 21rem !important; min-width: min(21rem, 100%); }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has([data-testid="stTextInput"]):not(:has([data-testid="stButtonGroup"])) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has([data-testid="stTextInput"]):not(:has([data-testid="stButtonGroup"])) {{
   flex: 1 1 10rem !important; min-width: 10rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) [data-testid="stColumn"]:has([data-testid="stButtonGroup"]):not(:has([data-testid="stTextInput"])) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has([data-testid="stButtonGroup"]):not(:has([data-testid="stTextInput"])) {{
   flex: 0 0 auto !important; width: auto !important; min-width: 0; }}
 .dq-tmcard-hd .t {{ font-size: clamp(.98rem, 1.15vw, 1.1rem); font-weight: 650;
   color: {NEUTRAL["text"]}; display: flex; align-items: center; gap: .5rem; }}
@@ -2325,13 +2325,117 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   margin-top: .2rem; }}
 .dq-count {{ font-size: .74rem; font-weight: 600; color: {ACCENT};
   background: {ACCENT_TINT}; border-radius: 999px; padding: .05rem .5rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) .dq-rowgrid.head {{ background: {NEUTRAL["canvas"]};
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .dq-rowgrid.head {{ background: {NEUTRAL["canvas"]};
   border-top: 1px solid var(--dq-border); padding: .55rem 1rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard) .st-key-dqrows_tables {{ border: none; border-radius: 0;
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .st-key-dqrows_tables {{ border: none; border-radius: 0;
   border-top: 1px solid var(--dq-border); }}
 .st-key-dqrows_tables [class*="st-key-dqrow_"] {{ border-radius: 0 !important;
   min-height: 4.6rem; }}
 .st-key-dqrows_tables .dq-rowgrid {{ padding: .7rem 1rem; gap: .9rem; }}
+/* --- Consistency (2026-10-13). The checks card is the table card above; the rest is
+   the relationship rows, the kinds card and the picked check's pane. */
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .st-key-dqrows_cschecks {{
+  border: none; border-radius: 0; border-top: 1px solid var(--dq-border); }}
+.st-key-dqrows_cschecks [class*="st-key-dqrow_"] {{ border-radius: 0 !important;
+  min-height: 3.9rem; }}
+.st-key-dqrows_cschecks .dq-rowgrid {{ padding: .6rem 1rem; gap: .8rem; }}
+.st-key-dq_csrels {{ border: 1px solid var(--dq-border); border-radius: 10px;
+  background: {NEUTRAL["surface"]}; padding: clamp(.8rem, 1.2vw, 1.05rem) 1rem;
+  gap: .55rem; height: 100%; }}
+.st-key-dq_csrels [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.st-key-dqrows_csrels .dq-rowgrid {{ padding: .55rem .75rem; gap: .75rem;
+  align-items: center; }}
+.dq-cs-rel {{ display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; min-width: 0; }}
+.dq-cs-node {{ font-family: var(--dq-mono, ui-monospace, monospace); font-size: .82rem;
+  padding: .3rem .55rem; border: 1.5px solid var(--dq-border-strong, {NEUTRAL["border_strong"]});
+  border-radius: 7px; background: {NEUTRAL["surface"]}; color: {NEUTRAL["text"]}; }}
+.dq-cs-edge {{ width: clamp(1.4rem, 3vw, 2.6rem); height: 3px; border-radius: 2px;
+  background: var(--dq-edge); position: relative; }}
+.dq-cs-edge::after {{ content: ""; position: absolute; right: -1px; top: -4px;
+  border-left: 7px solid var(--dq-edge); border-top: 5.5px solid transparent;
+  border-bottom: 5.5px solid transparent; }}
+.dq-cs-relrow {{ display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }}
+.dq-cs-relbadges {{ display: flex; flex-wrap: wrap; gap: .3rem; margin-left: auto; }}
+.dq-cs-note {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); margin-top: .35rem; }}
+.dq-cs-kinds .dq-cs-kind {{ display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem;
+  gap: .75rem; align-items: center; padding: .6rem 0; border-top: 1px solid var(--dq-border); }}
+.dq-cs-kind .k {{ font-weight: 600; font-size: .9rem; color: {NEUTRAL["text"]}; }}
+.dq-cs-kind .q {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); margin-top: .1rem; }}
+.dq-cs-kind .n {{ text-align: right; font-size: .82rem; color: var(--dq-text-2); }}
+.dq-cov3.sm {{ height: 6px; margin: .35rem 0 0; }}
+.dq-cs-warn {{ display: flex; gap: .55rem; align-items: flex-start; font-size: .86rem;
+  color: {TONE["high"]["fg"]}; background: {TONE["high"]["bg"]};
+  border: 1px solid {TONE["high"]["bd"]}; border-radius: 8px;
+  padding: .6rem .8rem; margin-bottom: clamp(.8rem, 1.4vw, 1.2rem); }}
+.dq-cs-warn span {{ color: {NEUTRAL["text"]}; }}
+.st-key-dq_cspane {{ border: 1px solid var(--dq-border); border-radius: 10px;
+  background: {NEUTRAL["surface"]}; padding: clamp(.9rem, 1.4vw, 1.25rem);
+  margin-top: clamp(.8rem, 1.4vw, 1.2rem); gap: .8rem; }}
+.st-key-dq_cspane [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+.dq-cs-panehd .t {{ font-size: clamp(1.02rem, 1.3vw, 1.2rem); font-weight: 650;
+  color: {NEUTRAL["text"]}; }}
+.dq-cs-panehd .b {{ display: flex; flex-wrap: wrap; gap: .35rem; align-items: center;
+  margin-top: .4rem; }}
+.dq-cs-figs {{ margin-bottom: 0; }}
+.dq-cs-figs .v {{ font-size: clamp(1.1rem, 1.6vw, 1.45rem); white-space: nowrap; }}
+.dq-cs-line {{ margin: .45rem 0 0; font-size: .9rem; color: {NEUTRAL["text"]}; line-height: 1.5; }}
+.dq-cs-side {{ display: flex; flex-direction: column; gap: .1rem; margin-top: .55rem; }}
+.dq-cs-side .l {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); }}
+.dq-cs-side .mono {{ font-size: .84rem; overflow-wrap: anywhere; }}
+/* Proposals card, and the New check / Review pages (2026-10-13). */
+.st-key-dq_csprops {{ margin-bottom: clamp(.8rem, 1.4vw, 1.2rem); }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .st-key-dqrows_csprops {{
+  border: none; border-radius: 0; border-top: 1px solid var(--dq-border); }}
+.st-key-dqrows_csprops [class*="st-key-dqrow_"] {{ border-radius: 0 !important; min-height: 3.6rem; }}
+.st-key-dqrows_csprops .dq-rowgrid {{ padding: .55rem 1rem; gap: .8rem; }}
+:is(.st-key-dq_csn_form, .st-key-dq_csn_side, .st-key-dq_csr_decide) {{
+  border: 1px solid var(--dq-border); border-radius: 10px; background: {NEUTRAL["surface"]};
+  padding: clamp(1rem, 1.8vw, 1.6rem); gap: clamp(.8rem, 1.3vw, 1.15rem); }}
+/* Streamlit's -1rem under a markdown box pulled each control up into the heading above
+   it (measured: 5px of overlap). Inside these cards a heading keeps its own height, and
+   the card's gap is the only space between blocks. */
+:is(.st-key-dq_csn_form, .st-key-dq_csn_side, .st-key-dq_csr_decide)
+  [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+/* Two pickers side by side keep the card's gap below them, not Streamlit's 1rem. */
+:is(.st-key-dq_csn_form, .st-key-dq_csn_side) [data-testid="stHorizontalBlock"] {{
+  row-gap: clamp(.8rem, 1.3vw, 1.15rem); column-gap: clamp(.75rem, 1.6vw, 1.4rem); }}
+.dq-csn-step {{ display: flex; align-items: center; gap: .6rem; font-weight: 650;
+  font-size: 1rem; color: {NEUTRAL["text"]};
+  margin-top: clamp(.5rem, 1.2vw, 1rem); padding-top: clamp(1.1rem, 2vw, 1.6rem);
+  border-top: 1px solid var(--dq-border); }}
+.st-key-dq_csn_form > div:first-child .dq-csn-step,
+.st-key-dq_csn_form [data-testid="stElementContainer"]:first-child .dq-csn-step {{
+  margin-top: 0; padding-top: 0; border-top: none; }}
+.dq-csn-step .n {{ width: 26px; height: 26px; border-radius: 50%; background: {ACCENT_TINT};
+  color: {ACCENT}; font-size: .8rem; font-weight: 700; display: inline-flex;
+  align-items: center; justify-content: center; }}
+.dq-csn-checks {{ border: 1px solid var(--dq-border); border-radius: 8px; overflow: hidden; }}
+.dq-csn-checks .l {{ display: flex; gap: .6rem; align-items: center; padding: .55rem .75rem;
+  font-size: .9rem; border-top: 1px solid var(--dq-border); }}
+.dq-csn-checks .l:first-child {{ border-top: none; }}
+.dq-csn-checks .i {{ flex: 0 0 22px; height: 22px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; font-weight: 700; font-size: .8rem; }}
+.dq-csn-todo {{ font-size: .84rem; color: {TONE["high"]["fg"]}; background: {TONE["high"]["bg"]};
+  border: 1px solid {TONE["high"]["bd"]}; border-radius: 8px;
+  padding: clamp(.55rem, 1vw, .75rem) clamp(.7rem, 1.2vw, .9rem); }}
+.dq-csn-todo ul {{ margin: .3rem 0 0 1.05rem; padding: 0; color: {NEUTRAL["text"]};
+  line-height: 1.55; }}
+.dq-csn-sidehd {{ font-weight: 650; font-size: 1rem; color: {NEUTRAL["text"]};
+  margin-bottom: clamp(.1rem, .5vw, .35rem); }}
+.dq-csn-then {{ font-size: .84rem; color: var(--dq-text-2); border-top: 1px solid var(--dq-border);
+  padding-top: clamp(.8rem, 1.3vw, 1.1rem); margin-top: clamp(.2rem, .6vw, .45rem); }}
+.dq-csn-then ol {{ margin: .3rem 0 0 1.1rem; padding: 0; line-height: 1.8; }}
+.dq-cs-cmp {{ width: 100%; border-collapse: collapse; margin-top: .4rem; font-size: .9rem; }}
+.dq-cs-cmp th {{ text-align: left; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--dq-text-3); font-weight: 600; padding: .3rem 0; }}
+.dq-cs-cmp td {{ padding: .45rem 0; border-top: 1px solid var(--dq-border); }}
+.dq-csr-ev {{ display: flex; align-items: center; gap: .6rem; font-size: .9rem;
+  color: var(--dq-text-3); padding: .3rem 0; }}
+.dq-csr-ev span {{ width: 9px; height: 9px; border-radius: 50%;
+  background: {NEUTRAL["border_strong"]}; }}
+.dq-csr-ev.on {{ color: {NEUTRAL["text"]}; font-weight: 600; }}
+.dq-csr-ev.on span {{ background: {ACCENT}; }}
+
 /* The status stripe: the row's urgency on its left edge, in the status tone. */
 .dq-tmname {{ border-left: 4px solid var(--dq-stripe); border-radius: 2px;
   padding-left: .75rem; }}

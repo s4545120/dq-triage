@@ -37,8 +37,7 @@ def scoped_runs(runs: pd.DataFrame) -> pd.DataFrame:
     claim about the table, and without this the vulnerable-customer variance check
     would still count against `ctct_c` on every run before 2026-10-01.
     """
-    versions = adapter.get_rule_registry().sort_values("rule_version")
-    retired = set(versions.groupby("rule_id").tail(1).query("status == 'retired'").rule_id)
+    retired = metrics.retired_rule_ids(adapter.get_rule_registry())
     attached = coverage.attached_rule_ids(adapter.get_cde_coverage())
     # One run a day, the day's last (`metrics.scheduled_runs`), as the scorecard reads.
     runs = metrics.scheduled_runs(runs)

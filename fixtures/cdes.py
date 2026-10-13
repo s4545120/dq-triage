@@ -419,7 +419,7 @@ CDES: list[CDE] = [
             # same person, as the rest of the register.
             Binding(CTCT_TABLE, "CTCT_ID"),
         ],
-        explicit_rule_ids=["XREF_SUBS_CTCT_ORPHAN"],
+        explicit_rule_ids=["XREF_SUBS_CTCT_ORPHAN", "XREF_SUBS_CTCT_COUNT"],
         note=(
             "Uniqueness by column match; the orphan check is cross-table, carries no "
             "target_column, and attaches by tag -- it is a rule about whether this key "

@@ -31,6 +31,11 @@ change to it (`propose_element`, an append to `config.cde_proposal`) and a secon
 decide it (`review_element`, `config.cde_review`) -- the seventh and eighth writes in
 07_grants.sql -- but the register version is written by the onboarding job's
 apply_elements step, never from here.
+
+Consistency checks the same way since 2026-10-13: a person proposes one as a spec
+(`propose_consistency`, `config.consistency_proposal`), a second person decides it
+(`review_consistency`, `config.consistency_review`) -- the tenth and eleventh writes --
+and the onboarding job's apply_consistency step writes the rule, in shadow.
 """
 
 from __future__ import annotations
@@ -49,8 +54,8 @@ import streamlit as st
 
 from dq_app.data import identity
 from dq_app.data import notify as _notify_transport
-from dq_app.domain import (coverage, elements, lifecycle, onboarding, slices, thresholds,
-                           tolerance)
+from dq_app.domain import (consistency, coverage, elements, lifecycle, onboarding, slices,
+                           thresholds, tolerance)
 
 APP_VERSION = "dq-triage-app/1.0.0"
 
@@ -288,6 +293,39 @@ def get_cde_proposal_current() -> pd.DataFrame:
                                    get_cde_registry())
 
 
+@st.cache_data(**_CACHE)
+def _base_consistency_proposals() -> pd.DataFrame:
+    return _impl.consistency_proposals()
+
+
+@st.cache_data(**_CACHE)
+def _base_consistency_reviews() -> pd.DataFrame:
+    return _impl.consistency_reviews()
+
+
+@st.cache_data(**_CACHE)
+def get_table_populations() -> pd.DataFrame:
+    return _impl.table_populations()
+
+
+def get_consistency_proposal_current() -> pd.DataFrame:
+    """Every consistency proposal with its decision and state, this session's included --
+    the twin of v_consistency_proposal_current."""
+    return consistency.proposal_state(
+        _with_pending(_base_consistency_proposals(), "cs_proposal"),
+        _with_pending(_base_consistency_reviews(), "cs_review"),
+        get_rule_registry())
+
+
+def test_consistency(spec: dict) -> dict | None:
+    """Run a check's read-only test on current records, or None where there is no
+    warehouse (the local fixture). Raises ValueError for a spec that is not complete."""
+    queries = consistency.test_queries(
+        spec, consistency.populations_by_table(get_table_populations()))
+    raw = _impl.run_consistency_test(queries)
+    return None if raw is None else consistency.summarise(raw)
+
+
 def get_binding_proposals() -> pd.DataFrame:
     return _with_pending(_base_binding_proposals(), "proposal")
 
@@ -319,8 +357,38 @@ def get_table_sizes(fqns: tuple[str, ...]) -> dict:
 
 
 @st.cache_data(**_CATALOG_CACHE)
-def get_catalog_columns(fqn: str) -> pd.DataFrame:
+def _catalog_columns(fqn: str) -> pd.DataFrame:
     return _impl.catalog_columns(fqn)
+
+
+# An empty listing is held for half a minute, not an hour. Not caching it at all made
+# every fragment rerun on Add tables (a search keystroke, a pick) ask the warehouse again
+# for a schema whose columns this principal cannot see -- 2.5s each, measured on
+# `samples.tpch`. Half a minute is still well inside the time a grant takes to give.
+# Off the warehouse only: a local listing is a parquet read, and the tests swap fixture
+# directories with `st.cache_data.clear()`, which a module dict would outlive.
+_EMPTY_COLUMNS_TTL = 30.0
+_empty_columns: dict[str, tuple[float, pd.DataFrame]] = {}
+
+
+def get_catalog_columns(fqn: str) -> pd.DataFrame:
+    """A table's (or a schema's) columns, held for the hour -- unless there are none.
+    An empty listing means this principal cannot see the table, and a grant given since
+    must show within `_EMPTY_COLUMNS_TTL`, not an hour later: found on dq_triage, where
+    CONTACT_ID stayed missing from New check after the read grant because the pre-grant
+    empty answer was cached."""
+    seen = _empty_columns.get(fqn)
+    if seen and time.monotonic() - seen[0] < _EMPTY_COLUMNS_TTL:
+        return seen[1].copy()
+    cols = _catalog_columns(fqn)
+    if cols is None or cols.empty:
+        _catalog_columns.clear(fqn)
+        if not is_local():
+            _empty_columns[fqn] = (time.monotonic(),
+                                   cols if cols is not None else pd.DataFrame())
+    else:
+        _empty_columns.pop(fqn, None)
+    return cols
 
 
 @st.cache_data(**_CACHE)
@@ -717,6 +785,94 @@ def review_element(proposal_id: str, decision: str, reason: str | None = None) -
     return row
 
 
+# --- Consistency check writes ------------------------------------------------------------
+# A proposal and a decision, each an append signed with the platform identity. The rule
+# register is the onboarding job's (apply_consistency), so neither can change what is
+# checked until a second person has approved and the job has run -- and then only in
+# shadow.
+
+def _consistency_write(write, row: dict) -> bool:
+    try:
+        return write(row)
+    except Exception as exc:  # noqa: BLE001 -- re-raised unless it is one of the two
+        msg = str(exc)
+        if "TABLE_OR_VIEW_NOT_FOUND" in msg:
+            raise OnboardingRejected(
+                "Consistency proposals are not installed in this schema yet (sql/ddl/22, "
+                "`onboard.py install`). Nothing was written.") from exc
+        if "PERMISSION_DENIED" in msg or "INSUFFICIENT_PERMISSIONS" in msg:
+            raise OnboardingRejected(
+                "The app has no grant to write consistency proposals here yet -- the two "
+                "grants in 07_grants.sql are a decision nobody has taken for this schema. "
+                "Nothing was written.") from exc
+        raise
+
+
+def propose_consistency(spec: dict, name: str, cde_id: str, severity: str, reason: str,
+                        test: dict | None, fanout_ack: bool = False) -> dict:
+    who = identity.current()
+    _require_platform_identity(who, "Proposing a consistency check", OnboardingRejected)
+    registered = set(get_cde_registry_current().query("status != 'retired'")["cde_id"])
+    try:
+        rendered = consistency.validate_proposal(
+            spec, name, cde_id, severity, reason, test=test, fanout_ack=fanout_ack,
+            registry=get_rule_registry(), state=get_consistency_proposal_current(),
+            registered=registered)
+    except ValueError as exc:
+        raise OnboardingRejected(str(exc)) from exc
+    tables = consistency.spec_mod.tables_of(spec)
+    row = {"proposal_id": str(uuid.uuid4()), "proposed_at": datetime.now(),
+           "rule_id": consistency.new_rule_id(), "rule_name": name.strip(),
+           "kind": spec["kind"], "spec": json.dumps(spec, sort_keys=True),
+           "target_table": rendered["target_table"], "other_tables": tables[1:],
+           "cde_id": cde_id, "severity": severity, "rule_type": rendered["rule_type"],
+           "target_column": rendered["target_column"], "join_sql": rendered["join_sql"],
+           "rule_expr": rendered["rule_expr"], "scope_filter": rendered["scope_filter"],
+           "fingerprint": rendered["fingerprint"],
+           "test_compared": None if test is None else test["compared"],
+           "test_failing": None if test is None else test["failing"],
+           "test_match_pct": None if test is None else test["match_pct"],
+           "test_fanout": None if test is None else test["fanout"],
+           "proposed_by": who.email, "reason": reason.strip()}
+    if not _consistency_write(_impl.write_consistency_proposal, row):
+        clear_cache()
+        raise OnboardingRejected("The same check was proposed, or its id taken, since you "
+                                 "opened the page. It has been refreshed.")
+    clear_cache()
+    return row
+
+
+def review_consistency(proposal_id: str, decision: str, reason: str | None,
+                       test: dict | None) -> dict:
+    who = identity.current()
+    _require_platform_identity(who, "Deciding a consistency check", OnboardingRejected)
+    state = get_consistency_proposal_current()
+    match = state[(state["proposal_id"] == proposal_id) & (state["state"] == "open")] \
+        if len(state) else state
+    if match.empty:
+        raise OnboardingRejected("That proposal is already decided.")
+    proposal = match.iloc[0].to_dict()
+    waived = self_approval_waived()
+    try:
+        consistency.validate_review(proposal, who.email, decision, reason, allow_self=waived)
+    except ValueError as exc:
+        raise OnboardingRejected(str(exc)) from exc
+    reason = (reason or "").strip() or None
+    if (waived and decision == "approved"
+            and str(proposal["proposed_by"]).lower() == who.email.lower()):
+        reason = f"{consistency.WAIVER_MARK} {reason or ''}".strip()
+    row = {"proposal_id": proposal_id, "decision": decision, "reviewed_by": who.email,
+           "reviewed_at": datetime.now(), "reason": reason,
+           "test_compared": None if test is None else test["compared"],
+           "test_failing": None if test is None else test["failing"]}
+    if not _consistency_write(_impl.write_consistency_review, row):
+        clear_cache()
+        raise OnboardingRejected("Someone decided this proposal since you opened it. "
+                                 "The page has been refreshed.")
+    clear_cache()
+    return row
+
+
 # The reads every page shares. Against the warehouse each one is a fresh connection
 # and a statement -- about two seconds -- and a page asking for them one after another
 # took over half a minute cold, then again after every write. `warm` asks for all of
@@ -727,33 +883,47 @@ _SHARED_READS = (
     get_threshold_proposals, _base_threshold_reviews, _base_monitored_tables,
     _base_binding_proposals, _base_binding_reviews, get_check_templates,
     _base_cde_proposals, _base_cde_reviews, get_tolerance_proposals,
-    _base_tolerance_reviews,
+    _base_tolerance_reviews, _base_consistency_proposals, _base_consistency_reviews,
 )
 _WARM_LOCK = threading.Lock()
 _warmed_at = 0.0
 
 
-def warm() -> None:
+def fetch_parallel(*calls):
+    """Run each `(fn, *args)` at once and return the results in order.
+
+    For cached reads a page needs together: each still fills its own `st.cache_data`
+    entry on its own connection, so this changes when they are fetched, never what. A
+    cold read is a fresh connection and a statement, about two seconds apiece, so two
+    asked one after the other cost four and asked together cost two."""
+    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    ctx = get_script_run_ctx()
+
+    def _one(call):
+        if ctx is not None:
+            add_script_run_ctx(threading.current_thread(), ctx)
+        return call[0](*call[1:])
+
+    if len(calls) < 2:
+        return [_one(c) for c in calls]
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        return list(pool.map(_one, calls))     # list(): re-raises a failed read here
+
+
+def warm(also: tuple = ()) -> None:
     """Fill the shared reads in parallel, at most once per cache lifetime.
 
     Each read is still its own `st.cache_data` entry on its own connection, so a page
     and a test see exactly what they saw before; this only changes when they are
     fetched. Skipped while the last warm is younger than the cache, because a cache hit
-    still unpickles a copy of the frame."""
+    still unpickles a copy of the frame. `also` is a page's own reads (no arguments),
+    fetched in the same wave when the wave runs -- Add tables' catalog listing, which
+    otherwise waited for the wave and then cost its own two seconds."""
     global _warmed_at
     with _WARM_LOCK:
         if time.monotonic() - _warmed_at < _CACHE["ttl"] - 10:
             return
-        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-        ctx = get_script_run_ctx()
-
-        def _fill(fn):
-            if ctx is not None:
-                add_script_run_ctx(threading.current_thread(), ctx)
-            fn()
-
-        with ThreadPoolExecutor(max_workers=len(_SHARED_READS)) as pool:
-            list(pool.map(_fill, _SHARED_READS))   # list(): re-raises a failed read here
+        fetch_parallel(*((fn,) for fn in _SHARED_READS + tuple(also)))
         _warmed_at = time.monotonic()
 
 

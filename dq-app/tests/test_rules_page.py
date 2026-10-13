@@ -97,7 +97,7 @@ def test_a_disputed_rule_is_not_painted_as_failing():
     at = _run(_rule_pick="SUBS_IMEI_NOT_NULL")
     body = _body(at)
     assert "Scope disputed" in body
-    assert "The CDE register disputes this scope" in body
+    assert "The key attribute register disputes this scope" in body
     head = next(str(m.value) for m in at.markdown if "dq-rhead" in str(m.value))
     assert "Failing" not in head
 
@@ -147,7 +147,7 @@ def test_the_cde_search_finds_an_element_by_its_rules():
     cde = reg.loc[reg["rule_id"] == "SUBS_IMEI_NOT_NULL", "cde_id"].iloc[0]
     assert els == [f"_open_dqrow_rc_{cde}"]
     next(t for t in at.text_input if t.key == "_rule_cde_search").input("zzz").run()
-    assert "No element matches." in _body(at)
+    assert "No attribute matches." in _body(at)
 
 
 def test_promoting_asks_first_and_writes_only_on_confirm():

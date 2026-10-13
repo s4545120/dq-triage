@@ -120,7 +120,7 @@ if len(open_p):
                         f'with “{onboarding.WAIVER_MARK}” in its reason.</div>',
                         unsafe_allow_html=True)
         hd = st.columns(W)
-        for c, label in zip(hd, ["Column", "Registered element", "Why it was proposed",
+        for c, label in zip(hd, ["Column", "Registered attribute", "Why it was proposed",
                                  "Checks it gets", "Decision"]):
             c.markdown(f'<div class="onb-headrow">{label}</div>', unsafe_allow_html=True)
         for _, p in open_p.sort_values("target_column").iterrows():
@@ -159,7 +159,7 @@ if len(open_p):
         picks = [v for v in choice.values() if v]
         rejecting = any(v == "Reject" for v in picks)
         reason = st.text_input("Reason for the rejections", key="_rv_reason",
-                               placeholder="Why the column does not hold that element",
+                               placeholder="Why the column does not hold that attribute",
                                disabled=not rejecting)
         approved = sum(v == "Approve" for v in picks)
         rejected = sum(v == "Reject" for v in picks)
@@ -219,7 +219,7 @@ if len(open_p):
         ui.head(f"Not proposed · {len(unbound)}")
         st.markdown(
             "".join(f'<div class="onb-ev"><b class="onb-mono" style="color:inherit">'
-                    f'{html.escape(c)}</b> — nothing identifies it as a registered element.'
+                    f'{html.escape(c)}</b> — nothing identifies it as a registered attribute.'
                     '</div>' for c in unbound)
             or '<div class="onb-ev">Every column is bound or proposed.</div>',
             unsafe_allow_html=True)
@@ -227,7 +227,7 @@ if len(open_p):
         ui.head("What a decision does")
         st.markdown(
             '<div class="onb-ev"><b>Approve</b> records the binding with your name. A job then '
-            'adds it to the element register and generates the column\'s checks in shadow.'
+            'adds it to the attribute register and generates the column\'s checks in shadow.'
             '</div><div class="onb-ev"><b>Reject</b> records why. The column is not proposed '
             'again unless someone tags it or suggests it.</div><div class="onb-ev"><b>A '
             'suggestion needs a second person.</b> Whoever suggests a binding cannot approve '
@@ -342,7 +342,7 @@ if len(ev):
                        f'excluded, {n_ex} check{"s" if n_ex != 1 else ""} retired.'
                        if dropped else "") + '</div>', unsafe_allow_html=True)
                 ex_reason = (st.text_input("Why exclude", key="onbt_ex_reason",
-                                           placeholder="Why the column does not hold its element")
+                                           placeholder="Why the column does not hold its attribute")
                              if dropped else "")
                 note = st.text_input("Note", key="onbt_note",
                                      value=f"Promoted after shadow review of {name}.")
@@ -402,7 +402,7 @@ if len(ev):
                     + '. Their breaches reach Triage.</div>', unsafe_allow_html=True)
 
         with st.container(key="onbcard_cols"):
-            ui.head("Columns and their elements")
+            ui.head("Columns and their attributes")
             approved_by = {}
             if len(proposals) and len(reviews):
                 j = proposals.merge(reviews[reviews["decision"] == "approved"], on="proposal_id")
@@ -499,6 +499,6 @@ ui.confirm("decommission", f"Decommission {name}?",
            why + f"<b>This is permanent.</b> <b>{html.escape(table)}</b> is retired, and so are its "
            f"<b>{n_active + n_shadow} checks</b> ({n_active} active, {n_shadow} shadow): each gets a "
            "retired version signed with your name. The next onboarding run removes its "
-           "columns from the element register. Past results and problems already in Triage "
+           "columns from the attribute register. Past results and problems already in Triage "
            "are kept as history. To check it again, onboard it again.",
            "Decommission", _decommission)

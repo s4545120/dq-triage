@@ -15,10 +15,17 @@ on the first screen's "Select", and the suggestion screen read like the rest of 
 form -- so a user who had not reached any Submit found the table already onboarding.
 
 FAST BY CONSTRUCTION. Which tables are readable comes from one privilege query per
-schema (`adapter.get_readable_tables`), sizes from a few reused connections in parallel
-(`get_table_sizes`), both held for an hour. The list is drawn before sizes arrive and
-filled in by one rerun, so the page is usable while they load. The exact per-table
-access check still happens at the moment of submitting (`adapter.select_table`).
+schema (`adapter.get_readable_tables`) and the column counts from one listing per
+schema, the two asked together; sizes from eight reused connections in parallel
+(`get_table_sizes`); all held for an hour. The list is drawn before sizes arrive and
+filled in by one fragment rerun, so the page is usable while they load. A picked
+table's columns are read off the schema's listing, not asked for again. The catalog
+listing is fetched in the shared reads' wave. Measured 2026-10-13 on dq_triage (36
+tables), from a laptop: opening a schema was 6.2s to the list (3.5 + 2.7) and 9s more
+to sizes, then a full rerun, and each pick 2.5s; now 4.3s to the list and 6.9s to
+sizes, then a fragment rerun, and a pick costs no query.
+The exact per-table access check still happens at the moment of submitting
+(`adapter.select_table`).
 
 Session state: `_add_cat` / `_add_sch` the open schema, `_add_pick` the row chosen,
 `_add_draft` the table being drafted, `_add_done` the table just submitted,
@@ -38,7 +45,7 @@ from dq_app.domain import coverage, onboarding
 from dq_app.ui import components, theme
 from dq_app.ui import onboarding_style as ui
 
-components.page_chrome()
+components.page_chrome(also=(adapter.get_catalog_tables,))
 ui.inject()
 
 SIZE_CAP = 60     # sizes are fetched for at most this many rows of one schema
@@ -99,12 +106,12 @@ if done:
         st.markdown(
             '<div class="onb-tl">'
             '<i class="done">✓</i><div class="onb-ev"><b>Submitted.</b> '
-            + (f'{sug} suggestion{"s" if sug != 1 else ""} sent to the element owners. '
+            + (f'{sug} suggestion{"s" if sug != 1 else ""} sent to the attribute owners. '
                if sug else "")
             + 'Nothing is checked yet.</div>'
             '<i class="next">2</i><div class="onb-ev"><b>Discovery, at the next pipeline run.'
-            '</b> A job proposes which columns hold which registered element.</div>'
-            '<i class="later">3</i><div class="onb-ev"><b>Each element\'s owner decides.</b> '
+            '</b> A job proposes which columns hold which registered attribute.</div>'
+            '<i class="later">3</i><div class="onb-ev"><b>Each attribute\'s owner decides.</b> '
             'Your suggestions need a second person.</div>'
             '<i class="later">4</i><div class="onb-ev"><b>Shadow, then promote.</b> Checks are '
             'measured raising nothing, until someone promotes them.</div></div>',
@@ -146,8 +153,8 @@ if draft:
             '<i class="next">1</i><div class="onb-ev"><b>The table is selected</b>, recorded '
             'with your name, with any suggestions you add here.</div>'
             '<i class="later">2</i><div class="onb-ev"><b>Discovery, at the next pipeline run.'
-            '</b> A job proposes which columns hold which registered element.</div>'
-            '<i class="later">3</i><div class="onb-ev"><b>Each element\'s owner decides.</b> '
+            '</b> A job proposes which columns hold which registered attribute.</div>'
+            '<i class="later">3</i><div class="onb-ev"><b>Each attribute\'s owner decides.</b> '
             'Your suggestions need a second person.</div>'
             '<i class="later">4</i><div class="onb-ev"><b>Shadow.</b> Checks are generated and '
             'measured by the scheduled run, raising nothing.</div>'
@@ -164,7 +171,7 @@ if draft:
             f'{theme.badge("Needs a second approver", "info")}</div>'
             '<div class="onb-cap">If you know what a column holds, say so. Columns you leave '
             'are still looked at: the job proposes from tags, value patterns and names. Your '
-            'suggestions go to the element\'s owner, and you can\'t approve them yourself.'
+            'suggestions go to the attribute\'s owner, and you can\'t approve them yourself.'
             '</div>', unsafe_allow_html=True)
         bound = {b["target_column"] for b in coverage.bound_columns(adapter.get_cde_registry())
                  if b["target_table"] == fqn}
@@ -173,7 +180,7 @@ if draft:
         NONE = "No suggestion — let the job propose"
         W = [.85, 1.3, 1.6]
         hd = st.columns(W)
-        for c, t in zip(hd, ["Column", "Registered element", "Why"]):
+        for c, t in zip(hd, ["Column", "Registered attribute", "Why"]):
             c.markdown(f'<div class="onb-headrow">{t}</div>', unsafe_allow_html=True)
         picks = {}
         for c in free:
@@ -195,7 +202,7 @@ if draft:
             f'<div class="onb-cap"><b style="color:#14142b">{len(picks)} '
             f'suggestion{"s" if len(picks) != 1 else ""}</b>'
             + (f' · <span style="color:#b91c1c">{len(missing)} without a reason</span>'
-               if missing else " · each goes to the element's owner, not to you")
+               if missing else " · each goes to the attribute's owner, not to you")
             + "</div>", unsafe_allow_html=True)
         if f2.button("Back", key="add_draft_back", use_container_width=True):
             st.session_state.pop("_add_draft", None)
@@ -237,7 +244,7 @@ if draft:
                     f"Business domain: <b>{html.escape(str(draft.get('domain') or ''))}</b>",
                     f"Checked daily at 03:00, full table scan ({html.escape(draft['scan'])})"])
         + (f"<b>{len(picks)} suggestion{'s' if len(picks) != 1 else ''}</b>, each to its "
-           "element's owner — you can't approve your own:" + ui.items(lines)
+           "attribute's owner — you can't approve your own:" + ui.items(lines)
            if picks else "No binding suggestions: the discovery job will propose them.<br>")
         + "This records the selection and any suggestions with your name. A selection "
           "cannot be withdrawn from the app yet.",
@@ -302,8 +309,8 @@ def _browse() -> None:
     if find.strip():
         view = view[view["table_name"].str.contains(find.strip(), case=False, regex=False)]
     view = view.sort_values("table_name")
-    readable = adapter.get_readable_tables(cat, sch)
-    schema_cols = adapter.get_catalog_columns(f"{cat}.{sch}")
+    readable, schema_cols = adapter.fetch_parallel(
+        (adapter.get_readable_tables, cat, sch), (adapter.get_catalog_columns, f"{cat}.{sch}"))
     ncols = schema_cols.groupby("table_name").size().to_dict() if len(schema_cols) else {}
     ntags = (schema_cols[schema_cols["tag_cde"].notna()].groupby("table_name").size().to_dict()
              if len(schema_cols) else {})
@@ -395,7 +402,10 @@ def _browse() -> None:
                                "info": "Its progress is on Onboarding."}[tone]
                             + "</div>", unsafe_allow_html=True)
             else:
-                cols = adapter.get_catalog_columns(fqn)
+                # The schema's listing already holds this table's columns, in order; only
+                # an empty one (nothing listable) is worth asking about by table.
+                cols = (schema_cols[schema_cols["table_name"] == r["Name"]]
+                        if len(schema_cols) else adapter.get_catalog_columns(fqn))
                 names = list(cols["column_name"]) if len(cols) else []
                 groups = sorted({g for g in regs["owner_group"].dropna()}) if len(regs) else []
                 key = st.multiselect("Row key", names, default=onboarding.suggest_row_key(names),
@@ -427,10 +437,14 @@ def _browse() -> None:
     if sizes is None and rows:
         fetched = adapter.get_table_sizes(tuple(view["fqn"].head(SIZE_CAP)))
         st.session_state.setdefault("_add_sizes", {})[sizes_key] = fetched
-        # A full run, not `scope="fragment"`: this branch runs as part of a full run
-        # (a schema opened for the first time), where Streamlit refuses that scope.
+        # Sizes are drawn only inside this fragment, so redraw just it. A schema opened
+        # by a tree click is a fragment run; the first schema shown is part of a full
+        # run, where Streamlit refuses that scope, so that one reruns the page.
         # Once per schema, then the sizes are in session.
-        st.rerun()
+        try:
+            st.rerun(scope="fragment")
+        except st.errors.StreamlitAPIException:
+            st.rerun()
 
 
 _browse()

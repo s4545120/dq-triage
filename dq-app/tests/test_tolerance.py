@@ -287,12 +287,12 @@ def test_an_accepted_tightening_points_at_the_elements_page():
     acc = cur[(cur["review_state"] == "accepted") & (cur["advice"] == "tighten")].iloc[0]
     at = _run(_tol_pick=acc["proposal_id"])
     assert [b for b in at.button if b.key == "tol_to_elements"]
-    assert "Elements page" in _text(at)
+    assert "Key attributes page" in _text(at)
 
 
 def test_the_triage_queue_says_what_it_held_back():
     at = _run("dq_app/ui/pages/triage.py")
     body = _text(at)
     assert "3 within tolerance" in body
-    assert "within their element's agreed tolerance" in body
+    assert "within their attribute's agreed tolerance" in body
     assert "Network technology" in body

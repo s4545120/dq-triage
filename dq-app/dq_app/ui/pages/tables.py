@@ -53,7 +53,7 @@ hd.markdown(
 )
 
 if runs.empty:
-    st.caption("No checks on registered critical data elements have run yet.")
+    components.no_runs_yet()
     st.stop()
 
 # --- Filters ------------------------------------------------------------------
@@ -98,7 +98,7 @@ with actions:
         file_name=f"dq-tables-{last_ts:%Y%m%d}.csv", mime="text/csv",
         icon=":material/download:", width="stretch",
         help="Every check result from the latest run in this domain, as CSV — the "
-             "checks on registered critical data elements, as on the page.")
+             "checks on registered key attributes, as on the page.")
 
 # --- Four figures -------------------------------------------------------------
 
@@ -207,7 +207,7 @@ st.markdown(
     "<span>Scores reflect checks passing, not row-level quality"
     + theme.hint(
         "A table's figure is its checks within their limit over the checks that ran "
-        "on the latest run. Counted over checks on registered critical data elements "
+        "on the latest run. Counted over checks on registered key attributes "
         "only, as the scorecard is; checks on unregistered columns still run and "
         "are worked from Triage. The scorecard's quality figure is weighted by rows "
         "and is a different number.", side="left")

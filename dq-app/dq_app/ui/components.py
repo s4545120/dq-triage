@@ -59,9 +59,32 @@ def as_list(value) -> list:
 # --- Page chrome ------------------------------------------------------------
 
 
-def page_chrome() -> None:
+def no_runs_yet() -> None:
+    """What a page with no measured run says instead of a score.
+
+    Since 2026-10-12 the register is the key attributes, whose checks are in shadow on
+    source tables this workspace may not reach, so "no check runs" was true and told the
+    reader nothing. This says what is registered and why nothing is scored."""
+    attrs = adapter.get_cde_registry_current()
+    attrs = attrs[attrs["status"] == "registered"] if len(attrs) else attrs
+    if attrs.empty:
+        st.caption("No key attributes are registered, so there is nothing to score.")
+        return
+    reg = adapter.get_rule_registry_current()
+    active = int((reg["status"] == "active").sum()) if len(reg) else 0
+    shadow = int((reg["status"] == "shadow").sum()) if len(reg) else 0
+    st.caption(
+        f"{len(attrs)} key attributes are registered, with {active} active and {shadow} "
+        "shadow checks, and no active check has been scored yet. A check is measured "
+        "once the check job can read its table, and counts toward a score only once "
+        "it is promoted and the next run has measured it. The Rules page shows every "
+        "check's own latest measurement, shadow ones included.")
+
+
+def page_chrome(also: tuple = ()) -> None:
+    """`also`: the page's own no-argument reads, fetched in the shared reads' wave."""
     theme.inject_css()
-    adapter.warm()
+    adapter.warm(also)
     _sidebar_source()
     _sidebar_identity()
 
@@ -379,7 +402,7 @@ def element_chips(elements: list[dict], unattached: list[str],
     if unattached:
         n = len(unattached)
         pills.append(f'<span class="dq-chip off">{n} {"check" if n == 1 else "checks"} '
-                     "on no registered element</span>")
+                     "on no registered attribute</span>")
     return "".join(pills)
 
 
@@ -451,7 +474,7 @@ def element_panel(cde_cov: pd.DataFrame, registry: pd.DataFrame, cde_id: str,
                        for i in as_list(ids)})
     if unscoped:
         st.caption(
-            "Rules contradicting this element's registered scope: "
+            "Rules contradicting this attribute's registered scope: "
             + ", ".join(f"`{i}`" for i in unscoped)
             + ". The register declares the scope these rules should have had, which "
             "is how a rule defect becomes an assertion the model makes rather than "
@@ -737,7 +760,7 @@ def failed_rows(rule_id: str, row, samples: pd.DataFrame, heading: bool = True) 
         f"{len(mine):,} of {int(row['violation_count']):,} captured"
         + (" — the runner caps what it keeps per check, so this is a sample, not "
            "the set." if len(mine) < int(row["violation_count"]) else "."),
-        help="The one accepted PII surface in this design. The element profile "
+        help="The one accepted PII surface in this design. The attribute profile "
              "stores no values at all, and this panel does not widen what the "
              "cohort view already showed — same rows, same columns, same cap.",
     )

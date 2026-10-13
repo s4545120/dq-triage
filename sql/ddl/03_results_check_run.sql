@@ -44,7 +44,12 @@ CREATE TABLE IF NOT EXISTS {catalog}.results.check_run (
   -- last because ADD COLUMNS puts them there. NULL on every run before slices existed.
   slice_version     INT                COMMENT 'config.monitored_table.slice_version in force for the target (driving) table at run time. NULL: the whole table',
   table_rows        BIGINT             COMMENT 'rows in the target table at run time, before the slice',
-  slice_rows        BIGINT             COMMENT 'rows in the slice -- the population every check on the table drew from. Equal to table_rows when unsliced. A slice that grows to hide failures shows as this falling'
+  slice_rows        BIGINT             COMMENT 'rows in the slice -- the population every check on the table drew from. Equal to table_rows when unsliced. A slice that grows to hide failures shows as this falling. Counted after config.table_population when the table declares one',
+  -- THE RECORDS THE VERDICT RAN OVER (2026-10-12). A history table's current versions,
+  -- from config.table_population (sql/ddl/21). Applied before the slice, so the three
+  -- counts nest: table_rows >= population_rows >= slice_rows. NULL when none declared.
+  population_version INT              COMMENT 'config.table_population.population_version in force for the target table at run time. NULL: every row of the table is a record',
+  population_rows   BIGINT             COMMENT 'current records in the target table (latest version, deletions dropped), before the slice. NULL when no population is declared'
 )
 USING DELTA
 CLUSTER BY (run_ts, rule_id)

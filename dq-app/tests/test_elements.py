@@ -268,7 +268,7 @@ def _pending(at, kind: str) -> list[dict]:
 def test_the_page_lists_the_register_and_how_registration_works(page):
     at = page()
     body = _text(at)
-    assert at.title[0].value == "Critical data elements" and "Elements · 19" in body
+    assert at.title[0].value == "Key attributes" and "Attributes · 19" in body
     assert "A second person approves" in body
     assert "Customer email address" in body
 
@@ -437,3 +437,15 @@ def test_a_schema_without_the_tables_or_the_grants_says_so_and_writes_nothing():
         adapter._element_write(denied, {})
     with pytest.raises(ValueError):
         adapter._element_write(lambda _r: (_ for _ in ()).throw(ValueError("other")), {})
+
+
+def test_an_attribute_opens_its_checks_on_the_rules_page(page):
+    at = page(_el_pick="CDE_CUST_EMAIL", _rule_cde_search="phone", _rule_cde_page=2,
+              _rule_pick="CTCT_PHN_FMT")
+    btn = next(b for b in at.button if b.key == "el_open_rules")
+    assert "in Rules" in btn.label
+    btn.click().run()
+    # The Rules page opens on this attribute, with nothing left that would hide it.
+    assert at.session_state["_rule_el"] == "CDE_CUST_EMAIL"
+    for k in ("_rule_pick", "_rule_cde_search", "_rule_cde_page"):
+        assert k not in at.session_state

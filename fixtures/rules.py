@@ -1466,4 +1466,53 @@ DQ_QUERIES_RULES: list[Rule] = [
 
 RULES += DQ_QUERIES_RULES
 
+
+# ---------------------------------------------------------------------------
+# A totals reconciliation -- the one example of the third consistency kind
+# ---------------------------------------------------------------------------
+# Added 2026-10-13 so the Consistency page has one of each kind to show. Its SQL is
+# rendered by onboarding/consistency.py, never typed: the spec is what a real one would
+# be written from. Shadow, and in build_fixtures.STEADY, so it moves no scored figure.
+
+def _consistency():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "onboarding"))
+    import consistency
+    return consistency
+
+
+_cs = _consistency()
+_COUNT = _cs.Reconcile(_cs.Side(SUBS_TABLE, "count(DISTINCT CTCT_KEY)"),
+                       _cs.Side(CTCT_TABLE, "count(DISTINCT CTCT_KEY)")).render()
+
+
+def _xref_contact_count(c: Ctx):
+    """One row, ungrouped: the two distinct-key counts, and whether they differ."""
+    frame = pd.DataFrame([{"SUBS_CONTACTS": c.subs.CTCT_KEY.nunique(),
+                           "CONTACTS": c.ctct.CTCT_KEY.nunique()}])
+    return frame, frame.SUBS_CONTACTS != frame.CONTACTS
+
+
+RECONCILE_RULES: list[Rule] = [
+    Rule(
+        rule_id="XREF_SUBS_CTCT_COUNT",
+        rule_name="Subscriptions and contacts carry the same number of customers",
+        target_table=SUBS_TABLE,
+        rule_type=_COUNT["rule_type"],
+        rule_expr=_COUNT["rule_expr"],
+        join_sql=_COUNT["join_sql"],
+        evaluator=_xref_contact_count,
+        severity="P3_monitor",
+        status="shadow",
+        key_column="SUBS_CONTACTS",
+        sample_columns=["SUBS_CONTACTS", "CONTACTS"],
+        note=("Example totals reconciliation, rendered by onboarding/consistency.Reconcile: "
+              "distinct contact keys on subscriptions against distinct contact keys on "
+              "contacts, exact. Shadow: nobody has said the two populations should match."),
+    ),
+]
+
+RULES += RECONCILE_RULES
+
 BY_ID = {r.rule_id: r for r in RULES}

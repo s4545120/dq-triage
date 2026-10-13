@@ -121,6 +121,16 @@ runs = adapter.get_check_runs()
 cde_cov = adapter.get_cde_coverage()
 registry = adapter.get_rule_registry_current()
 
+# A retired check's breach is history, not work, and a problem whose every check is
+# retired is history too: it leaves every view here, "All" included. Its page and its
+# decisions stay where they are. Since 2026-10-12 this is every problem raised on the
+# mock register.
+_retired = metrics.retired_rule_ids(adapter.get_rule_registry())
+runs = runs[~runs["rule_id"].isin(_retired)]
+_history = metrics.history_cohort_ids(cohorts, _retired)
+cohorts = cohorts[~cohorts["cohort_id"].isin(_history)]
+current = current[~current["cohort_id"].isin(_history)]
+
 # One definition of compression, in domain/metrics.py — recomputing it here with a
 # slightly different denominator is how a headline starts disagreeing with the
 # scorecard that reports it. The queue below lists exactly the cohorts it divides by.
@@ -141,7 +151,12 @@ st.markdown(
 )
 
 if current.empty:
-    st.caption("No problems have been raised.")
+    st.caption(
+        "No problems have been raised on the current checks."
+        + (f" {len(_history)} raised on checks since retired are kept as history."
+           if _history else ""),
+        help="A problem is raised when active checks breach on a run. Checks still in "
+             "shadow are measured but raise nothing.")
     st.stop()
 
 # --- What each view means ---------------------------------------------------
@@ -156,7 +171,7 @@ closed_ids = set(current[current["lifecycle_state"].str.startswith("closed")]["c
 SCOPES = {
     "live": ("Live", live_ids,
              "Every problem with a check breaching on the latest run — including ones "
-             "that were closed and have come back — less checks whose element is "
+             "that were closed and have come back — less checks whose attribute is "
              "within its agreed tolerance. This is the set the grouping ratio "
              "divides by."),
     "mine": ("Waiting on me", mine_ids,
@@ -292,7 +307,7 @@ def _cells(row) -> str:
         '<span class="t2">'
         + (f'<span class="mark" style="color:'
            f'{theme.TONE[theme.CRITICALITY_TONE.get(crit, "neutral")]["fg"]}">'
-           f'{html.escape(str(crit))} element</span> · ' if crit else "")
+           f'{html.escape(str(crit))} attribute</span> · ' if crit else "")
         + f'{html.escape(row["Tables"])}{marks}</span></span>'
         + f'<span>{theme.badge(row["State"], row["State tone"])}</span>'
         + f'<span class="num">{row["Checks"]:,}</span>'
@@ -357,7 +372,7 @@ st.markdown(
     f'<div class="dq-tmfoot"><span>{len(rows)} of {len(current)} problems ever raised'
     "</span><span>Ranked by the triage job's score, not by the model's confidence"
     + theme.hint("rank_score weighs severity, rows affected and the criticality of the "
-                 "elements touched. The model's own confidence is shown on the "
+                 "attributes touched. The model's own confidence is shown on the "
                  "problem and deliberately not an input: ranking on a self-reported "
                  "number lets a confident wrong answer outrank a hedged right one.",
                  side="left")
@@ -378,7 +393,7 @@ def _held_sentence() -> str:
     n = len(held)
     return (f" <b>{n} more failing check{'s' if n != 1 else ''}</b> "
             f"{'are' if n != 1 else 'is'} within {'their' if n != 1 else 'its'} "
-            f"element's agreed tolerance and {'were' if n != 1 else 'was'} not sent "
+            f"attribute's agreed tolerance and {'were' if n != 1 else 'was'} not sent "
             f"here: {html.escape(', '.join(els))}.")
 
 

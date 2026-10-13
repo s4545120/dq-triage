@@ -56,7 +56,7 @@ registry = adapter.get_rule_registry_current()
 tables = monitoring.table_rows(runs, 30)
 
 if not tables:
-    st.caption("No checks on registered critical data elements have run yet.")
+    components.no_runs_yet()
     st.stop()
 
 selected = st.session_state.get("monitors_selected_table")
@@ -142,7 +142,7 @@ hero.markdown(
     + '<div class="say">'
     + (f'<b>{len(breaching)} {"rule is" if len(breaching) == 1 else "rules are"}</b> '
        "breaching their configured limits"
-       + (f", {len(disputed)} of them a rule the CDE register disputes." if disputed
+       + (f", {len(disputed)} of them a rule the key attribute register disputes." if disputed
           else ".")
        if breaching else "<b>Every rule</b> is within its configured limit.")
     + (f" The table's slice changed on {pd.Timestamp(moved[-1]):%-d %b}: runs before it "
@@ -234,7 +234,7 @@ def _rules_and_pane() -> None:
 
         def _tip(r) -> list:
             return [r["Rule"], (r["key"], "mono"),
-                    "Rule scope disputed by the CDE register" if r["Disputed"] else
+                    "Rule scope disputed by the key attribute register" if r["Disputed"] else
                     "Over its limit" if r["Breach"] else "Within its limit"]
 
         if listed:
@@ -321,7 +321,7 @@ def _rules_and_pane() -> None:
                         + theme.icon("alert", 15)
                         + f'<span>{sel["Findings"]:,} of {sel["Rows"]:,} evaluated rows fail '
                         "this rule."
-                        + (" The CDE register says the rule measures rows it should not."
+                        + (" The key attribute register says the rule measures rows it should not."
                            if sel["Disputed"] else "")
                         + "</span></div>",
                         unsafe_allow_html=True)

@@ -5,6 +5,7 @@
     ../.venv/bin/python onboard.py setup      # schema, clones, new tables, mock source, tags
     #   -> PERSON (app): propose an element; a SECOND person approves it
     ../.venv/bin/python onboard.py apply_elements  # JOB: approved element proposals -> cde_registry
+    ../.venv/bin/python onboard.py apply_consistency  # JOB: approved consistency checks -> shadow rules
     ../.venv/bin/python onboard.py discover   # JOB:    propose bindings
     #   -> PERSON: review.sql step 1, approve or reject the proposals
     ../.venv/bin/python onboard.py apply      # JOB:    approved proposals -> cde_registry
@@ -48,6 +49,7 @@ except NameError:
     _HERE = Path(sys.argv[0]).resolve().parent
 sys.path.insert(0, str(_HERE))
 import mock_lead
+import consistency
 import discovery
 import elements
 import templates as tpl
@@ -74,7 +76,9 @@ _SLICE_ADDS = {
         "slice_filter STRING", "slice_spec STRING", "slice_version INT", "slice_change STRING",
         "slice_proposed_filter STRING", "slice_proposed_spec STRING",
         "slice_proposed_by STRING"],
-    "results.check_run": ["slice_version INT", "table_rows BIGINT", "slice_rows BIGINT"],
+    "results.check_run": ["slice_version INT", "table_rows BIGINT", "slice_rows BIGINT",
+                          # the population (2026-10-12), after the slice as 03 declares it
+                          "population_version INT", "population_rows BIGINT"],
 }
 TEMPLATE_COLS = ("template_id, template_version, data_class, check_code, title, input_type, "
                  "rule_type, rule_expr, scope_filter, severity, source_rule, created_by, "
@@ -229,7 +233,8 @@ ADOPT_ROW_KEY = {"SUBS_C": ["SUBS_KEY"], "CTCT_C": ["CTCT_KEY"]}
 # are re-created after the ALTER above. 08 and 11 also give this schema the triage views.
 DDL_FILES = ["15_config_onboarding.sql", "17_config_cde_onboarding.sql", "08_views.sql",
              "11_views_cde.sql", "14_views_threshold.sql", "16_views_onboarding.sql",
-             "18_views_cde_onboarding.sql"]
+             "18_views_cde_onboarding.sql", "21_config_population.sql",
+             "22_config_consistency.sql"]
 
 
 def _run_ddl(conn, fname: str) -> None:
@@ -312,10 +317,18 @@ def discover(conn) -> None:
 
     for table in tables:
         cat, sch, name = table.split(".")
-        typed = {r["column_name"]: r["data_type"] for r in run(conn, f"""
-            SELECT column_name, data_type FROM {cat}.information_schema.columns
-            WHERE table_schema = '{sch}' AND table_name = '{name}'
-            ORDER BY ordinal_position""")}
+        # A selected table this workspace cannot see -- the key attributes' prod.* source
+        # tables, registered before they are reachable -- is skipped, not fatal: one
+        # missing catalog used to stop discovery for every other table.
+        try:
+            typed = {r["column_name"]: r["data_type"] for r in run(conn, f"""
+                SELECT column_name, data_type FROM {cat}.information_schema.columns
+                WHERE table_schema = '{sch}' AND table_name = '{name}'
+                ORDER BY ordinal_position""")}
+        except Exception as exc:                    # noqa: BLE001 -- said, then skipped
+            print(f"discover: {table} skipped -- cannot read its columns: "
+                  f"{str(exc).splitlines()[0][:200]}")
+            continue
         cols = list(typed)
         bound = {r["target_column"] for r in run(conn, f"""
             SELECT target_column FROM {t('config', 'v_binding_current')}
@@ -566,6 +579,60 @@ WHERE  rule_id = {lit(r['rule_id'])} AND rule_version = {int(r['rule_version'])}
   AND  NOT EXISTS (SELECT 1 FROM {rr} WHERE rule_id = {lit(r['rule_id'])}
                    AND rule_version > {int(r['rule_version'])})""")
         print(f"{r['rule_id']}: retired with {r['cde_id']}")
+
+
+# ---------------------------------------------------------------------------
+# apply_consistency (job): approved consistency proposals become shadow rules
+# ---------------------------------------------------------------------------
+
+def apply_consistency(conn) -> None:
+    """Write each approved consistency proposal (sql/ddl/22) to the rule register, in
+    shadow, rendered HERE from its spec by onboarding/consistency.py.
+
+    The app wrote the spec and the rule it rendered; a second person approved it. What
+    this step refuses is `consistency.refusal`: an unmarked self-approval, a rule id
+    already used, a key attribute no longer registered, a spec that renders differently
+    here than in the app, and a check some current rule already does. A refused proposal
+    stays `approved` and is printed; this step never decides anything. Idempotent: the
+    note starts with `consistency.marker(proposal_id)`, which the view reads as applied,
+    and the INSERT is guarded on the rule id.
+
+    A schema `install` has not given sql/ddl/22 is skipped, not failed."""
+    if not run(conn, f"""SELECT 1 FROM {wh.CATALOG}.information_schema.tables
+            WHERE table_schema = '{wh.SCHEMA}'
+              AND table_name = '{PREFIX}config_v_consistency_proposal_current'"""):
+        print("consistency proposals are not installed in this schema (sql/ddl/22); skipped")
+        return
+    approved = run(conn, f"""SELECT * FROM {t('config', 'v_consistency_proposal_current')}
+        WHERE state = 'approved' ORDER BY proposed_at""")
+    if not approved:
+        print("no approved consistency proposals waiting")
+        return
+    rr = t("config", "rule_registry")
+    rules = run(conn, f"SELECT rule_id, rule_version, status, join_sql, rule_expr, "
+                      f"scope_filter FROM {rr}")
+    cdes = {c["cde_id"]: c for c in run(conn, f"""SELECT cde_id, business_domain, owner_group
+        FROM {t('config', 'v_cde_registry_current')} WHERE status IN ('registered', 'proposed')""")}
+    for p in approved:
+        why = consistency.refusal(p, rules, set(cdes))
+        if why:
+            print(f"refused: {p['rule_id']} ({p['proposal_id']}): {why}")
+            continue
+        r = consistency.render_spec(json.loads(p["spec"]))
+        c = cdes[p["cde_id"]]
+        note = (f"{consistency.marker(p['proposal_id'])} {p['reason']} (proposed by "
+                f"{p['proposed_by']}, approved by {p['reviewed_by']}). Written from a "
+                f"consistency spec; in shadow until a person promotes it.")
+        run(conn, f"""INSERT INTO {rr} ({RULE_COLS})
+SELECT {lit(p['rule_id'])}, 1, {lit(p['rule_name'])}, {lit(r['target_table'])},
+       {lit(r['target_column'])}, {lit(p['cde_id'])}, {lit(r['rule_type'])},
+       {lit(r['rule_expr'])}, {lit(r['scope_filter'])}, 0.0, {lit(p['severity'])},
+       {lit(c['business_domain'])}, {lit(c['owner_group'])}, 'L2', 'shadow',
+       current_timestamp(), 'job:onboard-consistency', current_timestamp(), NULL, NULL,
+       {lit(note)}, {lit(r['join_sql'])}, NULL, NULL
+WHERE NOT EXISTS (SELECT 1 FROM {rr} WHERE rule_id = {lit(p['rule_id'])})""")
+        rules.append({"rule_id": p["rule_id"], "rule_version": 1, "status": "shadow", **r})
+        print(f"{p['rule_id']}: written in shadow")
 
 
 # ---------------------------------------------------------------------------
@@ -906,6 +973,7 @@ def steps(conn) -> None:
     """What the event-triggered job runs when a table is submitted or a binding decided:
     every step that needs no person, then a shadow-only measurement of anything new."""
     print("== apply element proposals"); apply_elements(conn)
+    print("\n== apply consistency proposals"); apply_consistency(conn)
     print("\n== discover"); discover(conn)
     print("\n== apply"); apply(conn)
     print("\n== unbind decommissioned tables"); unbind_retired(conn)
@@ -934,6 +1002,7 @@ def _try(conn, sql: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("step", choices=["setup", "install", "adopt", "apply_elements",
+                                     "apply_consistency",
                                      "discover", "apply",
                                      "generate", "run", "status", "pipeline", "steps"])
     ap.add_argument("--schema", default=wh.TEST_SCHEMA,
@@ -962,7 +1031,8 @@ def main() -> int:
             return 1
     with connect() as conn:
         {"setup": setup, "install": install, "adopt": adopt,
-         "apply_elements": apply_elements, "discover": discover,
+         "apply_elements": apply_elements, "apply_consistency": apply_consistency,
+         "discover": discover,
          "apply": apply, "generate": generate, "run": run_checks, "status": status,
          "pipeline": pipeline, "steps": steps}[step](conn)
     return 0

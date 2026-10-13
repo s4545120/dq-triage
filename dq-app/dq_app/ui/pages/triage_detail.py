@@ -188,11 +188,11 @@ if elements:
             and st.session_state[_ELEM_PICK] not in by_id:
         st.session_state[_ELEM_PICK] = None
     picked_el = st.pills(
-        "Critical data elements", list(by_id), key=_ELEM_PICK,
+        "Key attributes", list(by_id), key=_ELEM_PICK,
         format_func=lambda i: (
             f'{by_id[i]["name"]} · {by_id[i]["criticality"]} · '
             f'{theme.COVERAGE_GAP_LABEL.get(by_id[i]["coverage_gap"], "")}'),
-        help="The registered elements this problem's checks watch, from the CDE "
+        help="The registered attributes this problem's checks watch, from the key attribute "
              "register. Click one to see every binding and what checks it.",
     )
     if unattached:
@@ -201,7 +201,7 @@ if elements:
 else:
     picked_el = None
     st.markdown(
-        '<div class="dq-chiprow"><span class="k">Critical data elements</span>'
+        '<div class="dq-chiprow"><span class="k">Key attributes</span>'
         + components.element_chips([], unattached)
         + "</div>",
         unsafe_allow_html=True,

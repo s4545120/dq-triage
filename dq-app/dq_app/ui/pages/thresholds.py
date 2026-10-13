@@ -42,13 +42,18 @@ components.page_chrome()
 
 st.markdown(
     '<div class="dq-page-hd"><div class="t">Thresholds</div>'
-    '<div class="s">One tolerance per critical data element, decided by the business. '
+    '<div class="s">One tolerance per key attribute, decided by the business. '
     "It decides which failing checks reach Triage.</div></div>",
     unsafe_allow_html=True,
 )
 
 current = adapter.get_tolerance_proposal_current()
 old = adapter.get_threshold_proposals()
+# Advice on an attribute since retired is history: the register no longer asks anyone
+# to decide it. Since 2026-10-12 that is every proposal made on the mock register.
+_registered = set(adapter.get_cde_registry_current()["cde_id"])
+if len(current):
+    current = current[current["cde_id"].isin(_registered)]
 
 
 def _history_note() -> None:
@@ -57,7 +62,7 @@ def _history_note() -> None:
             f"{old['rule_id'].nunique()} rules' earlier limit proposals are kept as history.",
             help="Until 2026-10-08 the threshold job advised on every rule's own limit, "
                  "and this page put each one to review. Rule limits are now a "
-                 "steward's setting, 0 by default; the business decides the element's "
+                 "steward's setting, 0 by default; the business decides the attribute's "
                  "tolerance instead. The proposals stay in results.threshold_proposal.",
         )
 
@@ -66,7 +71,7 @@ if current.empty:
     st.caption(
         "No tolerance advice yet.",
         help="The threshold job has not advised on tolerances in this catalog. It "
-             "writes one row per element per pass to results.tolerance_proposal.",
+             "writes one row per attribute per pass to results.tolerance_proposal.",
     )
     _history_note()
     st.stop()
@@ -92,19 +97,19 @@ decide = current[current["review_state"].isin(tolerance.DECIDABLE)]
 components.kpi_row([
     {"label": "Awaiting decision", "value": f"{s['open']}",
      "tone": "high" if s["open"] else None,
-     "help": "Advice nobody has decided. At most one per element."},
+     "help": "Advice nobody has decided. At most one per attribute."},
     {"label": "Business decisions", "value": str(int((decide["advice"] == "review").sum())),
-     "sub": "element outside its tolerance",
+     "sub": "attribute outside its tolerance",
      "help": "The data gets fixed, or the business accepts more failure. The job "
              "never raises a tolerance itself."},
     {"label": "Tighten", "value": str(int((decide["advice"] == "tighten").sum())),
      "sub": "tolerance looser than the data"},
     {"label": "Held from Triage", "value": str(sum(len(v) for v in held_by_cde.values())),
      "sub": "failing checks, latest run",
-     "help": "Failing checks whose element sat within its tolerance on the latest run. "
+     "help": "Failing checks whose attribute sat within its tolerance on the latest run. "
              "Still breaches on the Scorecard and the Rules page; not work in Triage. "
              "A P1 is never held."},
-    {"label": "Elements advised", "value": f"{s['proposals']}",
+    {"label": "Attributes advised", "value": f"{s['proposals']}",
      "sub": f"latest pass {pd.Timestamp(current['proposed_ts'].max()):%-d %b}"},
 ])
 
@@ -123,7 +128,7 @@ def _pct(v) -> str:
 
 rows = [{
     "Proposal id": r["proposal_id"],
-    "Element": opt(r["cde_name"]) or r["cde_id"],
+    "Attribute": opt(r["cde_name"]) or r["cde_id"],
     "Cde": r["cde_id"],
     "Criticality": opt(r["criticality"]) or "",
     "Now": _pct(r["current_tolerance_pct"]),
@@ -141,7 +146,7 @@ GRID = ("minmax(10rem,1.6fr) minmax(5rem,7rem) 4.6rem 5.4rem minmax(7.5rem,9rem)
 
 def _cells(m) -> str:
     return (
-        f'<span class="name" title="{html.escape(m["Cde"])}">{html.escape(m["Element"])}'
+        f'<span class="name" title="{html.escape(m["Cde"])}">{html.escape(m["Attribute"])}'
         f'<span style="color:var(--dq-text-2)"> · {html.escape(m["Criticality"])}</span></span>'
         f'<span class="num">{m["Now"]}'
         + (f' → <b>{m["Advised"]}</b>' if m["Advised"] else "") + "</span>"
@@ -183,15 +188,15 @@ def _advice() -> None:
         picked = rows[0]["Proposal id"] if rows else None
 
     components.row_head(
-        ["Element", ("Tolerance", "n"), ("Failing", "n"), ("Runs outside", "n"),
+        ["Attribute", ("Tolerance", "n"), ("Failing", "n"), ("Runs outside", "n"),
          "Advice", "State"], GRID)
     with st.container(key="dqrows_tol"):
         components.clickable_rows(
             rows, GRID, _cells, "tol", "Proposal id",
-            lambda m: f"Open the advice on {m['Element']}", picked=picked,
+            lambda m: f"Open the advice on {m['Attribute']}", picked=picked,
             on_pick=components.pick_into("_tol_pick"))
     st.caption(
-        "Failing is rows failed over rows checked across the element's checks on the "
+        "Failing is rows failed over rows checked across the attribute's checks on the "
         "latest run — the same figure the Scorecard prints against the same target.",
         help="A sum of failures across checks, not a count of distinct bad rows: a row "
              "failing two checks counts twice. check_run stores counts, not keys.")
@@ -236,7 +241,7 @@ def _advice() -> None:
     with right:
         st.markdown(
             theme.kv("Register now", _pct(p["register_tolerance_pct"]))
-            + theme.kv("Advised on", f"element version {int(p['cde_version'])}, "
+            + theme.kv("Advised on", f"attribute version {int(p['cde_version'])}, "
                                      f"{pd.Timestamp(p['proposed_ts']):%-d %b %Y}")
             + theme.kv("Decided by", p["reviewer"]),
             unsafe_allow_html=True)
@@ -251,17 +256,17 @@ def _advice() -> None:
                 + theme.kv("Latest run", _pct(p["latest_fail_pct"])),
                 unsafe_allow_html=True)
         if bool(p["scope_disputed"]):
-            st.caption("A rule on this element is in scope mismatch, so its failure rate "
+            st.caption("A rule on this attribute is in scope mismatch, so its failure rate "
                        "measures the rule, not the data. Nothing on it is held back.")
 
     if state == "accepted" and advice == "tighten":
         st.markdown(
             '<div class="dq-because">Accepted. The register still says '
             f'{_pct(p["register_tolerance_pct"])}: the change itself is an amendment on '
-            "the Elements page, approved by a second person and applied by the "
+            "the Key attributes page, approved by a second person and applied by the "
             "onboarding job. This advice reads <b>In force</b> once it lands.</div>",
             unsafe_allow_html=True)
-        if st.button("Amend on Elements", icon=":material/edit:", key="tol_to_elements",
+        if st.button("Amend in Key attributes", icon=":material/edit:", key="tol_to_elements",
                      on_click=_to_elements, args=(p["cde_id"],)):
             st.switch_page("dq_app/ui/pages/elements.py")
 
@@ -280,7 +285,7 @@ def _advice() -> None:
         st.caption("Writes are session-only here — lost on restart. Deploy to decide.")
     labels = {
         "accepted": (f"Accept — tighten to {_pct(p['proposed_tolerance_pct'])} through "
-                     "the Elements page" if advice == "tighten" else
+                     "the Key attributes page" if advice == "tighten" else
                      "Accept — the business will decide: fix the data or amend the tolerance"),
         "rejected": "Reject — the tolerance stays as it is",
         "deferred": "Defer — decide later",
@@ -315,7 +320,7 @@ def _advice() -> None:
                 f"for {name}."
                 + (f" Resurfaces {by:%-d %b %Y}." if by else "")
                 + " The register is not changed"
-                + (" — the tightening is then an amendment on the Elements page, approved "
+                + (" — the tightening is then an amendment on the Key attributes page, approved "
                    "by a second person." if d == "accepted" and advice == "tighten" else ".")
                 + " A decision cannot be edited, only followed by another.")
         onboarding_style.confirm(DECIDE, "Record this decision?", body, "Record", _write)

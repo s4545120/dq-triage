@@ -14,9 +14,12 @@
   6. The onboarding writers' column lists -- the job's and the app's -- against
      15_config_onboarding.sql and the template columns on rule_registry; since
      2026-10-08 also the CDE onboarding writers against 17, and the job's CDE_COLS
-     against 09.
+     against 09; since 2026-10-13 the consistency proposal writers against 22.
   7. No notebook's code reads violation_sample.sample_row: row values carry PII and
      never go into a model brief.
+  8. No current cross-table rule compares with `<>` or `!=` (onboarding/consistency.py
+     `unsafe_comparisons`): a NULL on one side drops the pair from the count, which is
+     the disagreement such a rule exists to catch. Two known rules are listed as known.
 
     ../.venv/bin/python verify.py [out_dir]
 
@@ -228,6 +231,8 @@ ONBOARDING_WRITERS = [
     ("onboarding/onboard.py", "CDE_COLS", "config.cde_registry", "09_config_cde_registry.sql"),
     ("dq-app/dq_app/domain/elements.py", "PROPOSAL_COLUMNS", "config.cde_proposal", "17_config_cde_onboarding.sql"),
     ("dq-app/dq_app/domain/elements.py", "REVIEW_COLUMNS", "config.cde_review", "17_config_cde_onboarding.sql"),
+    ("dq-app/dq_app/domain/consistency.py", "PROPOSAL_COLUMNS", "config.consistency_proposal", "22_config_consistency.sql"),
+    ("dq-app/dq_app/domain/consistency.py", "REVIEW_COLUMNS", "config.consistency_review", "22_config_consistency.sql"),
 ]
 _consts: dict[str, dict] = {}
 for src, name, tbl, fname in ONBOARDING_WRITERS:
@@ -268,6 +273,21 @@ for _, r in bad.iterrows():
 opened = set(disp[disp.event_type == "recommended"].cohort_id)
 for cid in set(coh.cohort_id) - opened:
     findings.append(f"missing_recommended_event: {cid}")
+
+# --- 8. Null-safe cross-table comparisons -------------------------------------
+# The two XREF agreement rules are the known cases (CLAUDE.md, *What the workspace
+# actually holds*); fixing them moves every downstream number and is a decision, so
+# they are named here rather than fixed. Any third one is a finding.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "onboarding"))
+from consistency import unsafe_comparisons  # noqa: E402
+
+KNOWN_UNSAFE = {"XREF_NAME_AGREEMENT", "XREF_OPEN_TS_AGREEMENT"}
+reg_all = T["config.rule_registry"]
+reg_now = reg_all[reg_all.rule_version == reg_all.groupby("rule_id").rule_version.transform("max")]
+for _, r in reg_now[reg_now.status != "retired"].iterrows():
+    hits = unsafe_comparisons(r.rule_expr, r.get("join_sql"))
+    if hits and r.rule_id not in KNOWN_UNSAFE:
+        findings.append(f"comparison_not_null_safe: {r.rule_id} {hits[0]!r} -- use <=>")
 
 # --- fixture-consistency assertions ----------------------------------------
 assert disp.groupby("cohort_id").event_seq.apply(lambda s: s.is_unique).all(), "event_seq reused"

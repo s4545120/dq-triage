@@ -39,7 +39,7 @@ _CSS = f"""
   padding-left: 1rem; padding-right: 1rem; box-sizing: border-box; }}
 [class*="st-key-onbcard_rows"] .st-key-dqrows_onb {{ padding: 0; }}
 
-/* The Elements page's list and detail: wrap rather than squeeze. The list's fixed
+/* The Attributes page's list and detail: wrap rather than squeeze. The list's fixed
    columns need about 16rem beside the name, so below 26rem of card it would crush the
    name to nothing; the two cards stack instead (the Rules page's dq_rsplit, the same
    way). Child combinators, so the form's own two-column rows are left alone. */

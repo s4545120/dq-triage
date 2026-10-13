@@ -96,8 +96,8 @@ with right, st.container(key="onbcard_how"):
     st.markdown(
         '<div class="onb-hw">'
         '<i>1</i><span><b>You select it</b> from Unity Catalog</span>'
-        '<i>2</i><span>A job proposes which columns hold which registered element</span>'
-        '<i>3</i><span><b>The element\'s owner approves</b> each binding</span>'
+        '<i>2</i><span>A job proposes which columns hold which registered attribute</span>'
+        '<i>3</i><span><b>The attribute\'s owner approves</b> each binding</span>'
         '<i>4</i><span>Checks are generated in shadow and measured, raising nothing</span>'
         '<i>5</i><span><b>A person promotes</b> them after seeing the numbers</span>'
         '</div><div class="onb-rule" style="margin-top:.4rem"></div>'

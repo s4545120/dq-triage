@@ -112,6 +112,27 @@ def scheduled_runs(check_run: pd.DataFrame) -> pd.DataFrame:
     return live[live["run_id"].isin(kept)]
 
 
+def retired_rule_ids(rule_versions: pd.DataFrame) -> set[str]:
+    """Rules whose latest version is retired. Their runs are history, not a current claim
+    about anything: every page that reads runs drops them, and Triage drops a problem
+    whose every check is one of them. Since 2026-10-12, when the mock register was
+    retired in favour of the key attributes, that is most of the history."""
+    if rule_versions.empty:
+        return set()
+    latest = rule_versions.sort_values("rule_version").groupby("rule_id").tail(1)
+    return set(latest.loc[latest["status"] == "retired", "rule_id"])
+
+
+def history_cohort_ids(cohort: pd.DataFrame, retired: set[str]) -> set[str]:
+    """Problems every one of whose checks is retired: history, on no page's count.
+    Triage leaves them out of every view and the scorecard's open-problems figure does
+    not count them."""
+    if cohort.empty:
+        return set()
+    return set(cohort.loc[cohort["member_rule_ids"].map(
+        lambda ids: all(r in retired for r in ids)), "cohort_id"])
+
+
 def queue_run_id(check_run: pd.DataFrame):
     """The run `live_cohorts` reads: the latest by run_ts. Named so the held set is
     computed on the same run the queue lists."""

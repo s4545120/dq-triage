@@ -117,7 +117,7 @@ RECURRED = {"CTCT_PHN_FMT": (-21, -8, 24)}  # (fixed_day, recurred_day, count no
 # history is flat at the snapshot count and draws nothing from the shared rng: a
 # draw here would shift every later rule's jitter, and with it figures the app's
 # tests pin. Flat is also the honest shape for a rule nobody has watched move.
-STEADY = {r.rule_id for r in rules.DQ_QUERIES_RULES}
+STEADY = {r.rule_id for r in rules.DQ_QUERIES_RULES + rules.RECONCILE_RULES}
 
 # The age rules are evaluated as of the final run; see rules.AS_OF.
 assert rules.AS_OF == pd.Timestamp(SNAPSHOT.date()), (rules.AS_OF, SNAPSHOT)
@@ -306,6 +306,15 @@ def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, 
     # The rules added since get their own stream, so adding one moves no figure the
     # original 35 produce -- see STEADY.
     added_rng = random.Random(20261005)
+    # And the reconciliation example (2026-10-13) its own again: sharing added_rng
+    # shifted every DQ Queries rule's duration and DBU on every later run.
+    recon_rng = random.Random(20261013)
+    recon = {r.rule_id for r in rules.RECONCILE_RULES}
+
+    def _rng(rule_id: str) -> random.Random:
+        if rule_id in recon:
+            return recon_rng
+        return added_rng if rule_id in STEADY else rng
     runs, samples = [], []
     index: dict[tuple[int, str], str] = {}   # (day, rule_id) -> result_id
     run_ids: dict[int, str] = {}
@@ -354,8 +363,8 @@ def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, 
                 owner_group=r.owner_group,
                 scope_fingerprint=None,   # open question, see 03_results_check_run.sql
                 message=msg,
-                duration_sec=round((added_rng if r.rule_id in STEADY else rng).uniform(0.4, 9.0), 2),
-                dbu_estimate=round((added_rng if r.rule_id in STEADY else rng).uniform(0.001, 0.03), 5),
+                duration_sec=round(_rng(r.rule_id).uniform(0.4, 9.0), 2),
+                dbu_estimate=round(_rng(r.rule_id).uniform(0.001, 0.03), 5),
             ))
 
             # Samples only where they are real: the final run, from actual bad rows.
@@ -373,9 +382,11 @@ def build_runs(snaps: dict[str, Snapshot]) -> tuple[pd.DataFrame, pd.DataFrame, 
                     ))
 
     frame = pd.DataFrame(runs)
-    # Every fixture run predates data slices (2026-10-06): no slice, and no population
-    # recorded. Typed so the parquet carries integers, not an all-null column.
-    for c in ("slice_version", "table_rows", "slice_rows"):
+    # Every fixture run predates data slices (2026-10-06) and declared populations
+    # (2026-10-12): no slice, no current-record narrowing, and no row counts recorded.
+    # Typed so the parquet carries integers, not an all-null column.
+    for c in ("slice_version", "table_rows", "slice_rows", "population_version",
+              "population_rows"):
         frame[c] = pd.Series(pd.NA, index=frame.index, dtype="Int64")
     return frame, pd.DataFrame(samples), {"index": index, "run_ids": run_ids}
 
