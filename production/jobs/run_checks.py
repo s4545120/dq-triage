@@ -76,11 +76,39 @@ row alone no longer says what was measured, and every verdict is stamped with th
   slice and a column varies within it.
 * Cross-table: only the DRIVING table (`target_table`) is sliced. Slicing the other side
   too would make a subscription whose contact sits outside the contact table's slice an
-  orphan, which is a statement about the slice, not the data.
+  orphan, which is a statement about the slice, not the data. The POPULATION below is
+  different and goes on every side.
 * `table_rows` is a bare `count(*)`, which Delta answers from the log.
 
 The slice is built by the app from a structured spec (dq_app/domain/slices.py) and is
 trusted config like `rule_expr`.
+
+THE POPULATION (2026-10-12)
+---------------------------
+A history table holds every version of a record. `config.table_population`
+(sql/ddl/21) says how to find the current one: the newest version of each
+`record_key` by `version_by`, dropped when it is a deletion. `current()` builds that
+relation, and it is applied UNDER the slice -- the slice narrows current records, never
+raw versions -- so every count nests: table_rows >= population_rows >= slice_rows.
+
+* Latest first, deletions after. Filtering `OP_TYPE <> 'D'` in the same SELECT as the
+  window would run before it and make a deleted record's previous version current.
+* On EVERY table of a join, not just the driving one. An orphan check that matched a
+  child against any old version of its parent would pass on a parent deleted last week;
+  dropping a deleted parent is what makes the child an orphan, which is the truth.
+* Ties are broken arbitrarily, so a declaration names enough columns to be total.
+* Stamped on every verdict as `population_version` / `population_rows`. A table with
+  no declaration reads exactly as before, and every builder below emits the same SQL
+  for it -- `dq_app/domain/rule_sql.py`'s copy is diffed against these on that basis.
+
+JOINS SHARE A QUERY TOO (2026-10-12)
+------------------------------------
+Cross-table rules whose join comes out identical -- same tables, same ON, same
+population and slice -- are folded into one aggregate the same way row-level rules on
+a table are: `count_if(scope)` and `count_if(scope AND expr)` per rule over one join.
+The equivalence argument is the one above. Two exceptions run alone: a rule whose
+`scope_filter` holds a subquery (Spark allows one only in a WHERE, where the single
+query keeps it) and a join no other rule shares, whose SQL is then exactly what it was.
 
 TRUST BOUNDARY. `rule_expr` and `scope_filter` are arbitrary SQL interpolated into a
 query, by design -- a rule_expr IS SQL and always will be. The registry is trusted
@@ -97,6 +125,7 @@ import uuid
 from dataclasses import dataclass, field
 
 RULE_ID_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,120}$")
+COLUMN_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,254}$")
 
 # The canonical prefix on the shared predicate helpers as config.rule_registry stores
 # them. A deployment whose catalog IS `dq` needs no rewrite at all; every other one
@@ -127,6 +156,19 @@ class Rule:
     owner_group: str | None = None
     join_sql: str | None = None       # from the registry once the column exists
     sample_columns: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Population:
+    """One table's current-record declaration, from config.table_population."""
+    record_key: tuple[str, ...] = ()
+    version_by: tuple[str, ...] = ()
+    deleted_column: str | None = None
+    deleted_value: str | None = None
+    version: int | None = None
+
+    def narrows(self) -> bool:
+        return bool(self.version_by) or not _blank(self.deleted_column)
 
 
 # ---------------------------------------------------------------------------
@@ -186,12 +228,53 @@ def scope_sql(r: Rule) -> str:
     return f"({r.scope_filter})"
 
 
-def relation(table: str, slice_filter: str | None) -> str:
-    """The table, or the rows of it in its slice. Parenthesised so it stands anywhere a
-    table name does -- after FROM, before a join alias, inside a variance expression."""
-    if _blank(slice_filter):
+def _col(name: str) -> str:
+    """A declared column, backticked. Column names come from config, not from a steward
+    typing SQL, so one that is not a plain identifier stops the run."""
+    if not COLUMN_OK.match(str(name)):
+        raise ValueError(f"population column {name!r} is not a plain identifier")
+    return f"`{name}`"
+
+
+def _lit(v) -> str:
+    """A string literal. Spark's literals take backslash escapes, so both are escaped."""
+    return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def current(table: str, pop: Population | None) -> str:
+    """The table's current records: the newest version per record, then deletions out.
+
+    Two nested SELECTs because the order matters: a WHERE beside the QUALIFY would drop
+    deleted versions BEFORE the window picks the newest, and the version before the
+    deletion would come back as the record.
+
+    A row with a NULL in its record key is kept, every one of them: it cannot be tied
+    to its other versions, and the window would otherwise put every keyless row in one
+    partition and keep one -- hiding exactly the rows a missing-key check exists to
+    count. Found on the mock contact table, where it hid planted defects."""
+    if pop is None or not pop.narrows():
         return table
-    return f"(SELECT * FROM {table} WHERE {slice_filter})"
+    src = table
+    if pop.version_by:
+        keys = ", ".join(_col(k) for k in pop.record_key)
+        keyless = " OR ".join(f"{_col(k)} IS NULL" for k in pop.record_key)
+        order = ", ".join(f"{_col(c)} DESC NULLS LAST" for c in pop.version_by)
+        src = (f"(SELECT * FROM {table} QUALIFY row_number() OVER "
+               f"(PARTITION BY {keys} ORDER BY {order}) = 1 OR {keyless})")
+    if not _blank(pop.deleted_column):
+        src = (f"(SELECT * FROM {src} WHERE NOT ({_col(pop.deleted_column)} <=> "
+               f"{_lit(pop.deleted_value)}))")
+    return src
+
+
+def relation(table: str, slice_filter: str | None, pop: Population | None = None) -> str:
+    """The table, or the rows of it in its slice. Parenthesised so it stands anywhere a
+    table name does -- after FROM, before a join alias, inside a variance expression.
+    The population, when declared, is underneath: the slice narrows current records."""
+    base = current(table, pop)
+    if _blank(slice_filter):
+        return base
+    return f"(SELECT * FROM {base} WHERE {slice_filter})"
 
 
 def _alias(prefix: str, rule_id: str) -> str:
@@ -247,39 +330,73 @@ def variance_sql(table: str, r: Rule) -> str:
             f"FROM   {table}{where}")
 
 
-def _join(r: Rule, resolve: dict[str, str], slices: dict[str, str] | None) -> str:
-    """`join_sql` with table names resolved and the DRIVING table replaced by its slice.
-    Resolution first, so the slice is found under the physical name."""
+def _join(r: Rule, resolve: dict[str, str], slices: dict[str, str] | None,
+          pops: dict[str, Population] | None = None) -> str:
+    """`join_sql` with table names resolved, every table with a declared population
+    replaced by its current records, and the DRIVING table also by its slice.
+    Resolution first, so both are found under the physical name."""
     join = r.join_sql
     for k, v in resolve.items():
         join = join.replace(k, v)
     driving = resolve.get(r.target_table, r.target_table)
+    swap: dict[str, str] = {}
+    for name, pop in (pops or {}).items():
+        phys = resolve.get(name, name)
+        if phys != driving and pop.narrows():
+            swap[phys] = current(phys, pop)
     sf = (slices or {}).get(r.target_table)
-    if not _blank(sf):
-        # Whole names only: a plain replace would also rewrite `..._subs_c_hist`.
-        join = re.sub(rf"(?<![\w.`]){re.escape(driving)}(?![\w`])",
-                      lambda _m: relation(driving, sf), join)
+    dp = (pops or {}).get(r.target_table)
+    if not _blank(sf) or (dp is not None and dp.narrows()):
+        swap[driving] = relation(driving, sf, dp)
+    if swap:
+        # Whole names only: a plain replace would also rewrite `..._subs_c_hist`. One
+        # pass over every name, longest first, so no replacement is scanned again.
+        names = sorted(swap, key=len, reverse=True)
+        pat = "|".join(re.escape(n) for n in names)
+        join = re.sub(rf"(?<![\w.`])(?:{pat})(?![\w`])",
+                      lambda m: swap[m.group(0)], join)
     return join
 
 
 def cross_table_sql(r: Rule, resolve: dict[str, str],
-                    slices: dict[str, str] | None = None) -> str:
+                    slices: dict[str, str] | None = None,
+                    pops: dict[str, Population] | None = None) -> str:
     """A join the registry has no column for. `resolve` is the table-name map."""
-    join = _join(r, resolve, slices)
+    join = _join(r, resolve, slices, pops)
     where = "" if _blank(r.scope_filter) else f"\n  WHERE {r.scope_filter}"
     return (f"SELECT count(*) AS rows_scanned,\n"
             f"       count_if({r.rule_expr}) AS violation_count\n"
             f"FROM   {join}{where}")
 
 
+def batch_cross_table(join: str, rules: list[Rule]) -> str:
+    """ONE aggregate over one join for every cross-table rule that shares it. The same
+    two counters per rule as `batch_row_level`, and the same equivalence: what the
+    single query's WHERE keeps, `count_if(scope)` counts."""
+    parts = ["  count(*) AS __joined_rows"]
+    for r in rules:
+        sc = scope_sql(r)
+        parts.append(f"  count_if({sc}) AS {_alias('s', r.rule_id)}")
+        parts.append(f"  count_if({sc} AND ({r.rule_expr})) AS {_alias('v', r.rule_id)}")
+    return "SELECT\n" + ",\n".join(parts) + f"\nFROM {join}"
+
+
+def _joins_batchable(r: Rule) -> bool:
+    """A scope holding a subquery cannot move into a count_if; Spark refuses it there."""
+    return _blank(r.scope_filter) or not re.search(r"\bSELECT\b", str(r.scope_filter),
+                                                    re.IGNORECASE)
+
+
 def sample_sql(r: Rule, table: str, resolve: dict[str, str], cap: int = SAMPLE_CAP,
-               slices: dict[str, str] | None = None) -> str:
+               slices: dict[str, str] | None = None,
+               pops: dict[str, Population] | None = None) -> str:
     """Up to `cap` offending rows for a breach. Raising the cap widens what the AI layer
     sees of production data, so it is a governance change -- see 04's header. `table`
-    is already the sliced relation when the table has a slice."""
+    is already the sliced relation when the table has a slice (and its current records
+    when it declares a population)."""
     sh = shape(r)
     if sh == "cross_table":
-        src, pred = _join(r, resolve, slices), r.rule_expr
+        src, pred = _join(r, resolve, slices, pops), r.rule_expr
     elif sh == "uniqueness":
         src, pred = f"(SELECT *, {r.rule_expr} AS __dup FROM {table})", "__dup"
     elif sh == "variance":
@@ -336,17 +453,22 @@ def verdict(r: Rule, scanned: int, violations: int) -> tuple[str, float, str]:
 
 
 def plan(rules: list[Rule], resolve: dict[str, str],
-         slices: dict[str, str] | None = None) -> dict:
+         slices: dict[str, str] | None = None,
+         pops: dict[str, Population] | None = None) -> dict:
     """Group rules into the queries that will run. Pure, so a test can assert the shape
     of a run without touching a warehouse: `len(plan(...)['batched'])` is the number of
-    table scans the row-level rules will cost. `slices` maps a registry table name to
-    its slice predicate; `batched` is keyed by the relation the scan reads."""
+    table scans the row-level rules will cost, `len(plan(...)['joined'])` the joins the
+    cross-table rules will cost beyond the singles. `slices` maps a registry table name
+    to its slice predicate and `pops` to its population; `batched` is keyed by the
+    relation the scan reads and `joined` by the join."""
     batched: dict[str, list[Rule]] = {}
+    joined: dict[str, list[Rule]] = {}
     singles: list[tuple[Rule, str]] = []
     unresolved: list[Rule] = []
     for r in rules:
         table = relation(resolve.get(r.target_table, r.target_table),
-                         (slices or {}).get(r.target_table))
+                         (slices or {}).get(r.target_table),
+                         (pops or {}).get(r.target_table))
         sh = shape(r)
         if sh == "row_level":
             batched.setdefault(table, []).append(r)
@@ -354,12 +476,18 @@ def plan(rules: list[Rule], resolve: dict[str, str],
             singles.append((r, uniqueness_sql(table, r)))
         elif sh == "variance":
             singles.append((r, variance_sql(table, r)))
+        elif _blank(r.join_sql):
+            unresolved.append(r)
+        elif _joins_batchable(r):
+            joined.setdefault(_join(r, resolve, slices, pops), []).append(r)
         else:
-            if not _blank(r.join_sql):
-                singles.append((r, cross_table_sql(r, resolve, slices)))
-            else:
-                unresolved.append(r)
-    return {"batched": batched, "singles": singles, "unresolved": unresolved}
+            singles.append((r, cross_table_sql(r, resolve, slices, pops)))
+    # A join only one rule reads stays the single query it always was.
+    for join in [j for j, rs in joined.items() if len(rs) == 1]:
+        r = joined.pop(join)[0]
+        singles.append((r, cross_table_sql(r, resolve, slices, pops)))
+    return {"batched": batched, "joined": joined, "singles": singles,
+            "unresolved": unresolved}
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +554,9 @@ def main(argv: list[str] | None = None) -> int:
     slices = {k: f for k, (f, _v) in sliced.items()}
     if slices:
         print(f"sliced: {', '.join(sorted(slices))}")
+    pops = read_populations(spark, t("config", "table_population"))
+    if pops:
+        print(f"current records only: {', '.join(sorted(pops))}")
     if selected is not None:
         rules = [r for r in rules if r.target_table in selected]
         print(f"checking {len(selected)} selected tables: {', '.join(sorted(selected))}")
@@ -444,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.schema:
         resolve = {"prod.customer.ctct_c": t("", "mock_ctct_c").replace("..", "."),
                    "prod.customer.subs_c": t("", "mock_subs_c").replace("..", ".")}
-    p = plan(rules, resolve, slices)
+    p = plan(rules, resolve, slices, pops)
 
     if p["unresolved"]:
         print(f"!! {len(p['unresolved'])} cross-table rules have no join and will be "
@@ -455,6 +586,9 @@ def main(argv: list[str] | None = None) -> int:
         for table, rs in p["batched"].items():
             print(f"\n-- batched: {len(rs)} row-level rules, ONE scan of {table}")
             print(batch_row_level(table, rs))
+        for join, rs in p["joined"].items():
+            print(f"\n-- joined: {len(rs)} cross-table rules, ONE join")
+            print(batch_cross_table(join, rs))
         for r, sql in p["singles"]:
             print(f"\n-- {shape(r)}: {r.rule_id}\n{sql}")
         return 0
@@ -463,8 +597,16 @@ def main(argv: list[str] | None = None) -> int:
     # `error` verdict for exactly the rules it carried, with the reason in `message`.
     measured: dict[str, tuple[int, int]] = {}
     failed: dict[str, str] = {}
-    # (table_rows, slice_rows) per registry table name, stamped on every verdict on it.
-    population: dict[str, tuple[int | None, int | None]] = {}
+    # (table_rows, population_rows, slice_rows) per registry table name, stamped on
+    # every verdict on it. Each extra count runs only when something narrowed the table.
+    population: dict[str, tuple[int | None, int | None, int | None]] = {}
+
+    def _count(rel: str) -> int | None:
+        try:
+            return int(spark.sql(f"SELECT count(*) AS n FROM {rel}").collect()[0]["n"])
+        except Exception:                           # noqa: BLE001 -- population unknown
+            return None
+
     for table, rs in p["batched"].items():
         try:
             row = spark.sql(batch_row_level(table, rs)).collect()[0].asDict()
@@ -473,14 +615,26 @@ def main(argv: list[str] | None = None) -> int:
                 failed[r.rule_id] = f"not executed: {table} scan failed: {_first_line(exc)}"
             continue
         name = rs[0].target_table
-        whole = int(row["__slice_rows"] or 0)
-        if not _blank(slices.get(name)):
-            try:
-                phys = resolve.get(name, name)
-                whole = int(spark.sql(f"SELECT count(*) AS n FROM {phys}").collect()[0]["n"])
-            except Exception:                       # noqa: BLE001 -- population unknown
-                whole = None
-        population[name] = (whole, int(row["__slice_rows"] or 0))
+        phys, pop = resolve.get(name, name), pops.get(name)
+        sliced_n = int(row["__slice_rows"] or 0)
+        narrowed = pop is not None and pop.narrows()
+        if narrowed:
+            current_n = sliced_n if _blank(slices.get(name)) else _count(current(phys, pop))
+        else:
+            current_n = None
+        whole = (_count(phys) if narrowed or not _blank(slices.get(name))
+                 else sliced_n)
+        population[name] = (whole, current_n, sliced_n)
+        for r in rs:
+            measured[r.rule_id] = (int(row[_alias("s", r.rule_id)] or 0),
+                                   int(row[_alias("v", r.rule_id)] or 0))
+    for join, rs in p["joined"].items():
+        try:
+            row = spark.sql(batch_cross_table(join, rs)).collect()[0].asDict()
+        except Exception as exc:                    # noqa: BLE001 -- recorded, not hidden
+            for r in rs:
+                failed[r.rule_id] = f"not executed: shared join failed: {_first_line(exc)}"
+            continue
         for r in rs:
             measured[r.rule_id] = (int(row[_alias("s", r.rule_id)] or 0),
                                    int(row[_alias("v", r.rule_id)] or 0))
@@ -494,9 +648,12 @@ def main(argv: list[str] | None = None) -> int:
                                int(row["violation_count"] or 0))
 
     def _stamp(name: str) -> dict:
-        tr, sr = population.get(name, (None, None))
+        tr, pr, sr = population.get(name, (None, None, None))
+        pop = pops.get(name)
         return dict(slice_version=sliced.get(name, (None, None))[1],
-                    table_rows=tr, slice_rows=sr)
+                    table_rows=tr, slice_rows=sr, population_rows=pr,
+                    population_version=pop.version if pop is not None and pop.narrows()
+                    else None)
 
     verdicts, samples = [], []
     for r in rules:
@@ -531,13 +688,13 @@ def main(argv: list[str] | None = None) -> int:
             message=msg, duration_sec=None, dbu_estimate=None, **_stamp(r.target_table)))
         if status == "breach":
             tgt = relation(resolve.get(r.target_table, r.target_table),
-                           slices.get(r.target_table))
+                           slices.get(r.target_table), pops.get(r.target_table))
             # Sampling reads the rows themselves, so a predicate that only errors on some
             # values (a date cast meeting '31-02-1988' under ANSI) can fail here after the
             # count succeeded. The verdict stands; the missing sample is said in the
             # message instead of taking every other table's verdicts down with it.
             try:
-                df = spark.sql(sample_sql(r, tgt, resolve, slices=slices))
+                df = spark.sql(sample_sql(r, tgt, resolve, slices=slices, pops=pops))
                 keep = sample_keep(r, df.columns, row_keys.get(r.target_table))
                 # Renamed by position first: a join's duplicate names cannot be selected.
                 names = [f"{c}#{i}" for i, c in enumerate(df.columns)]
@@ -568,7 +725,8 @@ def main(argv: list[str] | None = None) -> int:
     for v in verdicts:
         by[v["status"]] = by.get(v["status"], 0) + 1
     print(f"run {run_id}: {len(verdicts)} verdicts {by}, {len(samples)} samples, "
-          f"{len(p['batched'])} batched scans + {len(p['singles'])} single queries")
+          f"{len(p['batched'])} batched scans + {len(p['joined'])} shared joins + "
+          f"{len(p['singles'])} single queries")
     return 0
 
 
@@ -603,6 +761,32 @@ def select_tables(spark, monitored: str, cli: str | None):
     if rows:
         return {r["target_table"] for r in rows if r["status"] == "selected"}, keys, sliced
     return None, keys, sliced
+
+
+def read_populations(spark, table: str) -> dict[str, Population]:
+    """{registry table name: its population in force}, from the latest version of each
+    config.table_population row. A schema without the table, or a table with no row,
+    reads every table whole -- what every run did before 2026-10-12."""
+    try:
+        rows = spark.sql(f"""
+            SELECT * FROM (
+              SELECT *, ROW_NUMBER() OVER (PARTITION BY target_table
+                                           ORDER BY population_version DESC) AS rn
+              FROM {table}) WHERE rn = 1""").collect()
+    except Exception:                               # noqa: BLE001 -- table absent
+        return {}
+    return {d["target_table"]: population_of(d) for d in (r.asDict() for r in rows)}
+
+
+def population_of(d: dict) -> Population:
+    """One table_population row as the runner reads it. Pure, so a test can build one."""
+    return Population(record_key=tuple(d.get("record_key") or ()),
+                      version_by=tuple(d.get("version_by") or ()),
+                      deleted_column=None if _blank(d.get("deleted_column"))
+                      else d["deleted_column"],
+                      deleted_value=d.get("deleted_value"),
+                      version=None if d.get("population_version") is None
+                      else int(d["population_version"]))
 
 
 def row_key(sample: dict, keys: list[str] | None) -> str:

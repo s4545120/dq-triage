@@ -1,224 +1,474 @@
 #!/usr/bin/env python3
-"""Assemble production/ — every artefact meant to run in a real deployment.
+"""Assemble production/ — the SQL and the jobs, rendered for ONE sandpit schema.
 
-    python3 tools/build_production.py
+    .venv/bin/python tools/build_production.py
+    .venv/bin/python tools/build_production.py --catalog sdpt_data_trnf --schema udp_brnz \\
+        --prefix dq_ --source-catalog prod
 
-One folder holding what a deployment needs, so the PoC scaffolding cannot be shipped by
-accident. Nothing here is substituted: the production catalog, service principals and
-groups are not this repo's to guess.
+Everything in production/ is rendered for the names given here, so the SQL files, the
+job bundle and the two notebooks agree with each other. Change a name by re-running
+this, never by editing production/ by hand.
 
-WHAT IS DELIBERATELY EXCLUDED, and it is most of the repo: `fixtures/` (a laptop
-dataset), `sql/out/` (rendered for one sandpit, plus mock source tables, a fixture seed,
-39 fabricated runs, a check-runner stand-in and a comparison harness), and
-`sql/out/migrate_fn_adoption.sql` (a one-time repair for a catalog seeded before the
-shared helpers existed -- a deployment authored against them never needs it).
+WHAT IS IN IT. The pipeline without the app: the DDL (sql/render.py's sandpit layout,
+one schema, `dq_<group>_<table>`), the key-attribute register and its 119 rules, the
+placeholder tolerances, the current-record declaration, a SQL promote step (the app's
+Promote button, as a statement a person runs), the check runner, the triage notebook
+and the tolerance-advice notebook, and a Databricks Asset Bundle that schedules them.
 
-THE APP IS NOT COPIED HERE, on purpose. `dq-app/` deploys with `databricks sync` and is
-the only directory that ships; duplicating ~20 modules that 129 tests are pinned to
-would create a second copy that drifts silently. The README points at it instead.
+WHAT IS NOT. The app (`dq-app/`), and with it everything that only an app write starts:
+onboarding/ and its steps job (they react to monitored_table / binding_review /
+consistency_review appends, which only the app makes), notebook 04 (mails on an
+accepted review, which only the app records), fixtures/, and sql/out/ (rendered for
+workspace.dq_triage, with mock sources and seeded history).
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import pathlib
+import re
 import shutil
+import sys
 
 ROOT = pathlib.Path(__file__).parent.parent
 OUT = ROOT / "production"
+sys.path.insert(0, str(ROOT / "sql"))
+sys.path.insert(0, str(ROOT / "key_attributes"))
 
-# (source, destination, why it is here). SQL order is load-bearing.
-SQL = [
-    ("sql/ddl/00_schemas.sql",               "catalog and the two schemas"),
-    ("sql/ddl/01_config_rule_registry.sql",  "what we check — append-only"),
-    ("sql/ddl/02_config_playbook.sql",       "remediation approaches, non-executable by design"),
-    ("sql/ddl/03_results_check_run.sql",     "one verdict per rule per run"),
-    ("sql/ddl/04_results_violation_sample.sql", "<=100 example bad rows per breach"),
-    ("sql/ddl/05_results_cohort.sql",        "grouped breaches + the model's verdict"),
-    ("sql/ddl/06_results_disposition.sql",   "THE AUDIT REGISTER — append-only"),
-    ("sql/ddl/09_config_cde_registry.sql",   "what matters — registered before anything profiles it"),
-    ("sql/ddl/10_results_cde_profile.sql",   "what each registered element contains"),
-    ("sql/ddl/12_functions.sql",             "shared predicate helpers — 13 rules CALL these, "
-                                             "so this must precede any registry seed"),
-    ("sql/ddl/13_results_threshold.sql",     "the threshold job's advice, and the reviewer's "
-                                             "decision on it — the app's third write"),
-    ("sql/ddl/08_views.sql",                 "current state, derived — reads 01 and 06"),
-    ("sql/ddl/11_views_cde.sql",             "coverage — reads 09, 10, 03 and 08's view"),
-    ("sql/ddl/14_views_threshold.sql",       "where each rule's latest proposal has got to — "
-                                             "reads 13 and 08's view"),
-    ("sql/ddl/15_config_onboarding.sql",     "which tables are checked, check templates, and "
-                                             "binding proposals and decisions — append-only"),
-    ("sql/ddl/16_views_onboarding.sql",      "how far each selected table has got — reads 15, "
-                                             "08's view and 11's"),
-    ("sql/ddl/07_grants.sql",                "the control claim. Last, because it grants on "
-                                             "objects that must already exist"),
-]
+import render  # noqa: E402
+import migrate_key_attributes as mka  # noqa: E402
+import migrate_key_attribute_tolerance as mtol  # noqa: E402
+import migrate_key_attributes_source as msrc  # noqa: E402
+import migrate_table_population as mpop  # noqa: E402
+import register as ka  # noqa: E402
+from migrate_cde_scope import RULE_COLUMNS, lit  # noqa: E402
 
-OTHER = [
-    ("jobs/run_checks.py", "jobs/run_checks.py",
-     "**Scheduled in `workspace.dq_onboard` only** (the `dq-checks` job, daily). The check "
-     "runner. One aggregate per table rather than one query per rule; checks the tables "
-     "`config.monitored_table` selects. Verdict logic validated against a real catalog by "
-     "`jobs/validate_run_checks.py`."),
-    ("notebooks/03_group_and_advise.ipynb", "notebooks/03_group_and_advise.ipynb",
-     "**Executed.** The triage job: groups breaches mechanically, reads the register, "
-     "calls a model once per group, writes `results.cohort`."),
-    ("notebooks/04_send_notification.ipynb", "notebooks/04_send_notification.ipynb",
-     "**Never executed.** The mail sender behind `DQ_NOTIFY=job`. Needs a job, a secret "
-     "scope and an SMTP host that do not exist. Writes no table."),
-    ("notebooks/06_suggest_thresholds.ipynb", "notebooks/06_suggest_thresholds.ipynb",
-     "**Never executed.** The threshold job: one model call per registered element, "
-     "advising on each rule's fail_threshold_pct against the element's declared tolerance "
-     "and the run history. Writes `results.threshold_proposal` and nothing else."),
-]
+MODEL = "system.ai.gpt-oss-120b"
+NOTEBOOK_NAMES = 'CATALOG, SCHEMA, PREFIX = "workspace", "dq_triage", "dq_"'
 
-README = """# production/ — GENERATED by tools/build_production.py. Do not edit; regenerate.
 
-Every artefact meant to run in a real deployment, and nothing else. Excluded on purpose:
-`fixtures/` (a laptop dataset) and all of `sql/out/` (rendered for one sandpit, plus mock
-source tables, a fixture seed, 39 fabricated check runs, a check-runner stand-in and a
-comparison harness).
+def banner(title: str, *lines: str) -> str:
+    bar = "-- " + "=" * 69
+    return "\n".join([bar, f"-- {title}", *(f"-- {l}" if l else "--" for l in lines), bar])
 
-## Status, honestly
 
-| Artefact | Has it run? |
-|---|---|
-| `sql/` — 17 DDL files | **Yes**, as the rendered single-schema variant: 01–14 against `workspace.dq_triage`, the onboarding pair (15, 16) against `workspace.dq_onboard` only |
-| `notebooks/03_group_and_advise.ipynb` | **Yes**, as a serverless job against `system.ai.gpt-oss-120b` |
-| `jobs/run_checks.py` | **Yes, scheduled — in `workspace.dq_onboard` only** (the `dq-checks` job, daily). Nothing runs it against `dq_triage` |
-| `notebooks/04_send_notification.ipynb` | **No.** Needs a job, a secret scope and an SMTP host |
-| The Streamlit app | **Yes**, deployed — but from `dq-app/`, not from here. See below |
+# ---------------------------------------------------------------------------
+# SQL
+# ---------------------------------------------------------------------------
 
-## The app is not in this folder
+def preflight(cat: str, sch: str, pre: str, tables: list[str]) -> str:
+    probe = f"{cat}.{sch}.{pre}probe"
+    out = [banner(
+        "00_preflight.sql — read-only apart from two probe objects it drops again.",
+        f"target: {cat}.{sch}, prefix {pre}",
+        "",
+        "Run in the SQL editor, statement by statement. Every one should succeed. A",
+        "failure tells you which later step cannot run, before anything is created.")]
+    out += ["", "-- 0a — who you are, and that the schema exists.",
+            "SELECT current_user() AS me, current_catalog() AS catalog_now;",
+            f"DESCRIBE SCHEMA {cat}.{sch};",
+            "",
+            "-- 0b — you can create a view and a function here. 01_ddl.sql creates both; without",
+            "-- CREATE FUNCTION no rule that calls a helper can run.",
+            f"CREATE OR REPLACE VIEW {probe}_v AS SELECT 1 AS x;",
+            f"CREATE OR REPLACE FUNCTION {probe}_f(a INT) RETURNS INT RETURN a + 1;",
+            f"SELECT {probe}_f(1) AS should_be_2;",
+            f"DROP VIEW {probe}_v;",
+            f"DROP FUNCTION {probe}_f;",
+            "",
+            "-- 0c — nothing of ours is here yet. EXPECTED: zero rows. If rows come back the DDL",
+            "-- has run before: 01_ddl.sql is NOT re-runnable (ADD CONSTRAINT fails a second",
+            "-- time), so skip it, or use a fresh schema.",
+            f"SELECT table_name FROM {cat}.information_schema.tables",
+            f"WHERE  table_schema = '{sch}' AND table_name LIKE '{pre}%' ORDER BY 1;",
+            "",
+            "-- 0d — the five source tables are readable. EXPECTED: five rows, each with rows > 0.",
+            "-- A permission error here means every check on that table will be recorded as an",
+            "-- error: ask for USE CATALOG / USE SCHEMA / SELECT on it before going further.",
+            "\nUNION ALL\n".join(f"SELECT '{t}' AS source_table, COUNT(*) AS `rows` FROM {t}"
+                                 for t in tables) + ";",
+            "",
+            "-- 0e — the columns 05_current_records.sql reads. EXPECTED: zero rows (none missing).",
+            "-- A row means that table has no CDC columns of that name: drop its INSERT from 05",
+            "-- and its checks will read every version of every record.",
+            "WITH need AS (SELECT t, c FROM VALUES " + ", ".join(
+                f"('{t}', '{c}')" for t in tables
+                for c in [*mpop.VERSION_BY, "OP_TYPE", *ka.ROW_KEY[_canon(t)]]) + " AS v(t, c))",
+            "SELECT n.t AS source_table, n.c AS missing_column FROM need n",
+            "LEFT ANTI JOIN system.information_schema.columns s",
+            "  ON concat_ws('.', s.table_catalog, s.table_schema, s.table_name) = n.t",
+            " AND lower(s.column_name) = lower(n.c)",
+            "ORDER BY 1, 2;",
+            "",
+            f"-- 0f — not a query: check Serving > Endpoints shows {MODEL} as Ready. Both",
+            "-- notebooks call it. If it is missing, change MODEL_NAME in both notebooks; the",
+            "-- triage task would otherwise fail AFTER the checks have written, which is safe.",
+            ""]
+    return "\n".join(out)
 
-`dq-app/` deploys on its own and is the only directory that ships:
 
-```bash
-databricks sync . /Workspace/Users/<you>/dq-app-src
-databricks apps deploy dq-triage --source-code-path /Workspace/Users/<you>/dq-app-src
-```
+def _canon(table: str) -> str:
+    """The register's own name for a source table, whatever catalog it was rendered on."""
+    return next(t for t in ka.TABLES if t.split(".", 1)[1] == table.split(".", 1)[1])
 
-It is not duplicated here because ~20 modules that 129 tests are pinned to would become a
-second copy that drifts. Two things to know for a real deployment: `app.yaml` must point
-at the production catalog, and `dq_app/fixture_data/` is the **local demo bundle** — it
-exists only so the self-contained demo can run inside a container and must not be what a
-production app reads.
 
-### TODO before deploying to a company workspace (noted 2026-10-01, not started)
+def ddl(cat: str, sch: str, pre: str) -> tuple[str, dict]:
+    files = sorted((f for f in render.DDL.glob("*.sql") if f.name not in render.SKIP),
+                   key=lambda f: render.ORDER.index(f.name[:2]))
+    texts = []
+    for f in files:
+        text = f.read_text()
+        if f.name.startswith("12"):
+            text = render.strip_12(text)
+        texts.append((f.name, render.render(text, cat, sch, pre)))
+    for name, text in texts:
+        for n, line in enumerate(text.splitlines(), 1):
+            if not line.lstrip().startswith("--") and re.search(r"\{[a-z_]+\}", line):
+                raise SystemExit(f"unrendered placeholder in {name}:{n}: {line.strip()}")
+    c = render.counts([t for _, t in texts])
+    head = banner(
+        "01_ddl.sql — every table, constraint, function and view. RUN ONCE.",
+        f"target: {cat}.{sch}, prefix {pre}. Rendered from sql/ddl/ by sql/render.py's rules:",
+        "the config/results/fn schemas become name prefixes in this one schema.",
+        "",
+        f"Expected when complete: {c['tables']} tables, {c['views']} views, "
+        f"{c['functions']} functions, {c['constraints']} CHECK constraints.",
+        "",
+        "ADD CONSTRAINT is not idempotent: a second pass fails on every constraint. If it",
+        "stops partway, fix that one statement and continue from its banner.",
+        "Comments inside still say {catalog} and describe two schemas: they are the source",
+        "text, kept so this file reads against sql/ddl/. The statements are rendered.")
+    parts = [head]
+    for i, (name, text) in enumerate(texts, 1):
+        parts.append(f"\n\n{banner(f'[{i}/{len(texts)}]  sql/ddl/{name}')}\n\n{text}")
+    return "".join(parts) + "\n", c
 
-Checked against the code on 2026-10-01: at run time the app talks only to its own
-workspace (the SQL warehouse through `databricks-sql-connector`, the Jobs API through
-`databricks-sdk` when notifications are on). There are no external APIs, fonts or CDNs, and
-Streamlit telemetry is off. Restricted serverless egress should not break it. What will
-break it is the list below.
 
-* [ ] **Ask the workspace admin about PyPI.** The deploy runs `pip install` on
-  `dq-app/requirements.txt` (five packages). If serverless egress is in restricted mode
-  and `pypi.org` is not allowed, the build fails. Find out whether there is an internal
-  mirror (Artifactory, Nexus), and point the deploy at it: the workspace's default package
-  repository, or `--index-url` at the top of `requirements.txt`.
-* [ ] **Rewrite `dq-app/app.yaml` for the company workspace.** Every value in it
-  currently points at the personal workspace:
-  * `DQ_CATALOG` / `DQ_SCHEMA` / `DQ_PREFIX`: set these to where the DDL was run, or drop
-    `DQ_SCHEMA` to use the two-schema layout.
-  * `DQ_NOTIFY`: set to `off` or `log` for the first deploy. `job` with a job id that
-    does not exist fails silently, because the transport logs and swallows errors.
-  * `DQ_NOTIFY_JOB_ID`, `DQ_NOTIFY_TO` (currently a personal address) and `DQ_APP_URL`:
-    replace all three, or remove them.
-* [ ] **Prerequisites in the target workspace:** the DDL run in the target catalog, a SQL
-  warehouse attached to the App under the resource key `sql-warehouse`, and the App's
-  service principal holding the grants in `sql/16_grants.sql`.
-* [ ] **After the first deploy**, check `system.access.outbound_network` for rows with
-  `network_source_type = 'Apps'`. Any rows there are connections the App attempted and
-  the egress policy denied. Denials to `login.microsoftonline.com` with source `unknown`
-  were seen in the personal workspace and are not this app.
+def from_build(lines: list[str], title: str, *why: str) -> str:
+    return banner(title, *why) + "\n\n" + "\n".join(lines) + "\n"
 
-## Substitute before running any SQL
 
-| Placeholder | What it is |
-|---|---|
-| `{catalog}` | the catalog holding `config` and `results` (103 occurrences) |
-| `{app_sp}` | the app's service principal. Gets `MODIFY` on exactly six tables — three of them onboarding's, which is a decision; comment those out to deploy without it |
-| `{check_runner_sp}` | the check runner's principal. Gets `EXECUTE` on `{catalog}.fn` and nothing else |
-| `{steward_group}` | who may author rules and record a review |
-| `{approver_group}` | who may approve. **Unresolved in the spec — see below** |
+def promote(cat: str, sch: str, pre: str) -> str:
+    q = f"{cat}.{sch}.{pre}"
+    reg, reg_cur = f"{q}config_rule_registry", f"{q}config_v_rule_registry_current"
+    run = f"{q}results_check_run"
+    sel = [{"rule_version": "r.rule_version + 1", "status": "'active'",
+            "effective_from": "current_timestamp()", "created_by": "current_user()",
+            "created_at": "current_timestamp()", "promoted_by": "current_user()",
+            "promoted_at": "current_timestamp()",
+            "note": "'Promoted by SQL (production/sql/06_promote.sql) after its shadow "
+                    "measurement was reviewed.'"}.get(c, f"r.{c}") for c in RULE_COLUMNS]
+    return "\n".join([
+        banner("06_promote.sql — shadow -> active. The app's Promote button, as SQL.",
+               f"target: {cat}.{sch}, prefix {pre}",
+               "",
+               "Every rule is registered in SHADOW: measured, never raised. Only an active rule",
+               "can breach, so until this runs nothing reaches the triage notebook. Promotion",
+               "is a person's decision, and current_user() is the name the register keeps.",
+               "",
+               "Run it after the pipeline has measured the rules at least once, and after",
+               "reading 6a. Re-runnable: a rule already active is not touched."),
+        "",
+        "-- 6a — what each shadow rule measured on its latest run. Read this first: a rule",
+        "-- flagging most of its table is more likely a wrong rule than bad data, and",
+        "-- promoting it fills triage with one problem that is not a data defect.",
+        "SELECT r.target_table, r.rule_id, r.severity, c.rows_scanned, c.violation_count,",
+        "       round(c.violation_pct, 2) AS violation_pct, c.run_ts",
+        f"FROM   {reg_cur} r",
+        f"LEFT JOIN (SELECT *, row_number() OVER (PARTITION BY rule_id ORDER BY run_ts DESC) AS n",
+        f"           FROM {run}) c ON c.rule_id = r.rule_id AND c.n = 1",
+        "WHERE  r.status = 'shadow'",
+        "ORDER  BY violation_pct DESC NULLS FIRST, r.rule_id;",
+        "",
+        "-- 6b — promote. As written it promotes every MEASURED shadow rule on every table.",
+        "-- Narrow it by uncommenting a line below; start with one table.",
+        f"INSERT INTO {reg} ({', '.join(RULE_COLUMNS)})",
+        f"SELECT {', '.join(sel)}",
+        f"FROM   {reg_cur} r",
+        "WHERE  r.status = 'shadow'",
+        f"  AND  EXISTS (SELECT 1 FROM {run} c WHERE c.rule_id = r.rule_id",
+        "                                     AND c.status IN ('skipped', 'pass', 'breach'))",
+        f"  -- AND r.target_table = '{ka.TABLES[1]}'",
+        "  -- AND r.rule_id IN ('...', '...')",
+        ";",
+        "",
+        "-- 6c — EXPECTED: the rules you meant, now 'active'.",
+        f"SELECT target_table, status, COUNT(*) AS rules FROM {reg_cur}",
+        "GROUP BY 1, 2 ORDER BY 1, 2;",
+        ""])
 
-`{table}` in `sql/09_functions.sql` is NOT one of these. It appears inside a comment
-describing a variance `rule_expr`, and the check runner substitutes it at run time.
 
-## Order is load-bearing
+def verify(cat: str, sch: str, pre: str) -> str:
+    q = f"{cat}.{sch}.{pre}"
+    return "\n".join([
+        banner("07_verify.sql — read-only. After each pipeline run.",
+               f"target: {cat}.{sch}, prefix {pre}"),
+        "",
+        "-- 7a — the latest runs. A shadow-only day reads all 'skipped'; 'error' needs 7b.",
+        "SELECT run_id, min(run_ts) AS run_ts, status, COUNT(*) AS checks",
+        f"FROM   {q}results_check_run",
+        f"WHERE  run_id IN (SELECT run_id FROM {q}results_check_run",
+        "                  GROUP BY run_id ORDER BY max(run_ts) DESC LIMIT 3)",
+        "GROUP  BY run_id, status ORDER BY run_ts DESC, status;",
+        "",
+        "-- 7b — every error on the latest run, with the warehouse's reason. Usually a",
+        "-- source table or column this principal cannot read, or a helper function missing.",
+        "SELECT rule_id, target_table, message",
+        f"FROM   {q}results_check_run",
+        f"WHERE  status = 'error' AND run_id = (SELECT max_by(run_id, run_ts) FROM {q}results_check_run)",
+        "ORDER  BY target_table, rule_id;",
+        "",
+        "-- 7c — rows read vs current records vs slice, per table on the latest run. population",
+        "-- rows well below table rows is 05_current_records.sql working.",
+        "SELECT target_table, max(table_rows) AS table_rows, max(population_rows) AS current_records,",
+        "       max(slice_rows) AS in_slice",
+        f"FROM   {q}results_check_run",
+        f"WHERE  run_id = (SELECT max_by(run_id, run_ts) FROM {q}results_check_run)",
+        "GROUP  BY target_table ORDER BY 1;",
+        "",
+        "-- 7d — breaches on the latest run, and which reach triage. A breach whose key",
+        "-- attribute is within its tolerance is held back (not P1).",
+        "SELECT rule_id, severity, violation_count, rows_scanned, cde_id, escalates, held_reason",
+        f"FROM   {q}results_v_check_escalation",
+        f"WHERE  run_id = (SELECT max_by(run_id, run_ts) FROM {q}results_check_run)",
+        "ORDER  BY escalates DESC, violation_count DESC;",
+        "",
+        "-- 7e — what the triage notebook wrote. Every cohort it writes reads",
+        "-- 'awaiting_triage' and is listed by v_disposition_integrity as",
+        "-- missing_recommended_event: known, see CLAUDE.md 'The notebook never opens the chain'.",
+        "SELECT c.cohort_id, c.raised_ts, c.member_count, c.defect_location, c.confidence,",
+        "       v.lifecycle_state",
+        f"FROM   {q}results_cohort c",
+        f"JOIN   {q}results_v_cohort_current v USING (cohort_id)",
+        "ORDER  BY c.raised_ts DESC;",
+        ""])
 
-Run `sql/` top to bottom. Two dependencies are easy to get wrong:
 
-* **`09_functions.sql` must precede any seeding of `config.rule_registry`.** Thirteen
-  rules call `{catalog}.fn.is_blank_v1`, `is_valid_email_v1`, `is_au_mobile_v1` or
-  `is_sentinel_v1`. A registry seeded into a catalog without them holds rules the check
-  runner cannot execute, and nothing in the schema will tell you.
-* **Views last.** `11_views_cde.sql` reads the CDE tables, `check_run`, and the view
-  `10_views.sql` creates. It fails if any is missing.
+# ---------------------------------------------------------------------------
+# Notebooks and the bundle
+# ---------------------------------------------------------------------------
 
-`ALTER TABLE … ADD CONSTRAINT` is **not idempotent**. Run each file once.
+def notebook(src: pathlib.Path, dst: pathlib.Path, cat: str, sch: str, pre: str) -> None:
+    nb = json.loads(src.read_text())
+    hits = 0
+    for cell in nb["cells"]:
+        text = "".join(cell["source"])
+        if NOTEBOOK_NAMES in text:
+            text = text.replace(NOTEBOOK_NAMES,
+                                f'CATALOG, SCHEMA, PREFIX = "{cat}", "{sch}", "{pre}"'
+                                "   # rendered by tools/build_production.py")
+            cell["source"] = text.splitlines(keepends=True)
+            hits += 1
+    if hits != 1:
+        raise SystemExit(f"{src.name}: expected one `{NOTEBOOK_NAMES}` line, found {hits}")
+    dst.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n")
 
-Then: seed `config.rule_registry` and `config.cde_registry`, schedule
-`jobs/run_checks.py`, schedule `notebooks/03_group_and_advise.ipynb` after it, deploy the
-app.
 
-## Still missing, and none of it is a schema change
+BUNDLE = """# GENERATED by tools/build_production.py — do not edit; re-run the generator.
+#
+# The pipeline as a Databricks Asset Bundle, rendered for {cat}.{sch} (prefix {pre}).
+# Runs as whoever deploys it: in a sandpit that is you, and your own grants are what the
+# jobs have. From this folder:
+#
+#   databricks bundle validate -t sandpit -p <profile>
+#   databricks bundle deploy   -t sandpit -p <profile>
+#   databricks bundle run dq_daily -t sandpit -p <profile>
 
-* **The profile job.** Nothing writes `results.cde_profile`. No profiler has ever run in
-  a warehouse — the PoC's 12 rows are a laptop's pandas output, loaded verbatim.
-* **`join_sql` on `config.rule_registry`.** Three cross-table rules carry a join the
-  registry has no column to hold, so `jobs/run_checks.py` keeps them in a hardcoded dict
-  and writes `status = 'error'` for any it cannot resolve. Fix this first.
-* **`MODIFY` on `results.cohort` for the triage principal.** Not in `sql/16_grants.sql`.
-  Without it notebook 03 cannot open the chain it creates, and every cohort it writes is
-  reported by `v_disposition_integrity` as `missing_recommended_event`.
-* **`function_version` on `results.check_run`.** Rules now depend on functions, and a
-  verdict cannot say which version produced it. `CREATE OR REPLACE` on a referenced
-  helper silently rewrites the meaning of every past verdict. Keep `{catalog}.fn` owned
-  by the platform team with `EXECUTE` only — that ownership is the whole enforcement.
-* **`XREF_NAME_AGREEMENT` under-reports.** Its `<>` is not null-safe, so it returns 0
-  where the reference implementation returns 2. `XREF_OPEN_TS_AGREEMENT` has the same
-  pattern latently. Do not schedule a runner on top of a rule you know is wrong.
+bundle:
+  name: dq-sandpit
 
-## Two questions the grants file cannot answer
+include:
+  - resources/*.yml
 
-* **Who may approve.** `{approver_group}` must resolve to a governed group or the
-  two-distinct-approver control is decorative: the app can count two identities, but
-  nobody has said which identities are eligible.
-* **Detective or preventive.** This register records that named people approved and that
-  someone reported executing. It cannot prevent execution without approval. If it covers
-  regulated data, prevention belongs in change management and production grants, not
-  here. Do not present these files as providing it.
+# Only what the jobs execute; sql/ is run by a person in the SQL editor.
+sync:
+  exclude:
+    - sql/**
+    - README.md
 
-## Contents
+variables:
+  daily_schedule:
+    description: PAUSED or UNPAUSED. Deploy PAUSED, run by hand until a run is clean.
+    default: PAUSED
 
+targets:
+  sandpit:
+    default: true
+    mode: development
+    # host comes from the CLI profile (-p); set it here instead to pin the workspace:
+    # workspace:
+    #   host: https://<your-workspace>
+"""
+
+JOBS = """# GENERATED by tools/build_production.py — do not edit; re-run the generator.
+# Target: {cat}.{sch}, prefix {pre}. Source tables in {src_cat}.
+
+resources:
+  jobs:
+    dq_daily:
+      name: dq {sch} daily checks and triage
+      description: >-
+        Runs every active and shadow rule on the selected key-attribute tables in
+        {cat}.{sch} (results.check_run, results.violation_sample), then groups the
+        breaches that escalate and asks {model} for a verdict on each group
+        (results.cohort). Writes no business data.
+
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: Australia/Sydney
+        pause_status: ${{var.daily_schedule}}
+
+      # Two runs at once would both write a check run for the same day.
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      timeout_seconds: 7200
+
+      # Uncomment and set an address to hear about a failed run:
+      # email_notifications:
+      #   on_failure: [you@example.com]
+
+      environments:
+        - environment_key: checks_env
+          spec:
+            client: "3"
+        - environment_key: triage_env
+          spec:
+            client: "3"
+            dependencies: [openai]
+
+      tasks:
+        - task_key: run_checks
+          environment_key: checks_env
+          spark_python_task:
+            python_file: ../jobs/run_checks.py
+            parameters:
+              - "--catalog"
+              - "{cat}"
+              - "--schema"
+              - "{sch}"
+              - "--prefix"
+              - "{pre}"
+              - "--fn-prefix"
+              - "{cat}.{sch}.{pre}fn_"
+          max_retries: 1
+          min_retry_interval_millis: 600000
+
+        # Exits early, and succeeds, when nothing escalates: true of every run until a
+        # rule is promoted (sql/06_promote.sql), because a shadow rule never breaches.
+        - task_key: triage
+          depends_on:
+            - task_key: run_checks
+          environment_key: triage_env
+          notebook_task:
+            notebook_path: ../notebooks/03_group_and_advise.ipynb
+            base_parameters:
+              triage_job_run_id: "{{{{job.run_id}}}}"
+          max_retries: 0
+
+    dq_tolerance_advice:
+      name: dq {sch} tolerance advice
+      description: >-
+        On demand. One {model} call per key attribute, advising on its tolerance against
+        the run history; writes results.tolerance_proposal and nothing else. Worth running
+        only once there are a few weeks of runs.
+      max_concurrent_runs: 1
+      environments:
+        - environment_key: advice_env
+          spec:
+            client: "3"
+            dependencies: [openai]
+      tasks:
+        - task_key: advise
+          environment_key: advice_env
+          notebook_task:
+            notebook_path: ../notebooks/06_suggest_thresholds.ipynb
+            base_parameters:
+              job_run_id: "{{{{job.run_id}}}}"
+              only_cde: ""
 """
 
 
+# ---------------------------------------------------------------------------
+
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--catalog", default="sdpt_data_trnf")
+    ap.add_argument("--schema", default="udp_brnz")
+    ap.add_argument("--prefix", default="dq_")
+    ap.add_argument("--source-catalog", default="prod",
+                    help="catalog holding udp_brnz_nrt_tech_view.table_*_hist. `prod` is "
+                         "the register's own name for them; anything else adds "
+                         "sql/04_source_catalog.sql to point the register there")
+    a = ap.parse_args()
+    cat, sch, pre, src_cat = a.catalog, a.schema, a.prefix, a.source_catalog
+    tables = [msrc.on(t, src_cat) for t in ka.TABLES]
+
     if OUT.exists():
         shutil.rmtree(OUT)
-    (OUT / "sql").mkdir(parents=True)
-    rows = ["| # | File | Why here |", "|---|---|---|"]
-    for i, (src, why) in enumerate(SQL):
-        name = pathlib.Path(src).name
-        dst = OUT / "sql" / f"{i:02d}_{name[3:]}"
-        dst.write_text(
-            f"-- DEPLOY STEP {i:02d} of {len(SQL) - 1} — copied from {src}\n"
-            f"-- by tools/build_production.py. Placeholders are NOT substituted.\n--\n"
-            + (ROOT / src).read_text())
-        rows.append(f"| {i:02d} | `sql/{dst.name}` | {why} |")
-        print(f"  sql/{dst.name:34} <- {src}")
-    rows.append("")
-    rows += ["| Artefact | What it is |", "|---|---|"]
-    for src, rel, why in OTHER:
-        dst = OUT / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / src, dst)
-        rows.append(f"| `{rel}` | {why} |")
-        print(f"  {rel:38} <- {src}")
-    (OUT / "README.md").write_text(README + "\n".join(rows) + "\n")
-    print(f"\nwrote {len(SQL)} SQL + {len(OTHER)} other + README.md to production/")
+    for d in ("sql", "jobs", "notebooks", "resources"):
+        (OUT / d).mkdir(parents=True)
+
+    sql: list[tuple[str, str, str]] = []
+
+    def put(name: str, text: str, what: str) -> None:
+        (OUT / "sql" / name).write_text(text)
+        sql.append((name, what, f"{text.count(chr(10))} lines"))
+
+    put("00_preflight.sql", preflight(cat, sch, pre, tables),
+        "read-only checks: privileges, source tables readable, CDC columns present")
+    text, c = ddl(cat, sch, pre)
+    put("01_ddl.sql", text, f"{c['tables']} tables, {c['views']} views, {c['functions']} "
+        f"functions, {c['constraints']} constraints. **Run once**")
+    lines, _ = mka.build(cat, sch, pre)
+    put("02_key_attributes.sql", from_build(
+        lines, "02_key_attributes.sql — the register: 22 key attributes, their rules in "
+               "SHADOW, and the five source tables selected.",
+        "Copied from sql/migrate_key_attributes.py's output. On a fresh schema parts 1-3",
+        "retire nothing (there is no mock register here) and their INSERTs add 0 rows.",
+        "Re-runnable: every INSERT is guarded."),
+        f"22 key attributes, {len(mka.universe.all_rules())} shadow rules, 5 tables selected")
+    lines, _ = mtol.build(cat, sch, pre)
+    put("03_tolerances.sql", from_build(
+        lines, "03_tolerances.sql — a PLACEHOLDER tolerance on each key attribute.",
+        "Not business-approved. It decides which breaches reach triage. Re-runnable."),
+        "placeholder tolerance per attribute; decides what escalates")
+    if src_cat != "prod":
+        lines, _ = msrc.build(src_cat, cat, sch, pre)
+        put("04_source_catalog.sql", from_build(
+            lines, f"04_source_catalog.sql — point the register at {src_cat}.*",
+            "Moves every binding and rule onto the same schema and table",
+            f"names in {src_cat}, decommissions the prod.* tables and selects these."),
+            f"moves bindings and rules from prod.* to {src_cat}.*")
+    put("05_current_records.sql", from_build(
+        mpop.build(src_cat, cat, sch, pre),
+        "05_current_records.sql — check the current record, not every CDC version.",
+        "Without it the three uniqueness rules flag every record with two versions."),
+        "current record per source table (newest version, OP_TYPE 'D' dropped)")
+    put("06_promote.sql", promote(cat, sch, pre),
+        "shadow -> active, after reviewing the shadow measurements")
+    put("07_verify.sql", verify(cat, sch, pre), "read-only checks after each run")
+    sql.sort()
+
+    shutil.copy2(ROOT / "jobs" / "run_checks.py", OUT / "jobs" / "run_checks.py")
+    for nb in ("03_group_and_advise.ipynb", "06_suggest_thresholds.ipynb"):
+        notebook(ROOT / "notebooks" / nb, OUT / "notebooks" / nb, cat, sch, pre)
+    fmt = dict(cat=cat, sch=sch, pre=pre, src_cat=src_cat, model=MODEL)
+    (OUT / "databricks.yml").write_text(BUNDLE.format(**fmt))
+    (OUT / "resources" / "dq_pipeline.yml").write_text(JOBS.format(**fmt))
+
+    readme = (ROOT / "tools" / "production_README.md").read_text().format(
+        **fmt, fn=f"{cat}.{sch}.{pre}fn_", tables="\n".join(f"* `{t}`" for t in tables),
+        source_step=("" if src_cat == "prod" else
+                     f"   * `04_source_catalog.sql` moves the register onto `{src_cat}`.\n"),
+        sql_rows="\n".join(f"| `sql/{n}` | {w} |" for n, w, _ in sql))
+    (OUT / "README.md").write_text(readme)
+
+    for n, _, size in sql:
+        print(f"  sql/{n:26} {size}")
+    print(f"  jobs/run_checks.py, notebooks/03 + 06, databricks.yml, resources/dq_pipeline.yml")
+    print(f"\nproduction/ rendered for {cat}.{sch} (prefix {pre}), sources in {src_cat}")
     return 0
 
 

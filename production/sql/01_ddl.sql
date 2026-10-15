@@ -1,0 +1,2719 @@
+-- =====================================================================
+-- 01_ddl.sql — every table, constraint, function and view. RUN ONCE.
+-- target: sdpt_data_trnf.udp_brnz, prefix dq_. Rendered from sql/ddl/ by sql/render.py's rules:
+-- the config/results/fn schemas become name prefixes in this one schema.
+--
+-- Expected when complete: 21 tables, 15 views, 7 functions, 93 CHECK constraints.
+--
+-- ADD CONSTRAINT is not idempotent: a second pass fails on every constraint. If it
+-- stops partway, fix that one statement and continue from its banner.
+-- Comments inside still say {catalog} and describe two schemas: they are the source
+-- text, kept so this file reads against sql/ddl/. The statements are rendered.
+-- =====================================================================
+
+-- =====================================================================
+-- [1/21]  sql/ddl/01_config_rule_registry.sql
+-- =====================================================================
+
+-- rule_registry — what we check
+--
+-- Versioned source of truth for the schema contract. See dq-triage-agent-spec.md.
+-- Substitute {catalog} before execution.
+--
+-- Ownership boundary: this repo owns the SHAPE of the table. Databricks owns its
+-- CONTENTS — rule rows are inserted at runtime, never checked in here.
+--
+-- APPEND-ONLY, LIKE THE REGISTER. A rule is never edited in place. Promoting a
+-- shadow rule to active, or changing a threshold, INSERTS a new (rule_id,
+-- rule_version) row. There is deliberately no stored effective_to: closing the
+-- prior row would require an UPDATE, which would force a broader grant on the app's
+-- service principal and break the uniform "the app only ever appends" story.
+-- effective_to is derived with LEAD() in v_rule_registry_current (08_views.sql).
+--
+-- The current version of a rule is the highest rule_version per rule_id. Retiring a
+-- rule is an insert with status = 'retired', not a delete.
+--
+-- JOIN_SQL EXISTS BECAUSE A CROSS-TABLE RULE HAS NO SINGLE TARGET_TABLE. A rule
+-- comparing a subscription's first name with its contact's needs both tables and the
+-- key that relates them, and target_table can name only one. Before this column the
+-- three cross-table rules in the pilot carried their joins in Python -- real, correct,
+-- and invisible to Databricks -- so the registry could describe them but nothing
+-- reading the registry could run them. That was the gap; this is the fix.
+--
+-- WHAT IT HOLDS, AND WHAT IT DELIBERATELY DOES NOT. Everything that would follow the
+-- word FROM: the joined table expression, its aliases, and the ON condition. NOT a
+-- whole SELECT, and NOT the predicate. rule_expr remains the predicate and refers to
+-- the aliases join_sql introduces, so the thing that decides what counts as a
+-- violation is stored exactly once. The earlier Python version stored a full SELECT
+-- with its own WHERE, which meant every cross-table rule held two copies of its
+-- predicate that nothing kept in step.
+--
+-- target_table STAYS NOT NULL on a cross-table rule and names the DRIVING table --
+-- the one whose rows the verdict counts. The runner reads join_sql in place of it
+-- when building the query, but check_run, the scorecard and lineage all need a single
+-- table to attribute a breach to, and "it is a join" is not an answer a steward can
+-- act on.
+--
+-- SAME TRUST BOUNDARY AS rule_expr. This is SQL, interpolated into a query, and that
+-- is the point: the registry is trusted config, authored by stewards and append-only.
+-- It is not user input and must never be fed from one.
+
+-- A RULE NAMES ITS ELEMENT, SINCE 2026-09-28. cde_id is NOT NULL. Before, a rule
+-- attached to an element by column match or by an optional tag, 14 of 34 attached to
+-- nothing, and the quality score and the coverage view had a different denominator
+-- from the check runner. Now the register is the worklist: the runner executes the
+-- active rules whose element is registered, and a column nobody has declared an
+-- element for is a column nobody is monitoring -- which is what "registration
+-- precedes discovery" was always supposed to mean. In a workspace seeded before this
+-- date the column is nullable and sql/out/migrate_cde_scope.sql fills it with a new
+-- rule_version per rule; the verification query there asserts no current active rule
+-- is left without one.
+--
+-- SCOPE_FILTER IS NOT OPTIONAL POLISH. Profiling the pilot data found 900 breaches
+-- that were legitimate product variation: Fixed Broadband rows have no IMEI or SIM,
+-- prepaid rows have no billing account. A not-null rule without a scope_filter
+-- reports those as defects and destroys cohort precision. Treat a NULL scope_filter
+-- on a column that is conditionally populated as a rule-authoring defect.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_rule_registry (
+  rule_id            STRING    NOT NULL COMMENT 'stable identifier, survives versioning, e.g. CTCT_EML_FMT',
+  rule_version       INT       NOT NULL COMMENT 'incremented on every change; (rule_id, rule_version) is the logical key',
+  rule_name          STRING    NOT NULL COMMENT 'human-readable, shown in the queue and scorecard',
+  target_table       STRING    NOT NULL COMMENT 'catalog.schema.table being checked',
+  target_column      STRING             COMMENT 'NULL for table-level and cross-table rules',
+  cde_id             STRING    NOT NULL COMMENT 'the critical data element this rule monitors, from config.cde_registry. NOT NULL since 2026-09-28: DQ runs on registered elements, so a rule names its element or it is not a monitoring rule. Where the rule has a target_column it must be a bound column of that element; a cross-table rule (target_column NULL) attaches to every binding of it. v_cde_coverage joins on this, narrowed by the column where there is one -- no longer on a column match alone'
+  rule_type          STRING    NOT NULL COMMENT 'not_null | format | uniqueness | consistency | referential | sentinel | variance | freshness | volume',
+  rule_expr          STRING    NOT NULL COMMENT 'SQL boolean expression that is TRUE for a VIOLATING row; the check runner counts where this holds',
+  scope_filter       STRING             COMMENT 'SQL predicate narrowing the rows in scope, e.g. PROD_TYPE_KEY <> 0. NULL means the whole table — see header note',
+  join_sql           STRING             COMMENT 'For a cross-table rule: the FROM-clause body the check runner reads instead of target_table — the joined table expression with its aliases and ON condition, e.g. "prod.customer.subs_c s JOIN prod.customer.ctct_c c ON s.CTCT_KEY = c.CTCT_KEY". NOT a full SELECT: rule_expr stays the predicate and references these aliases, so the predicate is stored once. NULL for every single-table rule, which is almost all of them — see header note',
+  fail_threshold_pct DOUBLE    NOT NULL COMMENT 'violation_pct at or above which the run is a breach; 0.0 means any violation breaches',
+  severity           STRING    NOT NULL COMMENT 'P1_block | P2_alert | P3_monitor — drives the approver count in the disposition register',
+  business_domain    STRING             COMMENT 'owning domain, used for scorecard breakout',
+  owner_group        STRING             COMMENT 'accountable team; ideally a Databricks group name so it resolves to people',
+  source_layer       STRING             COMMENT 'L0 | L1 | L2 | L3 — which detection layer emits this rule, from the parent architecture doc',
+  status             STRING    NOT NULL COMMENT 'shadow | active | retired. Shadow rules are measured but never raise a cohort',
+  effective_from     TIMESTAMP NOT NULL COMMENT 'when this version took effect. There is no effective_to — it is derived, see header',
+  created_by         STRING             COMMENT 'authoring identity, from OBO where the app wrote the row',
+  created_at         TIMESTAMP          COMMENT 'when this version was authored',
+  promoted_by        STRING             COMMENT 'identity that promoted shadow -> active; NULL while shadow. Spec Open Question: who is authorised to do this is unspecified',
+  promoted_at        TIMESTAMP          COMMENT 'when the promotion happened',
+  note               STRING             COMMENT 'why this rule exists or why this version changed. Free text, read by humans in the Rule Registry Studio; the place to record that a scope_filter was added and what it excludes',
+  -- Last, not beside the other identity columns: ALTER TABLE ADD COLUMN appends at the
+  -- end, so this is where they sit on every table that predates them, and a positional
+  -- INSERT written against this file must line up with those tables too.
+  template_id        STRING             COMMENT 'set when the onboarding generator wrote this rule from config.check_template; NULL for a hand-written rule. A column that already has hand-written rules is never given template rules',
+  template_version   INT                COMMENT 'the template version the rule was generated from; NULL exactly when template_id is'
+)
+USING DELTA
+CLUSTER BY (target_table, rule_id)
+COMMENT 'The rule registry. Rows, not files — this is what lets a rule be promoted with an INSERT rather than a pull request and a redeploy. Append-only so the app never needs UPDATE on anything.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+  ADD CONSTRAINT rule_registry_severity_enum
+  CHECK (severity IN ('P1_block', 'P2_alert', 'P3_monitor'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+  ADD CONSTRAINT rule_registry_status_enum
+  CHECK (status IN ('shadow', 'active', 'retired'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+  ADD CONSTRAINT rule_registry_version_positive
+  CHECK (rule_version >= 1);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+  ADD CONSTRAINT rule_registry_template_versioned
+  CHECK ((template_id IS NULL) = (template_version IS NULL));
+
+
+-- =====================================================================
+-- [2/21]  sql/ddl/02_config_playbook.sql
+-- =====================================================================
+
+-- playbook — remediation APPROACHES as reference material
+--
+-- Substitute {catalog} before execution.
+--
+-- READ THIS BEFORE ADDING A COLUMN. There is deliberately no `fix_body`, no
+-- `fix_sql`, no `job_id` and no `notebook_path`. The spec calls the playbook
+-- "documentation, not a runtime" and executing fixes is the programme's defining
+-- non-goal. A body column is the first step to an execute button, and an execute
+-- button reopens the control question that keeping execution out was meant to close.
+-- If someone asks for one, that is a scope change to escalate, not a schema change.
+--
+-- prior_use_count and recurrence_rate are maintained by the triage job from the
+-- disposition register — they are derived, denormalised here so the workbench can
+-- show "this approach has been used 14 times and recurred 3 times" without a join
+-- at render time.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_playbook (
+  playbook_id      STRING    NOT NULL COMMENT 'stable identifier, e.g. PB_UPSTREAM_CRM_EXPORT',
+  rule_id          STRING             COMMENT 'rule this approach applies to; NULL for approaches that apply by rule_type instead',
+  rule_type        STRING             COMMENT 'applies to any rule of this type where rule_id is NULL',
+  approach_name    STRING    NOT NULL COMMENT 'short name shown as the recommendation heading',
+  approach_type    STRING    NOT NULL COMMENT 'pipeline_rerun | upstream_ticket | source_correction | manual_sql | accept_and_document',
+  description      STRING    NOT NULL COMMENT 'what to do, in prose, for a human to carry out in their own change process',
+  typical_owner    STRING             COMMENT 'who usually carries this out — a team, not a person',
+  prior_use_count  INT                COMMENT 'derived: times this approach was the recorded action on a closed cohort',
+  recurrence_count INT                COMMENT 'derived: times a cohort closed with this approach re-cohorted within 30 days',
+  recurrence_rate  DOUBLE             COMMENT 'derived: recurrence_count / prior_use_count. High means this approach patches symptoms',
+  last_used_ts     TIMESTAMP          COMMENT 'derived: most recent close using this approach',
+  status           STRING    NOT NULL COMMENT 'active | deprecated',
+  created_by       STRING             COMMENT 'authoring identity',
+  created_at       TIMESTAMP          COMMENT 'when authored'
+)
+USING DELTA
+CLUSTER BY (rule_id)
+COMMENT 'Rule-to-approach reference material. Non-executable by design — see the header note before adding any column that holds runnable content.';
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_playbook
+  ADD CONSTRAINT playbook_approach_type_enum
+  CHECK (approach_type IN ('pipeline_rerun', 'upstream_ticket', 'source_correction', 'manual_sql', 'accept_and_document'));
+
+-- An approach must attach to something: a specific rule or a rule_type, not neither.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_playbook
+  ADD CONSTRAINT playbook_has_target
+  CHECK (rule_id IS NOT NULL OR rule_type IS NOT NULL);
+
+
+-- =====================================================================
+-- [3/21]  sql/ddl/03_results_check_run.sql
+-- =====================================================================
+
+-- check_run — every verdict, one row per rule per run
+--
+-- Substitute {catalog} before execution.
+--
+-- Written by the check runner (Phase 1), read by everything else. The triage job
+-- reads it to form cohorts; verification reads it to decide whether a cohort closes.
+-- The app never writes it.
+--
+-- VERIFICATION SCOPE. `scope_fingerprint` exists to answer the spec's open
+-- engineering question — how a cohort's verification is compared like-for-like once
+-- the underlying partition has moved on. The intent is a hash of (scope_filter,
+-- partition bounds, rows_scanned band) so a later run can be judged comparable or
+-- not. THE HASHING RULE IS NOT DECIDED. The column is here so adding it later is not
+-- a schema migration; until the question is answered, write NULL and have
+-- verification fall back to comparing rule_id + target_table alone, which is what
+-- the fixture generator does.
+--
+-- CLUSTER BY (run_ts, rule_id): the two dominant reads are "the latest run" for the
+-- queue and "this rule's history" for recurrence and volume baselines.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_check_run (
+  result_id         STRING    NOT NULL COMMENT 'uuid, unique per verdict — this is what a cohort references as a member breach',
+  run_id            STRING    NOT NULL COMMENT 'groups every verdict produced by one scheduled pass',
+  run_ts            TIMESTAMP NOT NULL COMMENT 'start of the run',
+  rule_id           STRING    NOT NULL COMMENT 'the rule evaluated',
+  rule_version      INT       NOT NULL COMMENT 'the version evaluated; pins the verdict to the threshold in force at the time',
+  source_layer      STRING             COMMENT 'denormalised from the registry so layer coverage is a single-table query',
+  target_table      STRING    NOT NULL COMMENT 'catalog.schema.table that was checked',
+  target_column     STRING             COMMENT 'NULL for table-level and cross-table rules',
+  rows_scanned      BIGINT             COMMENT 'rows in scope after scope_filter — the denominator for violation_pct',
+  violation_count   BIGINT             COMMENT 'rows where rule_expr held',
+  violation_pct     DOUBLE             COMMENT 'violation_count / rows_scanned * 100',
+  threshold_pct     DOUBLE             COMMENT 'fail_threshold_pct in force at run time, copied from the registry — never recomputed',
+  status            STRING    NOT NULL COMMENT 'pass | breach | error | skipped. skipped is a real state (shadow rule, or scope empty), not a failure',
+  severity          STRING    NOT NULL COMMENT 'copied verbatim from the registry at run time; never computed or adjusted downstream',
+  business_domain   STRING             COMMENT 'denormalised from the registry for scorecard breakout',
+  owner_group       STRING             COMMENT 'denormalised from the registry',
+  scope_fingerprint STRING             COMMENT 'pins the comparison scope for verification — see header note. Write NULL until the hashing rule is decided',
+  message           STRING             COMMENT 'human-readable, e.g. "81 of 1000 rows have no @ in EML_ID, limit 0.0%"',
+  duration_sec      DOUBLE             COMMENT 'wall time for this check',
+  dbu_estimate      DOUBLE             COMMENT 'rough cost attribution, used to argue about rule economics',
+  -- THE SLICE THE VERDICT RAN UNDER (2026-10-06). The runner applies a table's slice at
+  -- run time, so the rule row alone no longer says what was measured; these do. Declared
+  -- last because ADD COLUMNS puts them there. NULL on every run before slices existed.
+  slice_version     INT                COMMENT 'config.monitored_table.slice_version in force for the target (driving) table at run time. NULL: the whole table',
+  table_rows        BIGINT             COMMENT 'rows in the target table at run time, before the slice',
+  slice_rows        BIGINT             COMMENT 'rows in the slice -- the population every check on the table drew from. Equal to table_rows when unsliced. A slice that grows to hide failures shows as this falling. Counted after config.table_population when the table declares one',
+  -- THE RECORDS THE VERDICT RAN OVER (2026-10-12). A history table's current versions,
+  -- from config.table_population (sql/ddl/21). Applied before the slice, so the three
+  -- counts nest: table_rows >= population_rows >= slice_rows. NULL when none declared.
+  population_version INT              COMMENT 'config.table_population.population_version in force for the target table at run time. NULL: every row of the table is a record',
+  population_rows   BIGINT             COMMENT 'current records in the target table (latest version, deletions dropped), before the slice. NULL when no population is declared'
+)
+USING DELTA
+CLUSTER BY (run_ts, rule_id)
+COMMENT 'The verdict layer. Single auditable source of truth for what is broken and how severely. Written only by the check runner; the app reads it and never writes.';
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_check_run
+  ADD CONSTRAINT check_run_status_enum
+  CHECK (status IN ('pass', 'breach', 'error', 'skipped'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_check_run
+  ADD CONSTRAINT check_run_severity_enum
+  CHECK (severity IN ('P1_block', 'P2_alert', 'P3_monitor'));
+
+
+-- =====================================================================
+-- [4/21]  sql/ddl/04_results_violation_sample.sql
+-- =====================================================================
+
+-- violation_sample — up to 100 example bad rows per breach
+--
+-- Substitute {catalog} before execution.
+--
+-- The cap is a boundary, not a performance tweak. It bounds how much production data
+-- is copied out of its source table. No sample value goes to a model endpoint (since
+-- 2026-10-08: notebook 03 reads row_key only), but raising the cap still widens the
+-- copy, so it is a governance change, not a config change.
+--
+-- A sample row is not the whole source row. jobs/run_checks.sample_keep stores the
+-- table's key columns and the columns the rule reads (its expression, scope, join and
+-- target column) and drops the rest, so a malformed-email sample carries the key and
+-- the address, not the contact's date of birth or ID number (since 2026-10-12; samples
+-- captured before then hold whole rows).
+--
+-- sample_row is JSON rather than a struct on purpose: the shape differs per target
+-- table, and a struct would force a schema migration every time a new table is
+-- onboarded. The cost is that the workbench renders it generically.
+--
+-- Samples are the shortest-lived data here and the most sensitive. Set a retention
+-- policy — see the spec's open question on whether the register is formal audit
+-- evidence, which governs this table too.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_violation_sample (
+  sample_id    STRING    NOT NULL COMMENT 'uuid',
+  result_id    STRING    NOT NULL COMMENT 'the check_run verdict this sample belongs to',
+  run_id       STRING    NOT NULL COMMENT 'denormalised so samples can be pruned by run without a join',
+  rule_id      STRING    NOT NULL COMMENT 'denormalised for the workbench lookup',
+  target_table STRING    NOT NULL COMMENT 'denormalised; also tells the renderer which key columns to expect',
+  row_key      STRING             COMMENT 'primary key of the offending row, so a steward can find it in the source',
+  sample_row   STRING    NOT NULL COMMENT 'JSON object: the offending row''s key columns and the columns the rule reads, nothing else',
+  captured_ts  TIMESTAMP NOT NULL COMMENT 'when the sample was taken'
+)
+USING DELTA
+CLUSTER BY (run_id, rule_id)
+COMMENT 'Bounded evidence for a breach — at most 100 rows. The cap is the AI-exposure boundary from the parent architecture doc, not a performance setting.';
+
+
+-- =====================================================================
+-- [5/21]  sql/ddl/05_results_cohort.sql
+-- =====================================================================
+
+-- cohort — grouped breaches, one root-cause hypothesis, one recommendation
+--
+-- Substitute {catalog} before execution.
+--
+-- The first of the two new tables. Written by the triage job (L4), read by the
+-- queue, the workbench and the scorecard. The app never writes it.
+--
+-- MEMBERS ARE AN ARRAY, NOT A BRIDGE TABLE. The spec budgets "two new tables"; a
+-- cohort_member bridge would make it three. The array is queryable in Delta
+-- (explode / array_contains) and cohorts are small — tens of members, not
+-- thousands. Revisit only if members need attributes of their own.
+--
+-- EVERYTHING THE MODEL PRODUCED IS LABELLED AS SUCH. root_cause_hypothesis is a
+-- hypothesis and the UI must render it as one. recommendation_source distinguishes
+-- a playbook entry from a drafted suggestion, which the spec requires be "clearly
+-- labelled as generated". model_input_payload stores what the endpoint was shown,
+-- because the parent architecture doc requires every AI output be stored with its
+-- input for audit.
+--
+-- THE VERDICT FIELDS ARE COLUMNS, NOT JSON. grouping_verdict, defect_location,
+-- confidence, recommended_owner, prior_state, differs_from_prior and
+-- members_not_covered were produced by the model from the first run and kept only
+-- inside model_input_payload, where nothing could query them and no page could show
+-- them. defect_location in particular is the highest-value thing the model produces
+-- — it is what turns 700 false breaches into a rule defect — and a field the UI
+-- cannot reach is a field that does not exist. model_input_payload keeps the brief
+-- and the provenance; the answer lives in columns.
+--
+-- A COHORT IS NOT A STATUS. There is no state column here. Where a cohort has got
+-- to is derived from the disposition event log — see 08_views.sql. Adding a status
+-- column here would create a second source of truth that can disagree with the
+-- register, which is the failure mode the append-only design exists to prevent.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_cohort (
+  cohort_id            STRING    NOT NULL COMMENT 'uuid, stable for the life of the cohort',
+  raised_run_id        STRING    NOT NULL COMMENT 'the check run whose breaches formed this cohort',
+  raised_ts            TIMESTAMP NOT NULL COMMENT 'when the triage job raised it — the start of the MTTR clock',
+  member_result_ids    ARRAY<STRING> NOT NULL COMMENT 'check_run.result_id for every breach in this cohort',
+  member_rule_ids      ARRAY<STRING> NOT NULL COMMENT 'distinct rule_ids, denormalised for filtering without an explode',
+  member_count         INT       NOT NULL COMMENT 'size of member_result_ids — the numerator of cohort compression',
+  affected_tables      ARRAY<STRING> NOT NULL COMMENT 'distinct target_tables across members',
+  total_violation_rows BIGINT             COMMENT 'sum of member violation_counts; rows may be double-counted across rules, so this is an indicator not a total',
+  root_cause_hypothesis STRING            COMMENT 'the agents proposed cause. A HYPOTHESIS — the UI must not render it as a finding',
+  evidence_summary     STRING             COMMENT 'what in the data led to the hypothesis, so a steward can confirm or discard quickly',
+  evidence_points      ARRAY<STRING>      COMMENT 'the summary itemised — one checkable fact per element, each standing on its own. A steward confirms or discards a hypothesis one fact at a time; a paragraph has to be accepted or rejected whole',
+  rival_hypothesis     STRING             COMMENT 'the competing explanation the same evidence also fits, or NULL where there is none. The prompt requires the model to say so; without a column it said so inside the hypothesis, where it read as hedging rather than as a second candidate',
+  confidence           DOUBLE             COMMENT '0.0-1.0, the models own. Advisory and NOT an input to rank_score — ranking on a self-reported number lets a confident wrong answer outrank a hedged right one',
+  defect_location      STRING             COMMENT 'data | rule | neither. Whether the fix belongs in the data or in the rule that judged it. neither exists because a plausibility rule firing on correct rows is a business question, not a defect on either side',
+  grouping_verdict     STRING             COMMENT 'holds | partial | rejected — the models review of the mechanical grouping it was handed. rejected raises no cohort at all, so no row here carries it',
+  members_not_covered  ARRAY<STRING>      COMMENT 'rule_ids from the proposed group that one cause does not explain. Non-empty only when grouping_verdict = partial; they are surfaced for a steward, never silently dropped',
+  blast_radius_tables  ARRAY<STRING>      COMMENT 'downstream tables from Unity Catalog lineage, beyond those directly breached',
+  blast_radius_count   INT                COMMENT 'size of blast_radius_tables, denormalised for ranking',
+  severity             STRING    NOT NULL COMMENT 'highest severity among members; drives the approver count in the register',
+  business_domain      STRING             COMMENT 'owning domain',
+  owner_group          STRING             COMMENT 'accountable team',
+  rank_score           DOUBLE             COMMENT 'triage ranking, higher first. Advisory — a steward can work the queue in any order',
+  recommended_approach STRING             COMMENT 'the approach to take, in prose',
+  recommended_approach_type STRING        COMMENT 'pipeline_rerun | upstream_ticket | source_correction | manual_sql | accept_and_document',
+  recommended_steps    ARRAY<STRING>      COMMENT 'the approach broken into ordered steps, in prose. PROSE ONLY — a step carrying a runnable body is the first move toward an execute button, and the triage jobs validator rejects one containing a write statement',
+  recommended_owner    STRING             COMMENT 'who the model believes should act — a team, not a person. Distinct from owner_group, which owns the data whatever the remedy turns out to be: a rule defect is the stewards to fix, not the source systems',
+  verification_expectation STRING         COMMENT 'what the next check run should show if this worked, so the verified event tests a stated prediction rather than a memory. Prose, never a query',
+  prior_state          STRING             COMMENT 'what the register said about these rules when the advice was drafted — none | awaiting_review | approved_awaiting_execution | deferred | closed_verified | closed_rejected | reopened. A SNAPSHOT at advice time, not a live state: where the cohort is now comes from v_cohort_current and the two are expected to diverge',
+  differs_from_prior   STRING             COMMENT 'what this advice does differently from what was already tried, or that it does not. NULL when prior_state is none',
+  playbook_id          STRING             COMMENT 'the playbook entry used; NULL when the recommendation was drafted',
+  recommendation_source STRING   NOT NULL COMMENT 'playbook | generated | none. generated MUST be surfaced as generated in the UI',
+  model_endpoint       STRING             COMMENT 'which serving endpoint produced this, for reproducibility',
+  model_input_payload  STRING             COMMENT 'JSON of exactly what the endpoint was shown — required for audit by the parent architecture doc',
+  triage_job_run_id    STRING             COMMENT 'the Lakeflow run that produced this row',
+  is_recurrence        BOOLEAN            COMMENT 'the triage jobs assertion that a member rule re-cohorted within 30 days of a verified close. An ASSERTION, not the metric: the scorecard recomputes recurrence from the disposition register, and a disagreement between the two means the triage jobs recurrence window is wrong'
+)
+USING DELTA
+CLUSTER BY (raised_ts, severity)
+COMMENT 'One row per problem, not per breach. Written by the triage job. Carries no status — where a cohort has got to lives in the disposition register.';
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_severity_enum
+  CHECK (severity IN ('P1_block', 'P2_alert', 'P3_monitor'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_recommendation_source_enum
+  CHECK (recommendation_source IN ('playbook', 'generated', 'none'));
+
+-- A cohort with no members is a triage-job defect, not a valid row.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_has_members
+  CHECK (member_count >= 1);
+
+-- The models verdict on the grouping it was handed. `rejected` means the members do
+-- not belong together, and the triage job raises no cohort at all — so a stored row
+-- may only be `holds` or `partial`. A rejected grouping that reached this table is a
+-- triage-job defect.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_grouping_verdict_enum
+  CHECK (grouping_verdict IS NULL OR grouping_verdict IN ('holds', 'partial'));
+
+-- Non-empty members_not_covered is exactly what `partial` means. The two disagreeing
+-- means the write dropped members without saying so, which is the failure the field
+-- exists to prevent.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_partial_names_its_gaps
+  CHECK (grouping_verdict IS NULL
+         OR (grouping_verdict = 'partial') = (size(coalesce(members_not_covered, array())) > 0));
+
+-- `neither` is not a hedge. The data may be correct and the rule reasonable, with the
+-- disagreement between them being a business question — a plausibility rule firing on
+-- customers recorded as under 18 is the worked example. Forcing that into data|rule
+-- makes the model assert a defect it does not believe in.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_defect_location_enum
+  CHECK (defect_location IS NULL OR defect_location IN ('data', 'rule', 'neither'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_confidence_range
+  CHECK (confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_prior_state_enum
+  CHECK (prior_state IS NULL OR prior_state IN (
+    'none', 'awaiting_review', 'approved_awaiting_execution', 'deferred',
+    'closed_verified', 'closed_rejected', 'reopened'));
+
+-- THE NON-EXECUTION INVARIANT, AT THE STORAGE LAYER. recommended_steps is prose. A
+-- step carrying a runnable body is the first step toward an execute button, and this
+-- is the same gate the triage jobs validator applies to the response before it is
+-- written — stated twice because the notebook can be edited and the table cannot be
+-- edited quietly.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
+  ADD CONSTRAINT cohort_steps_are_not_executable
+  CHECK (recommended_steps IS NULL
+         OR NOT exists(recommended_steps,
+                       s -> upper(s) RLIKE '(^|[^A-Z])(UPDATE|MERGE INTO|DELETE FROM|TRUNCATE|DROP) '));
+
+
+-- =====================================================================
+-- [6/21]  sql/ddl/06_results_disposition.sql
+-- =====================================================================
+
+-- disposition — THE AUDIT REGISTER
+--
+-- Substitute {catalog} before execution.
+--
+-- The second new table, and the only one the app writes. Read the spec's line on
+-- this before changing anything here:
+--
+--     "Writes are INSERT only. Any attempt to model this as an updatable status
+--      column is a design defect."
+--
+-- So: no status column, no closed_ts, no current_state, no last_updated. A
+-- correction is a new row with a higher event_seq, never an edit. The sequence
+-- itself is the evidence. Where a cohort has got to is a view over this table
+-- (08_views.sql), computed at read time.
+--
+-- APPEND-ONLY IS ENFORCED BY delta.appendOnly, NOT BY THE GRANT. This matters and
+-- the spec is imprecise about it. Unity Catalog has no INSERT-only privilege — the
+-- finest-grained write privilege on a table is MODIFY, which also permits UPDATE,
+-- DELETE and MERGE. The spec's phrase "granted INSERT on dq.results" is therefore
+-- not directly expressible. The enforceable equivalent is the pair:
+--     (a) MODIFY on this table only, nothing else in dq.results   [07_grants.sql]
+--     (b) delta.appendOnly = true on this table                   [below]
+-- With (b) set, UPDATE and DELETE fail for every principal including the owner.
+-- Clearing the property is itself recorded in Delta history, so the bypass is
+-- detectable. See sql/README.md for what to tell an auditor.
+--
+-- EVENT-SPECIFIC FIELDS ARE NULLABLE, PLUS A PAYLOAD. Five event types with
+-- different content, in one table, because the ordering across types is the whole
+-- point and separate tables would destroy it. Typed columns exist for the fields
+-- that are queried (decision, approver identity, verification counts); everything
+-- else goes in event_payload as JSON.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_disposition (
+  disposition_id      STRING    NOT NULL COMMENT 'uuid, unique per event row',
+  cohort_id           STRING    NOT NULL COMMENT 'the cohort this event is about',
+  event_seq           INT       NOT NULL COMMENT 'monotonic per cohort starting at 1. Gaps are acceptable; reuse is not',
+  event_type          STRING    NOT NULL COMMENT 'recommended | reviewed | approved | executed | verified | reopened',
+  event_ts            TIMESTAMP NOT NULL COMMENT 'when the event happened',
+  ingest_ts           TIMESTAMP NOT NULL COMMENT 'when the row was written. Differs from event_ts for self-reported execution',
+
+  actor_identity      STRING             COMMENT 'the acting principal. For in-app events this is the OBO user, never a typed-in name',
+  actor_display_name  STRING             COMMENT 'human-readable name for rendering; identity above is the one that counts',
+  actor_source        STRING    NOT NULL COMMENT 'obo_user | service_principal | triage_job | check_runner. How we know who acted',
+
+  decision            STRING             COMMENT 'reviewed only: accepted | deferred | rejected | no_action',
+  reason              STRING             COMMENT 'reviewed and reopened: why. Required for deferred and rejected',
+  review_by_date      DATE               COMMENT 'reviewed/deferred only: when the cohort resurfaces. Required when decision = deferred',
+
+  approver_ordinal    INT                COMMENT 'approved only: 1 or 2. One ROW per approver — two approvers are two rows, never one row with two names',
+
+  executed_summary    STRING             COMMENT 'executed only: what the owner reports they did',
+  external_ref        STRING             COMMENT 'executed only: ticket id or job run reference in the owners own system',
+  executed_ts         TIMESTAMP          COMMENT 'executed only: when the owner says it happened. A CLAIM — see the constraint note below',
+
+  verifying_run_id    STRING             COMMENT 'verified only: the check_run that decided it',
+  verification_passed BOOLEAN            COMMENT 'verified only: TRUE closes the cohort, FALSE is followed by a reopened row',
+  violations_before   BIGINT             COMMENT 'verified only: member violation total at raise time',
+  violations_after    BIGINT             COMMENT 'verified only: member violation total at verification',
+
+  approach_type_taken STRING             COMMENT 'the approach actually used, for recommendation-acceptance scoring against cohort.recommended_approach_type',
+  playbook_id         STRING             COMMENT 'the playbook entry actually followed, if any',
+
+  event_payload       STRING             COMMENT 'JSON for anything not typed above. Do not put queryable fields here to avoid a schema change',
+  app_version         STRING             COMMENT 'which build of the app wrote this, so a behavioural bug can be scoped to a date range'
+)
+USING DELTA
+CLUSTER BY (cohort_id, event_seq)
+COMMENT 'Append-only event log: recommended -> reviewed -> approved -> executed -> verified. Never updated, never deleted. The sequence is the audit evidence. delta.appendOnly is the enforcement — see 07_grants.sql for why the grant alone cannot express it.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
+  ADD CONSTRAINT disposition_event_type_enum
+  CHECK (event_type IN ('recommended', 'reviewed', 'approved', 'executed', 'verified', 'reopened'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
+  ADD CONSTRAINT disposition_actor_source_enum
+  CHECK (actor_source IN ('obo_user', 'service_principal', 'triage_job', 'check_runner'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
+  ADD CONSTRAINT disposition_event_seq_positive
+  CHECK (event_seq >= 1);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
+  ADD CONSTRAINT disposition_decision_enum
+  CHECK (decision IS NULL OR decision IN ('accepted', 'deferred', 'rejected', 'no_action'));
+
+-- A review that rejects or defers without a reason is not a disposition, it is silence.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
+  ADD CONSTRAINT disposition_reason_required
+  CHECK (decision IS NULL OR decision NOT IN ('deferred', 'rejected') OR (reason IS NOT NULL AND length(trim(reason)) > 0));
+
+-- A deferral without a resurface date is a disappearance.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
+  ADD CONSTRAINT disposition_deferral_has_date
+  CHECK (decision IS NULL OR decision <> 'deferred' OR review_by_date IS NOT NULL);
+
+-- Every in-app event must carry an identity, and it must come from the platform.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
+  ADD CONSTRAINT disposition_human_events_have_identity
+  CHECK (event_type NOT IN ('reviewed', 'approved', 'executed') OR (actor_identity IS NOT NULL AND actor_source = 'obo_user'));
+
+-- WHAT CANNOT BE A TABLE CONSTRAINT, AND SO MUST BE TESTED IN CODE
+--
+-- "A cohort cannot reach approved without the required number of DISTINCT approver
+-- identities" is a statement about a SET of rows. A Delta CHECK constraint sees one
+-- row at a time and cannot express it. Two approver rows with the same
+-- actor_identity will insert happily.
+--
+-- Enforcement therefore lives in two places, and needs both:
+--   1. The approval gate in the app's domain layer, unit-tested, which refuses to
+--      write the second row when the identity matches the first.
+--   2. The audit query in 08_views.sql (v_disposition_integrity), which finds any
+--      cohort that reached approved on fewer than the required distinct identities.
+--      Run it on a schedule; a non-empty result is a control failure, not a warning.
+--
+-- Do not delete (2) on the grounds that (1) exists. (1) is the control; (2) is the
+-- evidence that (1) held.
+
+
+-- =====================================================================
+-- [7/21]  sql/ddl/09_config_cde_registry.sql
+-- =====================================================================
+
+-- cde_registry — the critical data elements, registered before anything profiles them
+--
+-- Substitute {catalog} before execution.
+--
+-- Ownership boundary: this repo owns the SHAPE of the table. Databricks owns its
+-- CONTENTS — CDE rows are inserted at runtime, never checked in here.
+--
+-- WHY THIS TABLE EXISTS AT ALL. Without it, "which columns matter?" is answered by
+-- whichever rules someone happened to write, so coverage can only ever be measured
+-- against itself. Registering the elements first gives every coverage number a
+-- denominator that does not move when the rule set does. A CDE with no rule is the
+-- finding; a rule set with no CDEs cannot produce that finding.
+--
+-- REGISTERED BEFORE DISCOVERY. The order is the point. A CDE is registered as a
+-- DEFINITION — a business term, a data class, an expected signature — and only then
+-- does anything profile it. `results.cde_profile` takes its worklist from
+-- v_cde_registry_current, so an unregistered column cannot be profiled, and only a
+-- bound column can produce a proposed rule. That ordering is what stops discovery
+-- from quietly deciding what is critical.
+--
+-- APPEND-ONLY, LIKE THE RULE REGISTRY AND THE REGISTER. Re-tiering a CDE, adding a
+-- binding or retiring one INSERTS a new (cde_id, cde_version) row. There is
+-- deliberately no stored effective_to — it is derived with LEAD() in
+-- v_cde_registry_current (11_views_cde.sql), for the same reason as the rule
+-- registry: closing the prior row would need UPDATE, which would widen the app's
+-- grant and break the uniform "only ever appends" story.
+--
+-- BINDINGS ARE AN ARRAY, NOT A BRIDGE TABLE. One business element lands in many
+-- physical columns — the same call results.cohort made for member_result_ids, and
+-- for the same reasons: criticality, PII status and ownership are properties of the
+-- ELEMENT, not of each copy of it, and CDE registers are tens of rows, not
+-- thousands. Revisit only if a binding needs a lifecycle of its own.
+--
+-- binding_status and discovered_by are seeded 'bound' / 'manual' throughout the PoC,
+-- where bindings are hand-authored. They are here so that automated binding
+-- discovery — name matching, value signatures, Unity Catalog lineage — lands later
+-- as NEW ROWS in a 'candidate' state rather than as a schema migration on a table
+-- that by then carries history.
+--
+-- EXPECTED_SCOPE_FILTER IS A CLAIM ABOUT THE DATA, AND IT IS CHECKABLE. Where an
+-- element is only populated for some rows — IMEI only for handset services, billing
+-- account only for postpaid — the binding says so in SQL. v_cde_coverage compares
+-- that against the scope_filter on every rule attached to the binding and reports a
+-- mismatch. That is how a rule defect becomes visible without anyone having to
+-- notice it by hand.
+--
+-- TOLERANCE_PCT IS THE SAME KIND OF CLAIM, ABOUT THE LIMIT RATHER THAN THE SCOPE.
+-- It is the organisation's statement of how many violating rows this element may
+-- carry before the business considers it broken -- a percentage of rows in scope,
+-- declared on the ELEMENT, once, rather than re-decided on every rule that happens
+-- to watch it. It exists so that "what should the threshold on this rule be?" has
+-- an answer that does not come from the run history alone: history says where the
+-- data sits, and only a declaration says where it is allowed to sit. The triage
+-- job reads it into every brief and treats it as a CEILING -- a rule may be
+-- stricter than its element, never looser -- and it is that ceiling, not the
+-- model, that stops a threshold suggestion from being "raise the limit until the
+-- check passes". NULL means no tolerance has been declared, which is honest and is
+-- what the brief says in that case. It is not severity and not criticality:
+-- criticality is how much the element matters, tolerance is how much of it may be
+-- wrong, and the two are set by the same steward for different reasons.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_cde_registry (
+  cde_id             STRING    NOT NULL COMMENT 'stable identifier, survives versioning, e.g. CDE_CUST_EMAIL',
+  cde_version        INT       NOT NULL COMMENT 'incremented on every change; (cde_id, cde_version) is the logical key',
+  cde_name           STRING    NOT NULL COMMENT 'human-readable, shown in the CDE register and the coverage panel',
+  business_term      STRING             COMMENT 'the glossary term this element realises, where a glossary exists',
+  data_class         STRING    NOT NULL COMMENT 'email_address | person_name | date_of_birth | phone_number | msisdn | national_id | device_id | account_id | other',
+  definition         STRING             COMMENT 'what the element means in business terms — the thing a steward is agreeing to when they register it',
+  expected_signature STRING             COMMENT 'regex the values are expected to match. Drives signature_match_pct in the profile. NULL where the element has no fixed shape (a person name has none)',
+  criticality        STRING    NOT NULL COMMENT 'critical | high | medium | low. Feeds cohort.rank_score — NEVER check_run.severity, which is copied verbatim from the rule registry and adjusted downstream by nothing',
+  pii                BOOLEAN   NOT NULL COMMENT 'TRUE where values identify a person. Where TRUE, cde_profile stores masked signatures and counts only, never an exemplar value',
+  regulatory_basis   STRING             COMMENT 'why it is critical in compliance terms, free text, e.g. KYC identity evidence',
+  tolerance_pct      DOUBLE             COMMENT 'the stated organisational tolerance for violating rows on this element, as a percentage of rows in scope. A CEILING on fail_threshold_pct for any rule attached to a binding of this element -- a rule may be stricter, never looser. Read into every triage brief as the organisational basis for a threshold suggestion. NULL means no tolerance has been declared, and the brief says so. Not severity, not criticality -- see header note',
+  bindings           ARRAY<STRUCT<
+                       target_table:          STRING,
+                       target_column:         STRING,
+                       populated_when:        STRING,
+                       expected_scope_filter: STRING,
+                       binding_status:        STRING,
+                       discovered_by:         STRING,
+                       confidence:            DOUBLE
+                     >> NOT NULL COMMENT 'where this element physically lives. populated_when is prose for a human; expected_scope_filter is the same claim in SQL, checked against rule scope by v_cde_coverage. binding_status: candidate | bound | unbound. discovered_by: manual | name_match | value_signature | lineage | uc_tag',
+  business_domain    STRING             COMMENT 'owning domain, used for the coverage breakout',
+  owner_group        STRING             COMMENT 'accountable team; ideally a Databricks group name so it resolves to people',
+  status             STRING    NOT NULL COMMENT 'proposed | registered | retired. Only a registered CDE is profiled; retiring is an insert, not a delete',
+  effective_from     TIMESTAMP NOT NULL COMMENT 'when this version took effect. There is no effective_to — it is derived, see header',
+  registered_by      STRING             COMMENT 'authoring identity, from OBO where the app wrote the row',
+  registered_at      TIMESTAMP          COMMENT 'when this version was registered',
+  note               STRING             COMMENT 'why this element is critical, or why this version changed. Free text, read by humans in the CDE register'
+)
+USING DELTA
+CLUSTER BY (business_domain, cde_id)
+COMMENT 'The critical data element register. Registered BEFORE anything profiles or proposes rules, so coverage has a denominator that does not move when the rule set does. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_registry
+  ADD CONSTRAINT cde_registry_criticality_enum
+  CHECK (criticality IN ('critical', 'high', 'medium', 'low'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_registry
+  ADD CONSTRAINT cde_registry_status_enum
+  CHECK (status IN ('proposed', 'registered', 'retired'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_registry
+  ADD CONSTRAINT cde_registry_version_positive
+  CHECK (cde_version >= 1);
+
+-- A tolerance is a share of rows in scope. NULL is "not declared", not zero.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_registry
+  ADD CONSTRAINT cde_registry_tolerance_range
+  CHECK (tolerance_pct IS NULL OR (tolerance_pct >= 0.0 AND tolerance_pct <= 100.0));
+
+-- A registered CDE with no bindings is a definition nothing can act on. Proposed
+-- rows are allowed to be empty — that is exactly the state between registering an
+-- element and discovering where it lives.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_registry
+  ADD CONSTRAINT cde_registry_registered_has_bindings
+  CHECK (status <> 'registered' OR size(bindings) >= 1);
+
+
+-- =====================================================================
+-- [8/21]  sql/ddl/10_results_cde_profile.sql
+-- =====================================================================
+
+-- cde_profile — what the data in a critical element actually looks like
+--
+-- Substitute {catalog} before execution.
+--
+-- Written by the profile job, read by the CDE register and the coverage panel. The
+-- app never writes it. One row per (binding, profile run).
+--
+-- WHY THIS IS NOT A ROW IN check_run. It was tempting: add rule_type = 'profile'
+-- and reuse the verdict layer. Don't. check_run is the verdict layer — its status
+-- enum is pass | breach | error | skipped, and every row carries a threshold and a
+-- violation_pct. A profile has no threshold and reaches no verdict; forcing one in
+-- means either inventing a fake threshold or adding a fifth status that means "not
+-- actually a check", and either way the scorecard starts counting non-verdicts in
+-- denominators that are supposed to mean "checks that ran". A profile describes;
+-- a check judges. Separate tables.
+--
+-- NO VALUES, EVER, FOR A PII ELEMENT. The registered CDEs are date of birth, name,
+-- email, identity document number — that is what makes them critical, and it is
+-- also what makes a profile table dangerous. results.violation_sample already holds
+-- up to 100 real bad rows per breach; that is one accepted PII surface and there is
+-- no case for opening a second. So where the CDE is flagged pii, this table stores
+-- COUNTS, DISTRIBUTIONS AND MASKED SIGNATURES ONLY. value_stats_withheld records
+-- that the withholding happened, so an empty min/max is legible as a deliberate
+-- omission rather than a failed profile.
+--
+-- WHAT A SIGNATURE IS. Character classes with run lengths, values discarded:
+-- digits -> 9, letters -> X, whitespace -> _, punctuation kept because it is
+-- structure rather than content. So an address becomes X{4}.X{5}@X{7}.X{3} and a
+-- timestamp becomes 9{4}-9{2}-9{2}_9{2}:9{2}:9{2}. Two things follow, and both are
+-- the reason to do it this way. It is not reversible to a value. And a minority
+-- signature IS the defect, visible without anyone writing a rule for it first —
+-- the fourteen dates that read 9{2}-9{2}-9{4} against a column that is otherwise
+-- 9{4}-9{2}-9{2} are the CTCT_BRTH_PARSEABLE breach, found by describing the
+-- column rather than by asserting anything about it.
+--
+-- CLUSTER BY (profile_ts, cde_id): the dominant reads are "the latest profile" for
+-- the register and "this element over time" for drift.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_cde_profile (
+  profile_id          STRING    NOT NULL COMMENT 'uuid, unique per (binding, run)',
+  profile_run_id      STRING    NOT NULL COMMENT 'groups every profile produced by one pass',
+  profile_ts          TIMESTAMP NOT NULL COMMENT 'start of the profiling pass',
+  cde_id              STRING    NOT NULL COMMENT 'the registered element profiled',
+  cde_version         INT       NOT NULL COMMENT 'the version whose binding list was used; pins the profile to the definition in force at the time',
+  data_class          STRING             COMMENT 'denormalised from the registry so a profile is readable without a join',
+  criticality         STRING             COMMENT 'denormalised from the registry, for ranking the coverage panel',
+  pii                 BOOLEAN            COMMENT 'denormalised from the registry — the flag that governed what this row is allowed to contain',
+  target_table        STRING    NOT NULL COMMENT 'catalog.schema.table of the binding profiled',
+  target_column       STRING    NOT NULL COMMENT 'column of the binding profiled',
+  scope_filter        STRING             COMMENT 'the binding expected_scope_filter applied, if any. NULL means the whole table was profiled',
+  rows_scanned        BIGINT             COMMENT 'rows in scope after scope_filter — the denominator for every pct here',
+  null_count          BIGINT             COMMENT 'SQL NULLs',
+  null_pct            DOUBLE             COMMENT 'null_count / rows_scanned * 100',
+  blank_count         BIGINT             COMMENT 'present but empty or whitespace-only. Counted apart from NULL because a warehouse load that writes empty strings and one that writes NULLs are different defects with different owners',
+  blank_pct           DOUBLE             COMMENT 'blank_count / rows_scanned * 100',
+  populated_count     BIGINT             COMMENT 'rows_scanned - null_count - blank_count; the denominator for signature_match_pct',
+  distinct_count      BIGINT             COMMENT 'distinct populated values',
+  distinct_pct        DOUBLE             COMMENT 'distinct_count / populated_count * 100. Near 100 for an identifier, near 0 for a code — this is what says whether a column is what the registry claims it is',
+  min_length          INT                COMMENT 'shortest populated value, in characters. A length, not a value',
+  max_length          INT                COMMENT 'longest populated value, in characters',
+  signature_count     INT                COMMENT 'distinct masked signatures across populated values. 1 means perfectly uniform shape',
+  top_signatures      ARRAY<STRUCT<
+                        signature: STRING,
+                        row_count: BIGINT,
+                        pct:       DOUBLE
+                      >> COMMENT 'the most common masked signatures, descending. See the header for the masking rule. The minority entries are where the defects are',
+  signature_match_pct DOUBLE             COMMENT 'share of populated values matching the registry expected_signature. NULL where the CDE declares none',
+  sentinel_count      BIGINT             COMMENT 'populated values that are placeholders — unknown, n/a, service-number-unknown. Present but meaningless, which no null check catches',
+  value_stats_withheld BOOLEAN  NOT NULL COMMENT 'TRUE when the CDE is pii and exemplar values were therefore not retained. Records that the omission was deliberate',
+  profiled_by         STRING             COMMENT 'the job identity that produced this row',
+  duration_sec        DOUBLE             COMMENT 'wall time for this binding'
+)
+USING DELTA
+CLUSTER BY (profile_ts, cde_id)
+COMMENT 'What each registered CDE binding actually contains — distributions and masked signatures, never values for a PII element. Written by the profile job; the app reads it and never writes.';
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cde_profile
+  ADD CONSTRAINT cde_profile_criticality_enum
+  CHECK (criticality IS NULL OR criticality IN ('critical', 'high', 'medium', 'low'));
+
+-- The privacy invariant, expressed where it cannot be forgotten: a PII element's
+-- profile must declare that values were withheld.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cde_profile
+  ADD CONSTRAINT cde_profile_pii_withholds_values
+  CHECK (pii IS NOT TRUE OR value_stats_withheld = TRUE);
+
+
+-- =====================================================================
+-- [9/21]  sql/ddl/12_functions.sql
+-- =====================================================================
+
+-- Shared predicate helpers — the idioms that repeat across rule_expr
+--
+-- Substitute {catalog} and {check_runner_sp} before execution.
+--
+-- NO LONGER OPTIONAL. This file was additive until 2026-09-27 and its header said
+-- so. Thirteen rules in config.rule_registry now CALL these helpers, so a catalog
+-- without them holds a registry it cannot execute. Deploy this BEFORE the registry is
+-- populated -- it sits at that point in the order already, after the tables and before
+-- the views. A rule_expr is still an arbitrary SQL boolean and no FUTURE rule is
+-- obliged to use these; the thirteen that do are a hard dependency.
+--
+-- What each one replaced, across the 48 registry rows the fixture ships:
+--
+--   IS NULL OR trim(x) = ''          8 rules
+--   the email regex, longhand        2 rules
+--   ^04[0-9]{8}$                     2 rules  (same concept, two tables, two columns)
+--   the sentinel value list          1 rule   (and it will grow)
+--
+-- And since 2026-10-05, three more for the rules extracted from "DQ Queries":
+--
+--   the AU phone-normalising CASE    7 rules  (au_phone_digits_v1)
+--   the phone placeholder list       2 rules  (is_phone_placeholder_v1)
+--   the name placeholder list        3 rules  (is_name_placeholder_v1)
+--
+-- Seven helpers, 23 rules. All 10 of the new callers are in shadow.
+--
+-- That is the whole case. It is not large. The email regex is the one that matters
+-- most — it is long enough that nobody will spot the day the two copies diverge.
+--
+-- ================================================================
+-- READ THIS FIRST: two things here are load-bearing
+-- ================================================================
+--
+-- 1. NULL BEHAVIOUR IS INHERITED, NOT DESIGNED.
+--
+--    Every function below reproduces exactly what the expression it replaces did
+--    with a NULL input. That produces a deliberate asymmetry:
+--
+--      is_blank_v1(NULL)        -> TRUE   (NULL-absorbing)
+--      is_valid_email_v1(NULL)  -> NULL   (NULL-propagating)
+--      is_au_mobile_v1(NULL)    -> NULL   (NULL-propagating)
+--      is_sentinel_v1(NULL)     -> NULL   (NULL-propagating)
+--
+--    This is not an oversight to tidy up. `count_if` does not count a NULL
+--    predicate, so a NULL email is currently NOT a format violation — it is caught
+--    by CTCT_EML_NOT_NULL instead, and counting it twice would double-count the
+--    same row across two rules. Make is_valid_email_v1 return FALSE for NULL and
+--    every format rule's violation_count changes silently. Do not "fix" this.
+--
+-- 2. THE _v1 SUFFIX IS THE AUDIT MECHANISM.
+--
+--    config.rule_registry pins rule_version so a verdict can be explained from the
+--    threshold in force at the time. There is no function_version column, and a
+--    check_run row records no function state. So a function that is ALTERed in
+--    place retroactively changes the meaning of every historical verdict that used
+--    it, and nothing records that it happened.
+--
+--    The rule is therefore: these are immutable once a rule references them.
+--    A change is a NEW function (_v2) plus a NEW rule_version on every dependent
+--    rule, which is exactly the append-only discipline the registry already has.
+--    CREATE OR REPLACE on a referenced function is a control failure, not a fix.
+--
+-- ================================================================
+-- What these deliberately do NOT cover
+-- ================================================================
+--
+-- A UC scalar function takes column values and returns a boolean. Three of the four
+-- rule shapes in the registry cannot be expressed that way and are untouched here:
+--
+--   window uniqueness   3 rules   count(*) OVER (PARTITION BY x) > 1
+--   table-level variance 2 rules  (SELECT count(DISTINCT c) FROM {table}) <= 1
+--   cross-table          3 rules  aliased s. / c. — needs a join the registry
+--                                 does not currently store
+--
+-- Those need execution paths in the check runner, not helpers. The cross-table three
+-- are the open one: XREF_NAME_AGREEMENT has no target_column and references aliases
+-- s. and c. with nothing in the registry saying what they bind to. The joins DO exist
+-- — fixtures/rules.py carries a join_sql per rule — but config.rule_registry has no
+-- column to hold one, so they reach Databricks only via sql/checkrun.py.
+
+-- (CREATE SCHEMA dropped by render.py — the sandpit schema already exists)
+
+
+-- ---------------------------------------------------------------
+-- is_blank_v1 — absent, or present and empty
+-- ---------------------------------------------------------------
+-- Replaces: X IS NULL OR trim(X) = ''   (8 rules)
+--
+-- NULL-absorbing on purpose: a not_null rule must count a NULL as a violation, so
+-- this returns TRUE rather than NULL. It is the only function here that does.
+--
+-- Note this conflates SQL NULL with whitespace-only, which the rules already did.
+-- results.cde_profile keeps them apart (null_count vs blank_count) because a load
+-- writing empty strings and one writing NULLs are different defects with different
+-- owners. The rules do not make that distinction and this does not add it.
+
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_fn_is_blank_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x is NULL, empty, or whitespace-only. NULL-absorbing: is_blank_v1(NULL) is TRUE, not NULL.'
+RETURN x IS NULL OR trim(x) = '';
+
+
+-- ---------------------------------------------------------------
+-- is_valid_email_v1 — the shape of an address, not its deliverability
+-- ---------------------------------------------------------------
+-- Replaces the regex written longhand in CTCT_EML_FMT and CTCT_EML_STTS_CONSISTENT.
+--
+-- The regex is copied byte-for-byte from the registry, doubled backslashes and all
+-- — that is the Spark SQL string-literal form, and changing the escaping changes
+-- what the regex engine sees.
+--
+-- Deliberately positive ("is valid") rather than a violation predicate, so the rule
+-- reads NOT sdpt_data_trnf.udp_brnz.dq_fn_is_valid_email_v1(EML_ID). NULL-propagating: a NULL address
+-- is not a format violation, it is a not_null violation, and CTCT_EML_NOT_NULL
+-- already counts it.
+--
+-- This checks shape only. It does not check that the domain resolves, that the TLD
+-- exists, or that anyone reads mail there. The five narrower email rules
+-- (NO_AT, WHITESPACE, DOMAIN_TLD, DOUBLE_DOT, TRAILING_DOT) stay as they are: they
+-- exist to say WHICH way an address is malformed, which a single boolean cannot.
+
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_fn_is_valid_email_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x has the shape of an email address. NULL in, NULL out. Shape only — no domain or deliverability check.'
+RETURN x RLIKE '^[^@\\s.]+(\\.[^@\\s.]+)*@[^@\\s.]+(\\.[^@\\s.]+)+$';
+
+
+-- ---------------------------------------------------------------
+-- is_au_mobile_v1 — Australian mobile number format
+-- ---------------------------------------------------------------
+-- Replaces ^04[0-9]{8}$ in CTCT_MOBL_FMT (ctct_c.MOBL_NO) and SUBS_MSISDN_FMT
+-- (subs_c.PRIM_RSRC_VALU_TXT).
+--
+-- This is the strongest case of the four. The same business concept is checked on
+-- two tables under two unrelated column names, so a correction to one would very
+-- plausibly never reach the other. Naming the concept once is the point.
+--
+-- Format only: ten digits opening 04. It does not check that the prefix is an
+-- allocated carrier range or that the number is in service — SUBS_MSISDN_SENTINEL
+-- covers the placeholder case separately.
+
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_fn_is_au_mobile_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x is ten digits opening 04. NULL in, NULL out. Format only — no carrier-range or in-service check.'
+RETURN x RLIKE '^04[0-9]{8}$';
+
+
+-- ---------------------------------------------------------------
+-- is_sentinel_v1 — present, but meaningless
+-- ---------------------------------------------------------------
+-- Replaces the value list in SUBS_MSISDN_SENTINEL.
+--
+-- One rule uses it today. It is here anyway because the sentinel list is the thing
+-- most likely to grow — every new source system arrives with its own placeholder
+-- vocabulary — and a growing list copied across rules is the drift case this file
+-- exists to prevent. results.cde_profile.sentinel_count is profiling the same idea
+-- from the other direction; when that list and this one disagree, one of them is
+-- stale.
+--
+-- Adding a value to this list changes what every dependent rule counts. That is a
+-- _v2 and a new rule_version, not an edit — see the header.
+--
+-- NULL-propagating: lower(trim(NULL)) IN (...) is NULL, and an absent value is a
+-- not_null violation rather than a sentinel one.
+
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_fn_is_sentinel_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x is a placeholder standing in for a real value. NULL in, NULL out. Adding a value here is a _v2, not an edit.'
+RETURN lower(trim(x)) IN (
+  'service-number-unknown', 'unknown', 'n/a', 'na', 'none', 'null', ''
+);
+
+
+-- ---------------------------------------------------------------
+-- au_phone_digits_v1 — an Australian phone number in local 0xxxxxxxxx form
+-- ---------------------------------------------------------------
+-- Added 2026-10-05 with the rules extracted from the workspace folder "DQ Queries".
+-- Replaces the normalising CASE that seven of those rules each carried, three times
+-- over in some: strip everything but digits, then 61xxxxxxxxx -> 0xxxxxxxxx and a
+-- nine-digit number missing its leading zero -> 0 + it. Anything else comes back as
+-- its bare digits, unjudged.
+--
+-- The only helper here that returns a VALUE rather than a boolean. The rules judge
+-- its output -- is_au_mobile_v1(au_phone_digits_v1(x)), a landline pattern, the
+-- PARTITION BY of the shared-mobile rule -- so the normalisation is stated once
+-- and the judgements stay in the rules where a steward can read them.
+--
+-- NULL in, NULL out, as the CASE it replaces.
+
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_fn_au_phone_digits_v1(x STRING)
+RETURNS STRING
+COMMENT 'x reduced to digits, with 61xxxxxxxxx and a nine-digit number missing its leading 0 rewritten to local 0xxxxxxxxx form. NULL in, NULL out. Normalises; does not judge.'
+RETURN CASE
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^61[0-9]{9}$'
+    THEN concat('0', substr(regexp_replace(x, '[^0-9]', ''), 3))
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^[23478][0-9]{8}$'
+    THEN concat('0', regexp_replace(x, '[^0-9]', ''))
+  ELSE regexp_replace(x, '[^0-9]', '')
+END;
+
+
+-- ---------------------------------------------------------------
+-- is_phone_placeholder_v1 — a known placeholder, test or prohibited number
+-- ---------------------------------------------------------------
+-- Added 2026-10-05. Replaces the list carried by CTCT_PHN_PLACEHOLDER and
+-- CTCT_MOBL_PLACEHOLDER. The source query's two versions had already drifted apart
+-- (42 numbers and 14); this is their union, 48 numbers, plus seven or more
+-- zeros in a row anywhere in the digits.
+--
+-- SELF-CONTAINED ON PURPOSE: it repeats au_phone_digits_v1's CASE rather than
+-- calling it. A helper that calls a helper couples their versions -- a _v2 of one
+-- would silently change the other -- and the whole point of _v1 is that nothing
+-- changes silently.
+--
+-- Adding a number is a _v2 and a new rule_version on both rules, as for
+-- is_sentinel_v1. NULL in, NULL out.
+
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_fn_is_phone_placeholder_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x, normalised to local AU form, is a known placeholder, test or prohibited number, or holds seven zeros in a row. NULL in, NULL out. Adding a number is a _v2, not an edit.'
+RETURN CASE
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^61[0-9]{9}$'
+    THEN concat('0', substr(regexp_replace(x, '[^0-9]', ''), 3))
+  WHEN regexp_replace(x, '[^0-9]', '') RLIKE '^[23478][0-9]{8}$'
+    THEN concat('0', regexp_replace(x, '[^0-9]', ''))
+  ELSE regexp_replace(x, '[^0-9]', '')
+END IN (
+  '0400000000', '0400000001', '0400000002', '0404040404', '0400000123', '0400000321',
+  '0400009999', '0410000000', '0411000321', '0411111110', '0411111111', '0412000123',
+  '0412345678', '0413234234', '0420000000', '0421212111', '0422222222', '0432100000',
+  '0433333333', '0444444444', '0452397392', '0455555555', '0477777777', '0488888888',
+  '0491570006', '0499999999', '0200000000', '0200000001', '0222222222', '0250000000',
+  '0280000000', '0280808080', '0288888888', '0290000000', '0299999999', '0300000000',
+  '0390000000', '0700000000', '0800000000', '1300000000', '1300300937', '133937',
+  '1300133937', '0400011132', '0411111112', '0411111113', '0411111116', '0422226838'
+) OR regexp_replace(x, '[^0-9]', '') RLIKE '0{7,}';
+
+
+-- ---------------------------------------------------------------
+-- is_name_placeholder_v1 — a name field holding a stand-in
+-- ---------------------------------------------------------------
+-- Added 2026-10-05. Replaces the list in CTCT_FRST_NM_PLACEHOLDER,
+-- CTCT_LAST_NM_PLACEHOLDER and CTCT_MID_NM_PLACEHOLDER.
+--
+-- Not is_sentinel_v1, and not a _v2 of it: that list is for service numbers
+-- ('service-number-unknown', 'na', '') and this one is for people ('TBC', 'TEST',
+-- 'NOT PROVIDED'). 'NA' and 'NIL' are commented out of the source query -- both are
+-- real names -- and are left out here for the same reason.
+--
+-- NULL in, NULL out: an absent name is a presence violation, not a placeholder.
+
+CREATE OR REPLACE FUNCTION sdpt_data_trnf.udp_brnz.dq_fn_is_name_placeholder_v1(x STRING)
+RETURNS BOOLEAN
+COMMENT 'TRUE when x, trimmed and upper-cased, is a placeholder standing in for a name. NULL in, NULL out. Adding a value is a _v2, not an edit.'
+RETURN upper(trim(x)) IN (
+  'N/A', 'NONE', 'NULL', 'UNKNOWN', 'NOT APPLICABLE',
+  'NOT PROVIDED', 'TBC', 'TBD', 'TEST', 'DUMMY',
+  'SAMPLE', 'UNDEFINED', 'NOT AVAILABLE'
+);
+
+
+-- (Grants block dropped by render.py — you cannot grant in a sandpit.
+--  Keep ownership of these functions with whoever owns the schema, and see
+--  the _v1 immutability note in the header above.)
+
+
+-- =====================================================================
+-- [10/21]  sql/ddl/13_results_threshold.sql
+-- =====================================================================
+
+-- threshold_proposal and threshold_review — the detection limit, advised and decided
+--
+-- Substitute {catalog} before execution. Runs after 01 and 09, whose tables these
+-- reference by id, and before 14_views_threshold.sql.
+--
+-- WHAT THIS IS, AND WHAT IT IS NOT. A rule's fail_threshold_pct is the line between
+-- normal variation and a breach, and until now it was set once, by hand, and never
+-- revisited. threshold_proposal is a job's advice on where that line should be, one
+-- row per rule per pass, made from the two things a limit can rest on: the tolerance
+-- the CDE register declares on the element (organisational — what the business will
+-- accept) and where the violation rate has sat across the run history (empirical —
+-- where the data is). It is DETECTION advice, about the rule, and has nothing to do
+-- with triage: no cohort, no hypothesis, no disposition. The triage job neither reads
+-- nor writes it.
+--
+-- THE CEILING IS A ROW-LEVEL CONSTRAINT HERE. tolerance_pct is copied onto the row at
+-- proposal time, so "never above the element's tolerance" is a CHECK on this table,
+-- not a join. A model asked to advise on a limit can answer "whatever makes the check
+-- pass"; the tolerance is what stops that, and this is where it is enforced last —
+-- after the job's own validator and before anything reads the row.
+--
+-- current_threshold_pct IS COPIED FROM THE REGISTRY, NEVER FROM THE MODEL. The "from"
+-- half of a proposal is a fact. rule_version pins which version was advised on, so a
+-- proposal made against v2 is not mistaken for advice about v3.
+--
+-- threshold_review IS THE DECISION, AND IT IS THE APP'S THIRD WRITE. A reviewer
+-- adopts, rejects or defers a proposal. Adopting also appends a rule_version to
+-- config.rule_registry carrying the proposed limit — the same table and the same
+-- append the app already performs to promote a shadow rule — and adopted_rule_version
+-- records which. Rejections and deferrals have nowhere else to live: without this
+-- table a rejected proposal is indistinguishable from one nobody looked at and comes
+-- back every pass. 07_grants.sql names it as the third MODIFY grant and says so.
+-- Append-only, like the register; a change of mind is a new row.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_threshold_proposal (
+  proposal_id            STRING    NOT NULL COMMENT 'uuid, unique per proposal row',
+  proposal_run_id        STRING    NOT NULL COMMENT 'groups every proposal produced by one pass of the threshold job',
+  proposed_ts            TIMESTAMP NOT NULL COMMENT 'when the pass ran',
+  rule_id                STRING    NOT NULL COMMENT 'the rule advised on',
+  rule_version           INT       NOT NULL COMMENT 'the version advised on. A proposal against v2 is not advice about v3',
+  cde_id                 STRING    NOT NULL COMMENT 'the element the rule monitors, from the registry -- the organisational basis comes from here',
+  target_table           STRING    NOT NULL COMMENT 'denormalised from the registry',
+  target_column          STRING             COMMENT 'denormalised from the registry; NULL for a cross-table rule',
+  current_threshold_pct  DOUBLE    NOT NULL COMMENT 'fail_threshold_pct in force when the proposal was made. Copied from the registry, never from the model',
+  proposed_threshold_pct DOUBLE    NOT NULL COMMENT 'the limit the model would set',
+  tolerance_pct          DOUBLE             COMMENT 'the tolerance the element declared at proposal time -- the ceiling. NULL where none was declared, in which case the expected advice is unchanged',
+  basis                  STRING    NOT NULL COMMENT 'element_tolerance | run_history | both | unchanged. unchanged means proposed equals current, with the reason stated',
+  rationale              STRING    NOT NULL COMMENT 'the figures the proposal rests on, in prose, for the reviewer',
+  reviewer               STRING    NOT NULL COMMENT 'the team asked to review it -- a team, not a person. Normally the owner_group of the rule',
+  runs_observed          INT                COMMENT 'runs with a pass or breach verdict in the history the model was shown',
+  pct_min                DOUBLE             COMMENT 'violation_pct across those runs',
+  pct_median             DOUBLE             COMMENT 'violation_pct across those runs',
+  pct_p90                DOUBLE             COMMENT 'violation_pct across those runs',
+  pct_max                DOUBLE             COMMENT 'violation_pct across those runs',
+  runs_breaching         INT                COMMENT 'of runs_observed, how many breached the current limit',
+  latest_violation_pct   DOUBLE             COMMENT 'violation_pct on the latest run',
+  model_endpoint         STRING             COMMENT 'which serving endpoint produced this',
+  model_input_payload    STRING             COMMENT 'JSON of exactly what the endpoint was shown -- the brief and the provenance, retained for audit',
+  job_run_id             STRING             COMMENT 'the Lakeflow run that produced this row'
+)
+USING DELTA
+CLUSTER BY (rule_id, proposed_ts)
+COMMENT 'Advice from the threshold job on the fail_threshold_pct of each rule, one row per rule per pass. Detection advice, about the rule, made against the tolerance the element declares and the run history. Never applied by anything here: a limit changes only when a person adopts a proposal and a new rule_version is appended. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_proposal
+  ADD CONSTRAINT threshold_proposal_range
+  CHECK (proposed_threshold_pct >= 0.0 AND proposed_threshold_pct <= 100.0);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_proposal
+  ADD CONSTRAINT threshold_proposal_basis_enum
+  CHECK (basis IN ('element_tolerance', 'run_history', 'both', 'unchanged'));
+
+-- `unchanged` means exactly that the numbers are equal, so a reader can trust the
+-- word without comparing them.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_proposal
+  ADD CONSTRAINT threshold_proposal_unchanged_means_unchanged
+  CHECK ((basis = 'unchanged') = (proposed_threshold_pct = current_threshold_pct));
+
+-- THE CEILING. A rule may be stricter than its element, never looser.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_proposal
+  ADD CONSTRAINT threshold_proposal_under_tolerance
+  CHECK (tolerance_pct IS NULL OR proposed_threshold_pct <= tolerance_pct);
+
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_threshold_review (
+  review_id            STRING    NOT NULL COMMENT 'uuid, unique per review row',
+  proposal_id          STRING    NOT NULL COMMENT 'the proposal decided',
+  event_ts             TIMESTAMP NOT NULL COMMENT 'when the reviewer decided',
+  ingest_ts            TIMESTAMP NOT NULL COMMENT 'when the row was written',
+  actor_identity       STRING             COMMENT 'the acting principal -- the OBO user, never a typed-in name',
+  actor_display_name   STRING             COMMENT 'human-readable name for rendering; identity above is the one that counts',
+  actor_source         STRING    NOT NULL COMMENT 'obo_user | service_principal. How we know who acted',
+  decision             STRING    NOT NULL COMMENT 'adopted | rejected | deferred',
+  reason               STRING             COMMENT 'why. Required for rejected and deferred',
+  review_by_date       DATE               COMMENT 'deferred only: when the proposal resurfaces. Required when deferred',
+  adopted_rule_version INT                COMMENT 'adopted only: the rule_version appended to config.rule_registry carrying the proposed limit. Required when adopted',
+  app_version          STRING             COMMENT 'which build of the app wrote this'
+)
+USING DELTA
+CLUSTER BY (proposal_id, event_ts)
+COMMENT 'The decision of a reviewer on a threshold proposal. Adopting also appends a rule_version to config.rule_registry; rejecting and deferring are recorded here and nowhere else. The third write of the app. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_review
+  ADD CONSTRAINT threshold_review_decision_enum
+  CHECK (decision IN ('adopted', 'rejected', 'deferred'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_review
+  ADD CONSTRAINT threshold_review_actor_source_enum
+  CHECK (actor_source IN ('obo_user', 'service_principal'));
+
+-- A rejection or deferral without a reason is not a decision, it is silence.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_review
+  ADD CONSTRAINT threshold_review_reason_required
+  CHECK (decision = 'adopted' OR (reason IS NOT NULL AND length(trim(reason)) > 0));
+
+-- A deferral without a resurface date is a disappearance.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_review
+  ADD CONSTRAINT threshold_review_deferral_has_date
+  CHECK (decision <> 'deferred' OR review_by_date IS NOT NULL);
+
+-- An adoption names the rule_version it created, or it did not happen.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_review
+  ADD CONSTRAINT threshold_review_adoption_names_version
+  CHECK (decision <> 'adopted' OR adopted_rule_version IS NOT NULL);
+
+-- Every review is a person's, and the platform vouches for who.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_review
+  ADD CONSTRAINT threshold_review_has_identity
+  CHECK (actor_identity IS NOT NULL AND actor_source = 'obo_user');
+
+
+-- =====================================================================
+-- [11/21]  sql/ddl/08_views.sql
+-- =====================================================================
+
+-- Views — derived state, because none of it is stored
+--
+-- Substitute {catalog} before execution.
+--
+-- Two tables in this model deliberately have no status column: the register is an
+-- event log, and the registry is append-only. That is the right call for audit and
+-- the wrong shape for a UI, which needs to ask "show me open P1 cohorts". These
+-- views are the bridge. They are the ONLY place current-state logic should live —
+-- if the app computes it in pandas as well, the two will disagree.
+
+-- ---------------------------------------------------------------
+-- v_rule_registry_current — the rule as it stands now
+-- ---------------------------------------------------------------
+-- effective_to is derived rather than stored, so promoting a rule stays an INSERT.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_rule_registry_current
+COMMENT 'Latest version of every rule, with effective_to derived from the next version. Query this, not the base table, unless you want rule history.'
+AS
+WITH versioned AS (
+  SELECT
+    r.*,
+    LEAD(r.effective_from) OVER (PARTITION BY r.rule_id ORDER BY r.rule_version) AS effective_to,
+    ROW_NUMBER()           OVER (PARTITION BY r.rule_id ORDER BY r.rule_version DESC) AS rn
+  FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry r
+)
+SELECT * EXCEPT (rn)
+FROM   versioned
+WHERE  rn = 1
+  AND  status <> 'retired';
+
+-- ---------------------------------------------------------------
+-- v_cohort_current — where each cohort has got to
+-- ---------------------------------------------------------------
+-- Folds the event log into one row per cohort. This is what the Cohort Queue
+-- filters and what the Scorecard aggregates.
+--
+-- lifecycle_state is COMPUTED HERE AND NOWHERE ELSE. It is not a column anyone
+-- writes. The precedence below is the whole state machine:
+--   a failed verification reopens, and reopening outranks the approval that
+--   preceded it, so a reopened cohort returns to the queue rather than sitting
+--   closed and wrong.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_cohort_current
+COMMENT 'One row per cohort with its derived lifecycle state, approver count and MTTR. Computed from the disposition event log at read time — there is no stored status anywhere.'
+AS
+WITH ev AS (
+  SELECT
+    cohort_id,
+    MAX(event_seq)                                                                     AS last_seq,
+    MAX(CASE WHEN event_type = 'reviewed' THEN event_ts END)                           AS reviewed_ts,
+    MAX(CASE WHEN event_type = 'executed' THEN event_ts END)                           AS executed_ts,
+    MAX(CASE WHEN event_type = 'verified' THEN event_ts END)                           AS verified_ts,
+    COUNT_IF(event_type = 'approved')                                                  AS approval_rows,
+    COUNT(DISTINCT CASE WHEN event_type = 'approved' THEN actor_identity END)          AS distinct_approvers,
+    COUNT_IF(event_type = 'reopened')                                                  AS reopen_count,
+    MAX_BY(decision,  CASE WHEN event_type = 'reviewed' THEN event_seq END)            AS latest_decision,
+    MAX_BY(reason,    CASE WHEN event_type = 'reviewed' THEN event_seq END)            AS latest_reason,
+    MAX_BY(review_by_date, CASE WHEN event_type = 'reviewed' THEN event_seq END)       AS review_by_date,
+    MAX_BY(actor_identity, CASE WHEN event_type = 'reviewed' THEN event_seq END)       AS reviewed_by,
+    MAX_BY(verification_passed, CASE WHEN event_type = 'verified' THEN event_seq END)  AS last_verification_passed,
+    MAX_BY(violations_before,   CASE WHEN event_type = 'verified' THEN event_seq END)  AS violations_before,
+    MAX_BY(violations_after,    CASE WHEN event_type = 'verified' THEN event_seq END)  AS violations_after,
+    MAX_BY(approach_type_taken, CASE WHEN event_type = 'executed' THEN event_seq END)  AS approach_type_taken,
+    MAX_BY(event_type, event_seq)                                                      AS last_event_type
+  FROM sdpt_data_trnf.udp_brnz.dq_results_disposition
+  GROUP BY cohort_id
+)
+SELECT
+  c.cohort_id,
+  c.raised_ts,
+  c.severity,
+  c.business_domain,
+  c.owner_group,
+  c.member_count,
+  c.affected_tables,
+  c.total_violation_rows,
+  c.root_cause_hypothesis,
+  c.recommended_approach,
+  c.recommended_approach_type,
+  c.recommendation_source,
+  c.rank_score,
+
+  CASE
+    WHEN ev.cohort_id IS NULL                                        THEN 'awaiting_triage'
+    WHEN ev.last_verification_passed = TRUE                          THEN 'closed_verified'
+    WHEN ev.reopen_count > 0
+     AND ev.last_event_type IN ('reopened', 'verified')              THEN 'reopened'
+    WHEN ev.latest_decision = 'rejected'                             THEN 'closed_rejected'
+    WHEN ev.latest_decision = 'no_action'                            THEN 'closed_no_action'
+    WHEN ev.latest_decision = 'deferred'                             THEN 'deferred'
+    WHEN ev.executed_ts IS NOT NULL                                  THEN 'awaiting_verification'
+    WHEN ev.distinct_approvers >= CASE WHEN c.severity = 'P1_block' THEN 2 ELSE 1 END
+                                                                     THEN 'approved_awaiting_execution'
+    WHEN ev.latest_decision = 'accepted'                             THEN 'awaiting_approval'
+    ELSE                                                                  'awaiting_review'
+  END                                                                AS lifecycle_state,
+
+  ev.distinct_approvers,
+  CASE WHEN c.severity = 'P1_block' THEN 2 ELSE 1 END                AS approvals_required,
+  ev.reopen_count,
+  ev.latest_decision,
+  ev.latest_reason,
+  ev.review_by_date,
+  ev.reviewed_by,
+  ev.reviewed_ts,
+  ev.executed_ts,
+  ev.verified_ts,
+  ev.violations_before,
+  ev.violations_after,
+  ev.approach_type_taken,
+
+  -- Recommendation acceptance: did the steward do what was recommended?
+  CASE WHEN ev.approach_type_taken IS NULL THEN NULL
+       ELSE ev.approach_type_taken = c.recommended_approach_type END AS recommendation_followed,
+
+  -- MTTR clock: raised -> verified closed. NULL until it actually closes, so a
+  -- cohort nobody touched cannot flatter the average by being excluded silently —
+  -- report it alongside disposition coverage, never on its own.
+  CASE WHEN ev.last_verification_passed = TRUE
+       THEN datediff(SECOND, c.raised_ts, ev.verified_ts) / 86400.0 END AS mttr_days
+FROM sdpt_data_trnf.udp_brnz.dq_results_cohort c
+LEFT JOIN ev ON ev.cohort_id = c.cohort_id;
+
+-- ---------------------------------------------------------------
+-- v_disposition_integrity — the control test
+-- ---------------------------------------------------------------
+-- Every row this returns is a control failure. Schedule it; alert on non-empty.
+-- See the note at the foot of 06 for why this cannot be a table constraint.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_disposition_integrity
+COMMENT 'Control test over the register. A non-empty result is a control failure, not a warning. Distinct-approver enforcement cannot be a CHECK constraint because it is a property of a set of rows.'
+AS
+-- Approved on too few DISTINCT identities (the same person approving twice).
+SELECT
+  c.cohort_id,
+  'insufficient_distinct_approvers' AS finding,
+  concat('severity ', c.severity, ' requires ',
+         CAST(CASE WHEN c.severity = 'P1_block' THEN 2 ELSE 1 END AS STRING),
+         ' distinct approvers, found ',
+         CAST(COUNT(DISTINCT d.actor_identity) AS STRING),
+         ' across ', CAST(COUNT(*) AS STRING), ' approval rows') AS detail
+FROM sdpt_data_trnf.udp_brnz.dq_results_cohort c
+JOIN sdpt_data_trnf.udp_brnz.dq_results_disposition d
+  ON d.cohort_id = c.cohort_id AND d.event_type = 'approved'
+GROUP BY c.cohort_id, c.severity
+HAVING COUNT(DISTINCT d.actor_identity) < CASE WHEN c.severity = 'P1_block' THEN 2 ELSE 1 END
+
+UNION ALL
+
+-- Execution recorded without the approval that should have preceded it.
+SELECT
+  d.cohort_id,
+  'executed_without_approval',
+  concat('executed at ', CAST(MIN(d.event_ts) AS STRING), ' with no prior approved event')
+FROM sdpt_data_trnf.udp_brnz.dq_results_disposition d
+WHERE d.event_type = 'executed'
+  AND NOT EXISTS (
+    SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_results_disposition a
+    WHERE a.cohort_id = d.cohort_id
+      AND a.event_type = 'approved'
+      AND a.event_seq  < d.event_seq)
+GROUP BY d.cohort_id
+
+UNION ALL
+
+-- An in-app event whose identity did not come from the platform.
+SELECT
+  d.cohort_id,
+  'identity_not_from_platform',
+  concat(d.event_type, ' at seq ', CAST(d.event_seq AS STRING),
+         ' has actor_source = ', COALESCE(d.actor_source, 'NULL'))
+FROM sdpt_data_trnf.udp_brnz.dq_results_disposition d
+WHERE d.event_type IN ('reviewed', 'approved', 'executed')
+  AND (d.actor_source <> 'obo_user' OR d.actor_identity IS NULL)
+
+UNION ALL
+
+-- A cohort that exists but was never even recommended — the triage job failed to
+-- open the chain, so nothing downstream can be trusted for it.
+SELECT
+  c.cohort_id,
+  'missing_recommended_event',
+  'cohort has no recommended event opening its chain'
+FROM sdpt_data_trnf.udp_brnz.dq_results_cohort c
+WHERE NOT EXISTS (
+  SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_results_disposition d
+  WHERE d.cohort_id = c.cohort_id AND d.event_type = 'recommended');
+
+
+-- =====================================================================
+-- [12/21]  sql/ddl/11_views_cde.sql
+-- =====================================================================
+
+-- CDE views — current definitions, and the coverage question they exist to answer
+--
+-- Substitute {catalog} before execution. Runs after 09 and 10, which create the
+-- tables these read, and after 08, which creates v_rule_registry_current.
+--
+-- Same discipline as 08_views.sql: current state is derived here and NOWHERE ELSE.
+-- The registry is append-only, so "the CDE as it stands now" is a window function,
+-- not a column. If the app recomputes it in pandas as well, the two will disagree.
+
+-- ---------------------------------------------------------------
+-- v_cde_registry_current — the element as it stands now
+-- ---------------------------------------------------------------
+-- effective_to is derived rather than stored, so re-tiering an element, adding a
+-- binding or retiring one all stay INSERTs.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_cde_registry_current
+COMMENT 'Latest version of every critical data element, with effective_to derived from the next version. Query this, not the base table, unless you want registration history. This is also the profile job worklist — an element absent here cannot be profiled.'
+AS
+WITH versioned AS (
+  SELECT
+    c.*,
+    LEAD(c.effective_from) OVER (PARTITION BY c.cde_id ORDER BY c.cde_version) AS effective_to,
+    ROW_NUMBER()           OVER (PARTITION BY c.cde_id ORDER BY c.cde_version DESC) AS rn
+  FROM sdpt_data_trnf.udp_brnz.dq_config_cde_registry c
+)
+SELECT * EXCEPT (rn)
+FROM   versioned
+WHERE  rn = 1
+  AND  status <> 'retired';
+
+-- ---------------------------------------------------------------
+-- v_cde_coverage — one row per bound column, and whether anything watches it
+-- ---------------------------------------------------------------
+-- The view the whole component exists for. Every other table here describes what
+-- broke; this one describes what is not being looked at.
+--
+-- A RULE ATTACHES TO A BINDING BY NAMING THE ELEMENT. config.rule_registry.cde_id
+-- is NOT NULL, and where the rule has a target_column that column must be one of
+-- the element's bindings and the rule attaches to that binding only. A cross-table
+-- rule carries target_column = NULL by design — XREF_NAME_AGREEMENT checks that a
+-- subscription's first name agrees with its contact's, which is a name rule and
+-- unreachable by any column join — and attaches to every binding of its element.
+-- Until 2026-09-28 the join was `cde_id OR column match`, so that 20 rules could
+-- attach by column and 14 attach to nothing; now every rule attaches, once.
+--
+-- SCOPE MISMATCH IS A RULE DEFECT, DETECTED STRUCTURALLY. Where a binding declares
+-- expected_scope_filter — this element is only populated for these rows — and an
+-- attached rule carries no scope_filter at all, that rule is measuring rows the
+-- register says should never have held a value. It will report legitimate product
+-- variation as breaches. That is not a hypothetical: on the pilot data it is 700
+-- rows across two rules, and it is what cohort COH-B is about. The register makes
+-- the contradiction machine-visible; a human still decides what to do about it.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_cde_coverage
+COMMENT 'One row per bound CDE column: how many active rules watch it, of what types, whether any of them contradicts the binding scope, and when it was last profiled. A row with rule_count = 0 on a critical element is the finding this component was built to produce.'
+AS
+WITH bound AS (
+  SELECT
+    c.cde_id, c.cde_version, c.cde_name, c.data_class, c.criticality, c.pii,
+    c.business_domain, c.owner_group,
+    b.target_table, b.target_column, b.populated_when, b.expected_scope_filter,
+    b.discovered_by
+  FROM sdpt_data_trnf.udp_brnz.dq_config_v_cde_registry_current c
+  LATERAL VIEW explode(c.bindings) exploded AS b
+  WHERE c.status = 'registered'
+    AND b.binding_status = 'bound'
+),
+active_rules AS (
+  SELECT rule_id, rule_type, severity, scope_filter, cde_id, target_table, target_column
+  FROM   sdpt_data_trnf.udp_brnz.dq_config_v_rule_registry_current
+  WHERE  status = 'active'
+),
+latest_run AS (
+  SELECT MAX(run_ts) AS run_ts FROM sdpt_data_trnf.udp_brnz.dq_results_check_run
+),
+verdicts AS (
+  SELECT k.rule_id, k.status, k.violation_count
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_check_run k
+  JOIN   latest_run lr ON k.run_ts = lr.run_ts
+),
+attached AS (
+  SELECT
+    b.*,
+    r.rule_id,
+    r.rule_type,
+    r.severity,
+    r.scope_filter,
+    v.status          AS latest_status,
+    v.violation_count AS latest_violations
+  FROM bound b
+  -- The rule names its element (cde_id is NOT NULL since 2026-09-28), and the
+  -- column narrows it: a rule with a target_column attaches to that one binding of
+  -- the element, and a cross-table rule with none attaches to every binding of it.
+  -- Until 2026-09-28 this was `cde_id OR column match`, which let a tagged rule
+  -- with a column attach to every binding of a multi-column element.
+  LEFT JOIN active_rules r
+    ON  r.cde_id = b.cde_id
+    AND (r.target_column IS NULL
+         OR (r.target_table = b.target_table AND r.target_column = b.target_column))
+  LEFT JOIN verdicts v ON v.rule_id = r.rule_id
+),
+rolled AS (
+  SELECT
+    cde_id, cde_version, cde_name, data_class, criticality, pii,
+    business_domain, owner_group,
+    target_table, target_column, populated_when, expected_scope_filter, discovered_by,
+
+    COUNT(DISTINCT rule_id)                                          AS rule_count,
+    array_sort(collect_set(rule_id))                                 AS rule_ids,
+    array_sort(collect_set(rule_type))                               AS rule_types,
+    COUNT(DISTINCT CASE WHEN latest_status = 'breach'
+                        THEN rule_id END)                            AS breaching_rule_count,
+    array_sort(collect_set(CASE WHEN latest_status = 'breach'
+                                THEN rule_id END))                   AS breaching_rule_ids,
+    COALESCE(SUM(CASE WHEN latest_status = 'breach'
+                      THEN latest_violations END), 0)                AS latest_violation_rows,
+    array_sort(collect_set(
+      CASE WHEN expected_scope_filter IS NOT NULL AND rule_id IS NOT NULL
+                AND scope_filter IS NULL
+           THEN rule_id END))                                        AS unscoped_rule_ids
+  FROM attached
+  GROUP BY
+    cde_id, cde_version, cde_name, data_class, criticality, pii,
+    business_domain, owner_group,
+    target_table, target_column, populated_when, expected_scope_filter, discovered_by
+),
+profiled AS (
+  SELECT * FROM (
+    SELECT
+      p.cde_id, p.target_table, p.target_column,
+      p.profile_ts, p.rows_scanned, p.null_pct, p.blank_pct, p.distinct_pct,
+      p.signature_count, p.signature_match_pct, p.sentinel_count, p.top_signatures,
+      ROW_NUMBER() OVER (PARTITION BY p.cde_id, p.target_table, p.target_column
+                         ORDER BY p.profile_ts DESC) AS rn
+    FROM sdpt_data_trnf.udp_brnz.dq_results_cde_profile p
+  ) WHERE rn = 1
+)
+SELECT
+  g.cde_id,
+  g.cde_name,
+  g.data_class,
+  g.criticality,
+  g.pii,
+  g.business_domain,
+  g.owner_group,
+  g.target_table,
+  g.target_column,
+  g.populated_when,
+  g.expected_scope_filter,
+  g.discovered_by,
+
+  g.rule_count,
+  g.rule_ids,
+  g.rule_types,
+  g.rule_count > 0                                    AS has_active_rule,
+  g.breaching_rule_count,
+  g.breaching_rule_ids,
+  g.latest_violation_rows,
+  g.unscoped_rule_ids,
+  size(g.unscoped_rule_ids) > 0                       AS has_scope_mismatch,
+
+  p.profile_ts                                        AS last_profiled_ts,
+  p.rows_scanned                                      AS profiled_rows,
+  p.null_pct,
+  p.blank_pct,
+  p.distinct_pct,
+  p.signature_count,
+  p.signature_match_pct,
+  p.sentinel_count,
+  p.top_signatures,
+  p.profile_ts IS NULL                                AS never_profiled,
+
+  -- The gap classification the coverage panel sorts on. Precedence, worst first:
+  -- an element nobody checks outranks one checked by a rule that contradicts its
+  -- own binding scope, which outranks one where nothing checks the VALUES.
+  --
+  -- 'unvalidated' is deliberately about what a rule does, not what it is called. The
+  -- identity document number is watched by one rule typed 'consistency' -- if a
+  -- document type is recorded, the number must be present -- which is a presence
+  -- check wearing another name. Classifying on rule_type = 'not_null' would have
+  -- called that element covered. The set below is the rule types that examine the
+  -- values themselves; everything else asserts presence or agreement.
+  --
+  -- 'covered' is the absence of all three. It is not a claim that the rules are
+  -- GOOD, only that something is looking at the contents.
+  CASE
+    WHEN g.rule_count = 0                             THEN 'no_rule'
+    WHEN size(g.unscoped_rule_ids) > 0                THEN 'scope_mismatch'
+    WHEN size(array_intersect(g.rule_types,
+              array('format', 'uniqueness',
+                    'referential', 'variance'))) = 0  THEN 'unvalidated'
+    ELSE                                                   'covered'
+  END                                                 AS coverage_gap
+FROM rolled g
+LEFT JOIN profiled p
+  ON  p.cde_id       = g.cde_id
+  AND p.target_table = g.target_table
+  AND p.target_column = g.target_column;
+
+
+-- =====================================================================
+-- [13/21]  sql/ddl/14_views_threshold.sql
+-- =====================================================================
+
+-- Threshold views — where each rule's latest proposal has got to
+--
+-- Substitute {catalog} before execution. Runs after 13, which creates the tables
+-- this reads, and after 08, which creates v_rule_registry_current.
+--
+-- Same discipline as 08_views.sql: the review state is derived here and NOWHERE
+-- ELSE. threshold_review is append-only and threshold_proposal carries no status
+-- column, so "what is the standing of this proposal" is a window function over
+-- both, not a field. The app's Python twin is dq-app/dq_app/domain/thresholds.py,
+-- pinned to this view by a conformance test; change one, run the test.
+--
+-- NO current_date() HERE, ON PURPOSE. A deferral stays `deferred` and carries its
+-- review_by_date; whether that date has passed is the page's to say. A view whose
+-- output changes overnight with nothing written cannot be pinned by a test and
+-- cannot be reproduced for an auditor.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_threshold_proposal_current
+COMMENT 'The latest proposal per rule with its latest review folded in. review_state: no_change (the advice was keep), open (a change nobody has decided), adopted, rejected, deferred (with review_by_date), in_force (the registry already carries the proposed limit, by adoption or otherwise).'
+AS
+WITH latest_proposal AS (
+  SELECT p.*,
+         ROW_NUMBER() OVER (PARTITION BY p.rule_id ORDER BY p.proposed_ts DESC, p.proposal_id) AS rn
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_threshold_proposal p
+),
+latest_review AS (
+  SELECT r.*,
+         ROW_NUMBER() OVER (PARTITION BY r.proposal_id ORDER BY r.event_ts DESC, r.review_id) AS rn
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_threshold_review r
+)
+SELECT
+  p.proposal_id,
+  p.proposal_run_id,
+  p.proposed_ts,
+  p.rule_id,
+  p.rule_version,
+  reg.rule_name,
+  reg.rule_type,
+  reg.severity,
+  reg.owner_group,
+  p.cde_id,
+  p.target_table,
+  p.target_column,
+  p.current_threshold_pct,
+  p.proposed_threshold_pct,
+  reg.fail_threshold_pct                              AS registry_threshold_pct,
+  p.tolerance_pct,
+  p.basis,
+  p.rationale,
+  p.reviewer,
+  p.runs_observed,
+  p.pct_min,
+  p.pct_median,
+  p.pct_p90,
+  p.pct_max,
+  p.runs_breaching,
+  p.latest_violation_pct,
+  p.model_endpoint,
+  r.decision                                          AS latest_decision,
+  r.event_ts                                          AS latest_review_ts,
+  r.actor_display_name                                AS latest_reviewer,
+  r.reason                                            AS latest_reason,
+  r.review_by_date,
+  r.adopted_rule_version,
+  CASE
+    WHEN p.basis = 'unchanged'                        THEN 'no_change'
+    WHEN r.decision = 'adopted'                       THEN 'adopted'
+    WHEN r.decision = 'rejected'                      THEN 'rejected'
+    WHEN r.decision = 'deferred'                      THEN 'deferred'
+    WHEN reg.fail_threshold_pct = p.proposed_threshold_pct THEN 'in_force'
+    ELSE                                                   'open'
+  END                                                 AS review_state
+FROM latest_proposal p
+LEFT JOIN latest_review r
+  ON  r.proposal_id = p.proposal_id AND r.rn = 1
+LEFT JOIN sdpt_data_trnf.udp_brnz.dq_config_v_rule_registry_current reg
+  ON  reg.rule_id = p.rule_id
+WHERE p.rn = 1;
+
+
+-- =====================================================================
+-- [14/21]  sql/ddl/15_config_onboarding.sql
+-- =====================================================================
+
+-- Onboarding — which tables are checked, the checks written once per kind of data, and
+-- which columns hold which registered element
+--
+-- Substitute {catalog} before execution. Runs after 01 and 09, whose rows these refer
+-- to by id, and before 16_views_onboarding.sql.
+--
+-- WHAT THIS IS. A table is SELECTED for checking by a row in monitored_table. A job
+-- PROPOSES which of its columns hold which registered element (binding_proposal); a
+-- person DECIDES each proposal (binding_review); the job then writes the approved
+-- bindings onto config.cde_registry and generates the column's checks from
+-- check_template as SHADOW rule rows on config.rule_registry. A person promotes them.
+-- How far a table has got is derived (16_views_onboarding.sql), never stored.
+--
+-- THREE OF THESE ARE APP WRITES, AND 07_grants.sql NAMES THEM. Selecting a table
+-- (monitored_table), a person's binding suggestion (binding_proposal, method
+-- 'suggested') and a binding decision (binding_review). Each is an append signed with
+-- the platform identity. check_template is written by a seed from the repo and
+-- cde_registry only by the onboarding job: no app writes the element register.
+--
+-- APPEND-ONLY, ALL FOUR, LIKE THE REGISTER. Pausing or decommissioning a table is a new
+-- monitored_table version; changing a template is a new template_version; a changed
+-- mind about a binding is not representable as an edit, so a decision is final and the
+-- next proposal for that column is a new row. The one exception is EXCLUSION AT
+-- PROMOTION: a person taking back an approved binding at the last look appends a second
+-- review, `rejected`, reason starting "[excluded at promotion]". The latest review is
+-- the decision everywhere; the onboarding job then unbinds the column.
+--
+-- THE CHECKS BELOW ARE WHERE THE RULES LIVE LAST. The app and the job each refuse what
+-- these refuse, earlier and with a better message; a third writer that skipped both
+-- would still meet these. The one rule they cannot express -- that whoever suggested a
+-- binding cannot approve it -- spans two tables and is enforced by the app and again by
+-- the onboarding job's apply step.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_monitored_table (
+  target_table    STRING        NOT NULL COMMENT 'catalog.schema.table selected for checking',
+  table_version   INT           NOT NULL COMMENT 'incremented on every change; (target_table, table_version) is the logical key and the latest version is current',
+  table_code      STRING        NOT NULL COMMENT 'short upper-case code prefixed to the rule ids generated for this table. Never reused, retired tables included, so a new table cannot take a decommissioned one''s rule ids',
+  row_key         ARRAY<STRING> NOT NULL COMMENT 'the column(s) identifying a row; the check runner stamps them on every violation sample it captures',
+  owner_group     STRING                 COMMENT 'group accountable for the table',
+  business_domain STRING                 COMMENT 'copied onto every generated check. A check with no domain vanished from every domain filter in the app, so the generator falls back to the element''s',
+  schedule_group  STRING                 COMMENT 'which scheduled check run picks the table up, e.g. daily_0300',
+  scan_mode       STRING        NOT NULL COMMENT 'full | partition. partition waits on the scope_fingerprint decision: a partial scan changes what violation_pct means',
+  status          STRING        NOT NULL COMMENT 'selected | paused | retired. The check runner checks only selected tables. retired is permanent: re-onboarding is a new selection. How far a selected table has got is DERIVED, see v_onboarding_status',
+  effective_from  TIMESTAMP     NOT NULL COMMENT 'when this version took effect',
+  selected_by     STRING                 COMMENT 'who authored THIS version: the selector, or whoever paused, resumed or decommissioned it -- platform identity when the app wrote it',
+  note            STRING                 COMMENT 'why. Required when a table is paused or retired',
+  -- THE SLICE (2026-10-06). Which rows of the table are the population being checked at
+  -- all; a rule's scope_filter then says which of those it applies to, and the runner
+  -- ANDs the two. Built by the app from a structured spec, never typed as SQL. Every
+  -- version carries the slice IN FORCE and any PENDING proposal, so the latest version
+  -- is the whole state. Declared last: ADD COLUMNS puts them here on a table that
+  -- predates them. dq_app/domain/slices.py is the one definition of how they move.
+  slice_filter          STRING           COMMENT 'the predicate in force, ANDed onto every check on the table by the runner. NULL is the whole table',
+  slice_spec            STRING           COMMENT 'the structured slice slice_filter was rendered from, as JSON: conditions on this table, and optionally membership in another',
+  slice_version         INT              COMMENT 'the table_version the slice in force took effect at; stamped on every check_run row as slice_version. NULL if the table was never sliced',
+  slice_change          STRING           COMMENT 'what THIS version did to the slice: set (one person, while no check on the table is active) | proposed | approved | rejected. NULL for a version that left it alone',
+  slice_proposed_filter STRING           COMMENT 'a change waiting for a second person: the predicate exactly as it will run. NULL with a proposed spec means "remove the slice"',
+  slice_proposed_spec   STRING           COMMENT 'the proposed slice as JSON. Kept on the approving or rejecting version as the record of what was decided',
+  slice_proposed_by     STRING           COMMENT 'who proposed it. A second person approves; rejecting your own is withdrawing it'
+)
+USING DELTA
+CLUSTER BY (target_table)
+COMMENT 'Which tables are checked. Selection and config only; how far a table has got is a view. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_check_template (
+  template_id      STRING    NOT NULL COMMENT 'stable identifier, e.g. TPL_EMAIL_FMT',
+  template_version INT       NOT NULL COMMENT 'incremented on every change. A changed template is a new version and a regeneration pass, never an edit: a past verdict must keep meaning what ran',
+  data_class       STRING    NOT NULL COMMENT 'matches config.cde_registry.data_class: a template applies to a column bound to an element of this class. * is the pattern template (TPL_PATTERN): any class, filled from the element''s expected_signature, and only where the class has no format check of its own',
+  check_code       STRING    NOT NULL COMMENT 'suffix on a generated rule_id, e.g. FMT',
+  title            STRING    NOT NULL COMMENT 'the generated rule_name, with the element name filled in',
+  input_type       STRING    NOT NULL COMMENT 'the column type the expression expects; a column of another type is skipped, and the generator says so',
+  rule_type        STRING    NOT NULL COMMENT 'as config.rule_registry.rule_type',
+  rule_expr        STRING    NOT NULL COMMENT 'the predicate, with a placeholder where the bound column goes (and, on the pattern template, one where the element''s signature goes as a literal). Lifted from a registered rule: onboarding/templates.py proves each reproduces its source rule',
+  scope_filter     STRING             COMMENT 'as config.rule_registry.scope_filter, with the same placeholder; the binding''s expected_scope_filter is ANDed on at generation',
+  severity         STRING    NOT NULL COMMENT 'P1_block | P2_alert | P3_monitor, copied onto the generated rule',
+  source_rule      STRING             COMMENT 'the registered rule this was lifted from',
+  created_by       STRING             COMMENT 'who seeded this version',
+  created_at       TIMESTAMP          COMMENT 'when'
+)
+USING DELTA
+CLUSTER BY (data_class, template_id)
+COMMENT 'Checks written once per kind of data. The generator writes concrete rule rows from these; the check runner never reads them. Seeded from the repo, append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_binding_proposal (
+  proposal_id   STRING    NOT NULL COMMENT 'uuid',
+  proposed_at   TIMESTAMP NOT NULL COMMENT 'when',
+  target_table  STRING    NOT NULL COMMENT 'the table',
+  target_column STRING    NOT NULL COMMENT 'the column said to hold the element',
+  cde_id        STRING    NOT NULL COMMENT 'the registered element it is said to hold',
+  method        STRING    NOT NULL COMMENT 'uc_tag | value_signature | name_match (the discovery job) | suggested (a person)',
+  confidence    DOUBLE    NOT NULL COMMENT '0 to 1. A tag or a suggestion is 1; a value pattern its match rate; a column name 0.6',
+  evidence      STRING             COMMENT 'why, in words a reviewer can check -- the shape of the values, never the values. A suggestion''s reason',
+  proposed_by   STRING             COMMENT 'job:<name> for the discovery job, else the person''s platform identity'
+)
+USING DELTA
+CLUSTER BY (target_table, target_column)
+COMMENT 'A job or a person saying "this column holds this element". Nothing reads a proposal as a binding until a person approves it. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_binding_review (
+  proposal_id STRING    NOT NULL COMMENT 'the proposal decided',
+  decision    STRING    NOT NULL COMMENT 'approved | rejected. One decision per proposal, except a rejection appended at promotion to take back an approved binding (reason starts "[excluded at promotion]"); the latest is the decision. A rejected column is not proposed again unless it is tagged since',
+  reviewed_by STRING    NOT NULL COMMENT 'the deciding person''s platform identity',
+  reviewed_at TIMESTAMP NOT NULL COMMENT 'when',
+  reason      STRING             COMMENT 'required for a rejection. A self-approval made where the second-approver rule is waived starts "[second approver waived]"'
+)
+USING DELTA
+CLUSTER BY (proposal_id)
+COMMENT 'A person deciding a binding proposal. Approved bindings reach config.cde_registry through the onboarding job, never from the app. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_status_enum
+  CHECK (status IN ('selected', 'paused', 'retired'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_scan_mode_enum
+  CHECK (scan_mode IN ('full', 'partition'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_version_positive
+  CHECK (table_version >= 1);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_has_row_key
+  CHECK (size(row_key) >= 1);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_stop_has_reason
+  CHECK (status = 'selected' OR (note IS NOT NULL AND trim(note) <> ''));
+
+-- The slice. The second-approver rule CAN be a row constraint here, unlike a binding's,
+-- because the approving version carries the proposer beside the approver.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_change_enum
+  CHECK (slice_change IS NULL OR slice_change IN ('set', 'proposed', 'approved', 'rejected'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_has_spec
+  CHECK ((slice_filter IS NULL) = (slice_spec IS NULL)
+         AND (slice_filter IS NULL OR slice_version IS NOT NULL)
+         AND (slice_proposed_filter IS NULL OR slice_proposed_spec IS NOT NULL)
+         AND ((slice_proposed_spec IS NULL) = (slice_proposed_by IS NULL)));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_takes_effect_here
+  CHECK (coalesce(slice_change, '') NOT IN ('set', 'approved') OR slice_version = table_version);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_proposal_signed
+  CHECK (coalesce(slice_change, '') NOT IN ('proposed', 'approved', 'rejected')
+         OR slice_proposed_by IS NOT NULL);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_proposal_by_author
+  CHECK (coalesce(slice_change, '') <> 'proposed'
+         OR (lower(selected_by) = lower(slice_proposed_by) AND trim(coalesce(note, '')) <> ''));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_second_approver
+  CHECK (coalesce(slice_change, '') <> 'approved'
+         OR ((lower(selected_by) <> lower(slice_proposed_by)
+              OR coalesce(note, '') LIKE '[second approver waived]%')
+             AND slice_filter <=> slice_proposed_filter));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_monitored_table
+  ADD CONSTRAINT monitored_table_slice_rejection_has_reason
+  CHECK (coalesce(slice_change, '') <> 'rejected' OR trim(coalesce(note, '')) <> '');
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_check_template
+  ADD CONSTRAINT check_template_version_positive
+  CHECK (template_version >= 1);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_check_template
+  ADD CONSTRAINT check_template_severity_enum
+  CHECK (severity IN ('P1_block', 'P2_alert', 'P3_monitor'));
+
+-- The placeholder is spelled through concat() so this file never carries it literally:
+-- sql/render.py treats any brace-wrapped word in a statement as a substitution it missed.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_check_template
+  ADD CONSTRAINT check_template_names_its_column
+  CHECK (instr(rule_expr, concat('{', 'col', '}')) > 0);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_binding_proposal
+  ADD CONSTRAINT binding_proposal_method_enum
+  CHECK (method IN ('uc_tag', 'value_signature', 'name_match', 'suggested'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_binding_proposal
+  ADD CONSTRAINT binding_proposal_confidence_range
+  CHECK (confidence >= 0 AND confidence <= 1);
+
+-- A job signs job:<name>, a person signs with their identity, and the method says which.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_binding_proposal
+  ADD CONSTRAINT binding_proposal_author_matches_method
+  CHECK ((method = 'suggested') = (coalesce(proposed_by, '') NOT LIKE 'job:%'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_binding_proposal
+  ADD CONSTRAINT binding_proposal_suggestion_has_reason
+  CHECK (method <> 'suggested' OR (evidence IS NOT NULL AND trim(evidence) <> ''));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_binding_review
+  ADD CONSTRAINT binding_review_decision_enum
+  CHECK (decision IN ('approved', 'rejected'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_binding_review
+  ADD CONSTRAINT binding_review_rejection_has_reason
+  CHECK (decision = 'approved' OR (reason IS NOT NULL AND trim(reason) <> ''));
+
+
+-- =====================================================================
+-- [15/21]  sql/ddl/16_views_onboarding.sql
+-- =====================================================================
+
+-- Onboarding views — where a selected table has got to, derived and never stored
+--
+-- Substitute {catalog} before execution. Runs after 15, which creates the tables these
+-- read, and after 08 and 11, which create v_rule_registry_current and
+-- v_cde_registry_current.
+--
+-- Same discipline as 08_views.sql: current state is derived here. The app keeps a
+-- labelled pandas copy of the review queue and the stage (dq_app/domain/onboarding.py)
+-- because a decision recorded in a session has to move the page before any warehouse
+-- re-runs these; the onboarding job reads these views directly.
+--
+-- A TABLE'S STAGE IS NOT A COLUMN. Promoting a rule, approving a binding and running
+-- the checks each move it without anyone writing "stage", so the stage cannot disagree
+-- with the registers it summarises.
+
+-- ---------------------------------------------------------------
+-- v_monitored_table_current — the selection as it stands now
+-- ---------------------------------------------------------------
+-- Every status, paused and retired included: a retired table's code is still taken.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_monitored_table_current
+COMMENT 'Latest version of every table ever selected for checking, in every status. Filter on status = ''selected'' for what the check runner runs.'
+AS
+SELECT * EXCEPT (rn)
+FROM (
+  SELECT m.*,
+         ROW_NUMBER() OVER (PARTITION BY m.target_table ORDER BY m.table_version DESC) AS rn
+  FROM   sdpt_data_trnf.udp_brnz.dq_config_monitored_table m
+)
+WHERE rn = 1;
+
+-- ---------------------------------------------------------------
+-- v_binding_current — one row per column bound to a registered element
+-- ---------------------------------------------------------------
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_binding_current
+COMMENT 'Every binding on a registered element, one row per bound column. The register is the only source; an approved proposal appears here only once the onboarding job has written it there.'
+AS
+SELECT e.cde_id, e.cde_name, e.data_class, e.tolerance_pct, b.*
+FROM   sdpt_data_trnf.udp_brnz.dq_config_v_cde_registry_current e
+LATERAL VIEW explode(e.bindings) x AS b
+WHERE  e.status = 'registered';
+
+-- ---------------------------------------------------------------
+-- v_binding_proposal_open — the review queue
+-- ---------------------------------------------------------------
+-- Proposals nobody has decided, for columns not already bound. A proposal for a column
+-- bound since by another route drops out rather than asking twice.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_binding_proposal_open
+COMMENT 'Binding proposals awaiting a decision, for columns not already bound.'
+AS
+SELECT p.*
+FROM   sdpt_data_trnf.udp_brnz.dq_config_binding_proposal p
+LEFT ANTI JOIN sdpt_data_trnf.udp_brnz.dq_config_binding_review r
+       ON r.proposal_id = p.proposal_id
+LEFT ANTI JOIN sdpt_data_trnf.udp_brnz.dq_config_v_binding_current b
+       ON b.target_table = p.target_table AND b.target_column = p.target_column;
+
+-- ---------------------------------------------------------------
+-- v_onboarding_status — how far each selected table has got
+-- ---------------------------------------------------------------
+-- The stage strings carry their order as a leading digit so a plain sort is the
+-- pipeline's order. dq_app/domain/onboarding.py STAGE_LABEL puts them in words.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_onboarding_status
+COMMENT 'One row per selected table: open proposals, bound columns, shadow and active checks, runs, and the stage they add up to. Derived; nothing stores a stage.'
+AS
+WITH m AS (
+  SELECT * FROM sdpt_data_trnf.udp_brnz.dq_config_v_monitored_table_current WHERE status = 'selected'
+),
+p AS (
+  SELECT target_table, count(*) AS proposals_open
+  FROM   sdpt_data_trnf.udp_brnz.dq_config_v_binding_proposal_open
+  GROUP BY target_table
+),
+b AS (
+  SELECT target_table, count(DISTINCT target_column) AS columns_bound
+  FROM   sdpt_data_trnf.udp_brnz.dq_config_v_binding_current
+  GROUP BY target_table
+),
+r AS (
+  SELECT target_table,
+         count_if(status = 'shadow') AS rules_shadow,
+         count_if(status = 'active') AS rules_active
+  FROM   sdpt_data_trnf.udp_brnz.dq_config_v_rule_registry_current
+  GROUP BY target_table
+),
+c AS (
+  SELECT target_table, count(DISTINCT run_id) AS runs, max(run_ts) AS last_run_ts,
+         count_if(status = 'breach') AS breaches_ever
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_check_run
+  GROUP BY target_table
+)
+SELECT m.target_table, m.table_code, m.owner_group,
+       coalesce(p.proposals_open, 0) AS proposals_open,
+       coalesce(b.columns_bound, 0)  AS columns_bound,
+       coalesce(r.rules_shadow, 0)   AS rules_shadow,
+       coalesce(r.rules_active, 0)   AS rules_active,
+       coalesce(c.runs, 0)           AS runs,
+       c.last_run_ts,
+       CASE
+         WHEN coalesce(p.proposals_open, 0) > 0                   THEN '2 bindings awaiting review'
+         WHEN coalesce(b.columns_bound, 0) = 0                    THEN '1 awaiting discovery'
+         WHEN coalesce(r.rules_shadow, 0) + coalesce(r.rules_active, 0) = 0
+                                                                  THEN '3 awaiting rule generation'
+         WHEN coalesce(r.rules_active, 0) = 0 AND coalesce(c.runs, 0) = 0
+                                                                  THEN '4 shadow, not yet run'
+         WHEN coalesce(r.rules_active, 0) = 0                     THEN '5 shadow, awaiting promotion'
+         ELSE '6 active'
+       END AS stage
+FROM m
+LEFT JOIN p USING (target_table)
+LEFT JOIN b USING (target_table)
+LEFT JOIN r USING (target_table)
+LEFT JOIN c USING (target_table);
+
+
+-- =====================================================================
+-- [16/21]  sql/ddl/17_config_cde_onboarding.sql
+-- =====================================================================
+
+-- CDE onboarding — a person proposes an element, a second person decides, a job registers it
+--
+-- Substitute {catalog} before execution. Runs after 09, whose element ids these refer
+-- to, and before 18_views_cde_onboarding.sql.
+--
+-- WHAT THIS IS. Until 2026-10-08 the element register changed only by migration script.
+-- Now a person PROPOSES a change to it (cde_proposal) -- register a new element, amend
+-- one, or retire one -- a SECOND person DECIDES it (cde_review), and the onboarding
+-- job's apply_elements step writes the approved change onto config.cde_registry as a
+-- new version. The same shape as a binding: the app writes the proposal and the
+-- decision, and only the job writes the register, one version per element per apply,
+-- so two reviewers never race for a cde_version.
+--
+-- TWO APP WRITES, AND 07_grants.sql NAMES THEM: the seventh and eighth. Granting them is
+-- the decision that makes in-app registration real in a schema; the DDL alone does not.
+-- "No app writes the element register" stays true.
+--
+-- ONLY A PERSON PROPOSES AN ELEMENT. Discovery proposes bindings for elements that are
+-- already registered; nothing proposes the element. That is what "registration precedes
+-- discovery" means, and proposed_by may not be a job.
+--
+-- A REGISTERED ELEMENT STARTS WITH NO BINDING, AND THE REGISTER CALLS THAT 'proposed'.
+-- cde_registry_registered_has_bindings (09) refuses a 'registered' row with an empty
+-- bindings array, and its comment names exactly this state: between registering an
+-- element and discovering where it lives. So an approved `register` lands as status
+-- 'proposed', discovery reads it, and the first binding applied moves it to
+-- 'registered'. The app says "registered, not yet bound" -- the word 'proposed' on the
+-- register predates this table and means something narrower than a cde_proposal.
+--
+-- RETIRING IS THE SHARP EDGE (Addendum A). It drops coverage, so it takes the element's
+-- rules with it: the job writes a retired version of every rule naming the element,
+-- because cde_id is NOT NULL on a rule and a rule on a retired element is one the check
+-- runner has already stopped running. Results and Triage problems stay as history.
+--
+-- APPEND-ONLY, BOTH. A changed mind is a new proposal. A decision is final.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_cde_proposal (
+  proposal_id        STRING    NOT NULL COMMENT 'uuid',
+  proposed_at        TIMESTAMP NOT NULL COMMENT 'when',
+  cde_id             STRING    NOT NULL COMMENT 'the element. For register, a new id: never one the register has held, retired included',
+  change             STRING    NOT NULL COMMENT 'register | amend | retire',
+  based_on_version   INT                COMMENT 'the cde_version the author was looking at. NULL for register. The job refuses an amend or retire if the element''s attributes have changed since',
+  cde_name           STRING             COMMENT 'as config.cde_registry, for register and amend; NULL on a retire. An amend carries the WHOLE attribute set as it will be, not a diff',
+  business_term      STRING             COMMENT 'as config.cde_registry',
+  data_class         STRING             COMMENT 'as config.cde_registry. Decides which check templates a bound column gets',
+  definition         STRING             COMMENT 'as config.cde_registry: what a reviewer is agreeing the element means',
+  expected_signature STRING             COMMENT 'as config.cde_registry. A Spark (Java) regex; discovery matches values against it',
+  criticality        STRING             COMMENT 'critical | high | medium | low. Feeds rank_score, never severity',
+  pii                BOOLEAN            COMMENT 'as config.cde_registry',
+  regulatory_basis   STRING             COMMENT 'as config.cde_registry',
+  tolerance_pct      DOUBLE             COMMENT 'as config.cde_registry: the element''s target, and the ceiling on any rule''s limit. NULL is "not declared"',
+  business_domain    STRING             COMMENT 'as config.cde_registry',
+  owner_group        STRING             COMMENT 'as config.cde_registry. Shown to the reviewer, not enforced: those groups do not exist yet',
+  proposed_by        STRING    NOT NULL COMMENT 'the person''s platform identity. Never a job',
+  reason             STRING    NOT NULL COMMENT 'why: what makes it critical, or why it changes, or why it can go'
+)
+USING DELTA
+CLUSTER BY (cde_id)
+COMMENT 'A person proposing to register, amend or retire a critical data element. Nothing reads it as the register until a second person approves it and the onboarding job applies it. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_cde_review (
+  proposal_id STRING    NOT NULL COMMENT 'the proposal decided',
+  decision    STRING    NOT NULL COMMENT 'approved | rejected. One per proposal',
+  reviewed_by STRING    NOT NULL COMMENT 'the deciding person''s platform identity. Not the proposer, unless the rule is waived and the reason says so',
+  reviewed_at TIMESTAMP NOT NULL COMMENT 'when',
+  reason      STRING             COMMENT 'required for a rejection. A waived self-approval starts "[second approver waived]"'
+)
+USING DELTA
+CLUSTER BY (proposal_id)
+COMMENT 'A person deciding a CDE proposal. Approved changes reach config.cde_registry through the onboarding job, never from the app. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_change_enum
+  CHECK (change IN ('register', 'amend', 'retire'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_id_shape
+  CHECK (cde_id RLIKE '^CDE_[A-Z0-9_]+$');
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_signed_by_a_person
+  CHECK (proposed_by NOT LIKE 'job:%' AND trim(proposed_by) <> '');
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_has_reason
+  CHECK (trim(reason) <> '');
+
+-- A new element is written against nothing; a change is written against a version.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_based_on
+  CHECK ((change = 'register') = (based_on_version IS NULL));
+
+-- Register and amend carry the element as it will be; a retire carries none of it.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_attributes
+  CHECK (CASE WHEN change = 'retire'
+              THEN cde_name IS NULL AND data_class IS NULL AND criticality IS NULL
+                   AND pii IS NULL AND tolerance_pct IS NULL
+              ELSE cde_name IS NOT NULL AND trim(cde_name) <> '' AND data_class IS NOT NULL
+                   AND criticality IS NOT NULL AND pii IS NOT NULL
+                   AND definition IS NOT NULL AND trim(definition) <> '' END);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_criticality_enum
+  CHECK (criticality IS NULL OR criticality IN ('critical', 'high', 'medium', 'low'));
+
+-- The classes 09 lists. Closed: a new class has no templates, so it is a DDL change and
+-- a template, not a word typed into a form.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_data_class_enum
+  CHECK (data_class IS NULL OR data_class IN ('email_address', 'person_name',
+         'date_of_birth', 'phone_number', 'msisdn', 'national_id', 'device_id',
+         'account_id', 'other'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_proposal
+  ADD CONSTRAINT cde_proposal_tolerance_range
+  CHECK (tolerance_pct IS NULL OR (tolerance_pct >= 0.0 AND tolerance_pct <= 100.0));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_review
+  ADD CONSTRAINT cde_review_decision_enum
+  CHECK (decision IN ('approved', 'rejected'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_review
+  ADD CONSTRAINT cde_review_rejection_has_reason
+  CHECK (decision = 'approved' OR (reason IS NOT NULL AND trim(reason) <> ''));
+
+
+-- =====================================================================
+-- [17/21]  sql/ddl/18_views_cde_onboarding.sql
+-- =====================================================================
+
+-- CDE onboarding views — where each element proposal has got to, derived and never stored
+--
+-- Substitute {catalog} before execution. Runs after 17, which creates the tables this
+-- reads, and after 09.
+--
+-- Same discipline as 16: the app keeps a labelled pandas copy
+-- (dq_app/domain/elements.py `proposal_state`) because a decision recorded in a
+-- session has to move the page before any warehouse re-runs this.
+--
+-- APPLIED IS READ OFF THE REGISTER. The onboarding job starts the note on every version
+-- it writes for a proposal with "[cde_proposal <proposal_id>]", so whether a proposal
+-- has reached the register is a fact about the register, not a flag anyone sets. The
+-- job reads the same marker to stay idempotent.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_cde_proposal_current
+COMMENT 'Every CDE proposal with its decision and, once applied, the register version it became. state: open | approved | applied | rejected.'
+AS
+WITH a AS (
+  SELECT regexp_extract(note, '^\\[cde_proposal ([^\\]]+)\\]', 1) AS proposal_id,
+         min(cde_version) AS applied_version
+  FROM   sdpt_data_trnf.udp_brnz.dq_config_cde_registry
+  WHERE  note LIKE '[cde_proposal %'
+  GROUP BY 1
+)
+SELECT p.*,
+       r.decision, r.reviewed_by, r.reviewed_at, r.reason AS review_reason,
+       a.applied_version,
+       CASE
+         WHEN r.decision IS NULL            THEN 'open'
+         WHEN r.decision = 'rejected'       THEN 'rejected'
+         WHEN a.applied_version IS NOT NULL THEN 'applied'
+         ELSE 'approved'
+       END AS state
+FROM   sdpt_data_trnf.udp_brnz.dq_config_cde_proposal p
+LEFT JOIN sdpt_data_trnf.udp_brnz.dq_config_cde_review r ON r.proposal_id = p.proposal_id
+LEFT JOIN a ON a.proposal_id = p.proposal_id;
+
+
+-- =====================================================================
+-- [18/21]  sql/ddl/19_results_tolerance.sql
+-- =====================================================================
+
+-- tolerance_proposal and tolerance_review — the element's tolerance, advised and decided
+--
+-- Substitute {catalog} before execution. Runs after 09, whose elements these reference
+-- by id, and before 20_views_tolerance.sql.
+--
+-- WHY THIS REPLACED PER-RULE ADVICE (2026-10-08). 13's threshold_proposal advised on
+-- every rule's fail_threshold_pct: 86 proposals over 19 elements on its first real
+-- pass, 30 of them asking for a decision. The business does not decide 86 limits; it
+-- decides one number per element — config.cde_registry.tolerance_pct, the share of the
+-- element's rows it will accept failing — and v_check_escalation applies that number
+-- to what reaches triage. A rule's limit is a steward's setting, 0 by default. So the
+-- threshold job now advises on the TOLERANCE, one row per element per pass, and a
+-- reviewer sees at most one item per element. 13's tables stay, as history.
+--
+-- WHAT THE JOB MAY ADVISE. Three things, and never a higher number:
+--   keep     the tolerance stands. proposed = current.
+--   tighten  every run sat well inside it, so it is looser than the data has ever
+--            needed and a regression up to it would go unescalated. proposed < current.
+--   review   the element has sat outside it — or none is declared — and a person must
+--            decide whether the data is fixed or more failure is accepted. proposed =
+--            current. Raising a tolerance is the business accepting worse data; a job
+--            may say the question needs asking, never answer it.
+-- That is a CHECK below, not only the job's validator.
+--
+-- current_tolerance_pct AND THE SCORE STATISTICS COME FROM THE BRIEF, NEVER FROM THE
+-- MODEL. The "from" half is a fact. cde_version pins which version was advised on.
+--
+-- ACCEPTING DOES NOT WRITE THE REGISTER. The register changes through the Elements
+-- page: a person proposes the amendment (config.cde_proposal), a second person
+-- approves it, the onboarding job applies it. One path for every register change.
+-- tolerance_review records the decision on the advice — accepted, rejected or
+-- deferred — so a rejected proposal is not mistaken for one nobody looked at, and
+-- v_tolerance_proposal_current reads `in_force` off the register once the amendment
+-- lands. It is the app's ninth MODIFY grant (07_grants.sql). Append-only.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_tolerance_proposal (
+  proposal_id            STRING    NOT NULL COMMENT 'uuid, unique per proposal row',
+  proposal_run_id        STRING    NOT NULL COMMENT 'groups every proposal produced by one pass of the threshold job',
+  proposed_ts            TIMESTAMP NOT NULL COMMENT 'when the pass ran',
+  cde_id                 STRING    NOT NULL COMMENT 'the element advised on',
+  cde_version            INT       NOT NULL COMMENT 'the version advised on. Advice about v3 is not advice about v4',
+  current_tolerance_pct  DOUBLE             COMMENT 'tolerance_pct in force when the proposal was made, copied from the register. NULL where none is declared',
+  proposed_tolerance_pct DOUBLE             COMMENT 'the tolerance the job would set. Equal to current unless advice = tighten',
+  advice                 STRING    NOT NULL COMMENT 'keep | tighten | review',
+  rationale              STRING    NOT NULL COMMENT 'the figures the advice rests on, in prose, for the reviewer',
+  reviewer               STRING    NOT NULL COMMENT 'the team asked to decide -- a team, not a person. Normally the element''s owner_group',
+  runs_observed          INT                COMMENT 'runs on which a check on the element raised a verdict',
+  runs_outside           INT                COMMENT 'of those, how many the element sat outside its current tolerance',
+  fail_pct_min           DOUBLE             COMMENT 'rows failed over rows evaluated across the element''s checks, as a percentage, per run',
+  fail_pct_median        DOUBLE             COMMENT 'see fail_pct_min',
+  fail_pct_p90           DOUBLE             COMMENT 'see fail_pct_min',
+  fail_pct_max           DOUBLE             COMMENT 'see fail_pct_min',
+  latest_fail_pct        DOUBLE             COMMENT 'the same figure on the latest run',
+  scope_disputed         BOOLEAN            COMMENT 'any binding of the element in scope_mismatch when the proposal was made. Its fail rate then measures a rule defect',
+  model_endpoint         STRING             COMMENT 'which serving endpoint produced this',
+  model_input_payload    STRING             COMMENT 'JSON of exactly what the endpoint was shown -- the brief and the provenance, retained for audit',
+  job_run_id             STRING             COMMENT 'the Lakeflow run that produced this row'
+)
+USING DELTA
+CLUSTER BY (cde_id, proposed_ts)
+COMMENT 'The threshold job''s advice on each element''s tolerance: keep it, tighten it, or put it to the business. Never a higher number. One row per element per pass. Detection, not triage. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_proposal
+  ADD CONSTRAINT tolerance_proposal_advice_enum
+  CHECK (advice IN ('keep', 'tighten', 'review'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_proposal
+  ADD CONSTRAINT tolerance_proposal_range
+  CHECK (proposed_tolerance_pct IS NULL
+         OR (proposed_tolerance_pct >= 0.0 AND proposed_tolerance_pct <= 100.0));
+
+-- Never a higher number. The one constraint that matters.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_proposal
+  ADD CONSTRAINT tolerance_proposal_never_raises
+  CHECK (current_tolerance_pct IS NULL OR proposed_tolerance_pct <= current_tolerance_pct);
+
+-- Only `tighten` moves the number, and it can only move one way.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_proposal
+  ADD CONSTRAINT tolerance_proposal_tighten_moves
+  CHECK (CASE WHEN advice = 'tighten'
+              THEN current_tolerance_pct IS NOT NULL
+                   AND proposed_tolerance_pct < current_tolerance_pct
+              ELSE proposed_tolerance_pct <=> current_tolerance_pct END);
+
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_results_tolerance_review (
+  review_id            STRING    NOT NULL COMMENT 'uuid, unique per review row',
+  proposal_id          STRING    NOT NULL COMMENT 'the tolerance proposal decided',
+  event_ts             TIMESTAMP NOT NULL COMMENT 'when the reviewer decided',
+  ingest_ts            TIMESTAMP NOT NULL COMMENT 'when the row was written',
+  actor_identity       STRING             COMMENT 'the acting principal -- the OBO user, never a typed-in name',
+  actor_display_name   STRING             COMMENT 'human-readable name for rendering; identity above is the one that counts',
+  actor_source         STRING    NOT NULL COMMENT 'obo_user | service_principal. How we know who acted',
+  decision             STRING    NOT NULL COMMENT 'accepted | rejected | deferred',
+  reason               STRING             COMMENT 'why. Required for rejected and deferred',
+  review_by_date       DATE               COMMENT 'deferred only: when the proposal resurfaces. Required when deferred',
+  app_version          STRING             COMMENT 'which build of the app wrote this'
+)
+USING DELTA
+CLUSTER BY (proposal_id, event_ts)
+COMMENT 'A reviewer''s decision on a tolerance proposal. Accepting writes nothing else: the register changes through the Elements page''s amendment, and v_tolerance_proposal_current reads in_force off the register once it lands. The ninth write of the app. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_review
+  ADD CONSTRAINT tolerance_review_decision_enum
+  CHECK (decision IN ('accepted', 'rejected', 'deferred'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_review
+  ADD CONSTRAINT tolerance_review_actor_source_enum
+  CHECK (actor_source IN ('obo_user', 'service_principal'));
+
+-- A rejection or deferral without a reason is not a decision, it is silence.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_review
+  ADD CONSTRAINT tolerance_review_reason_required
+  CHECK (decision = 'accepted' OR (reason IS NOT NULL AND length(trim(reason)) > 0));
+
+-- A deferral without a resurface date is a disappearance.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_review
+  ADD CONSTRAINT tolerance_review_deferral_has_date
+  CHECK (decision <> 'deferred' OR review_by_date IS NOT NULL);
+
+-- Every review is a person's, and the platform vouches for who.
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_review
+  ADD CONSTRAINT tolerance_review_has_identity
+  CHECK (actor_identity IS NOT NULL AND actor_source = 'obo_user');
+
+
+-- =====================================================================
+-- [19/21]  sql/ddl/20_views_tolerance.sql
+-- =====================================================================
+
+-- Tolerance views — is each element inside what the business accepts, and which
+-- breaches does that let through to triage
+--
+-- Substitute {catalog} before execution. Runs after 03 (check_run), 11
+-- (v_cde_registry_current, v_cde_coverage) and 19 (tolerance_proposal, _review).
+--
+-- THE BUSINESS DECIDES ONE NUMBER PER ELEMENT. config.cde_registry.tolerance_pct is
+-- the share of an element's rows the business will accept failing. A rule's
+-- fail_threshold_pct decides whether that one check reads `breach`; it is a
+-- steward's setting, 0 by default, and nobody is asked to approve it. What reaches
+-- triage is decided here, per element, against the tolerance — not per rule.
+--
+-- THE ELEMENT'S SCORE IS THE SCORECARD'S. Rows passed over rows evaluated, across the
+-- element's checks that raised a verdict (pass or breach) on that run — shadow checks
+-- are in neither half. Attachment is read off v_cde_coverage.rule_ids, the one
+-- definition of which checks belong to which element, and a rule is counted once per
+-- element however many bindings it attaches to. The app's twin is
+-- dq-app/dq_app/domain/tolerance.py, pinned to this view's fixture output by
+-- tests/test_tolerance.py.
+--
+-- It is a sum of failures over a sum of rows, NOT a count of distinct bad rows: a row
+-- failing three of an element's checks counts three times. check_run stores counts,
+-- not keys, so the distinct figure cannot be computed (see
+-- metrics.records_affected_floor). This is the figure the scorecard already prints
+-- against the same target; the two agree because they are the same arithmetic.
+--
+-- WITHIN TOLERANCE IS NARROWER THAN THE SCORECARD'S "ASSESSED", ON PURPOSE. The
+-- scorecard refuses to say an element MEETS its target unless something validates
+-- what the column holds. That is a claim about the data. This view asks only whether
+-- the failures that were measured fit inside what the business accepts — a smaller
+-- question that needs a declared tolerance, a score, and no binding in scope
+-- mismatch. A scope mismatch is never within tolerance: its failures are a rule
+-- defect, and holding them back would hide exactly the finding the register exists
+-- to raise (COH-B).
+--
+-- The tolerance is the register's CURRENT one, applied to every run, so a run's
+-- within_tolerance can change when the register does. That is what a reader of the
+-- history wants — "against today's agreed tolerance, how often were we outside it" —
+-- and it is what the threshold job's brief is built from.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_element_tolerance
+COMMENT 'One row per run and registered element with a check that raised a verdict: rows evaluated, rows failed, the row-weighted score, the element''s current tolerance and target, whether any binding is in scope mismatch, and whether the run sat within tolerance. The scorecard''s element score, against the register''s tolerance.'
+AS
+WITH attached AS (
+  -- rule_ids holds active rules only, so a retired rule's old runs score nothing.
+  SELECT DISTINCT cv.cde_id, x.rule_id
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_v_cde_coverage cv
+  LATERAL VIEW explode(cv.rule_ids) x AS rule_id
+),
+disputed AS (
+  SELECT cde_id, MAX(CASE WHEN coverage_gap = 'scope_mismatch' THEN 1 ELSE 0 END) = 1
+                   AS scope_disputed
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_v_cde_coverage
+  GROUP  BY cde_id
+),
+raised AS (
+  -- One verdict per rule per run, pass or breach only: a skipped or errored check has
+  -- no rate, and a shadow check raises nothing.
+  SELECT run_id, run_ts, rule_id, rows_scanned, violation_count
+  FROM (
+    SELECT k.*, ROW_NUMBER() OVER (PARTITION BY k.run_id, k.rule_id
+                                   ORDER BY k.result_id) AS rn
+    FROM   sdpt_data_trnf.udp_brnz.dq_results_check_run k
+    WHERE  k.status IN ('pass', 'breach')
+  ) WHERE rn = 1
+),
+scored AS (
+  SELECT k.run_id, MAX(k.run_ts) AS run_ts, a.cde_id,
+         COUNT(*)                  AS checks_raised,
+         SUM(k.rows_scanned)       AS rows_evaluated,
+         SUM(k.violation_count)    AS rows_failed
+  FROM   raised k
+  JOIN   attached a ON a.rule_id = k.rule_id
+  GROUP  BY k.run_id, a.cde_id
+)
+SELECT
+  s.run_id,
+  s.run_ts,
+  s.cde_id,
+  c.cde_name,
+  c.criticality,
+  s.checks_raised,
+  s.rows_evaluated,
+  s.rows_failed,
+  -- DOUBLE, not the DECIMAL `100.0 * ...` gives in Spark: a pandas reader cannot
+  -- subtract a Decimal from a float, and notebook 06's first run died on exactly that.
+  CAST(CASE WHEN s.rows_evaluated > 0
+            THEN 100.0 * (s.rows_evaluated - s.rows_failed) / s.rows_evaluated END
+       AS DOUBLE)                                                             AS score_pct,
+  c.tolerance_pct,
+  CAST(100.0 - c.tolerance_pct AS DOUBLE)                                     AS target_pct,
+  COALESCE(d.scope_disputed, FALSE)                                           AS scope_disputed,
+  COALESCE(
+    c.tolerance_pct IS NOT NULL
+    AND s.rows_evaluated > 0
+    AND NOT COALESCE(d.scope_disputed, FALSE)
+    AND 100.0 * (s.rows_evaluated - s.rows_failed) / s.rows_evaluated
+        >= 100.0 - c.tolerance_pct - 1e-9,
+    FALSE)                                                                    AS within_tolerance
+FROM   scored s
+JOIN   sdpt_data_trnf.udp_brnz.dq_config_v_cde_registry_current c ON c.cde_id = s.cde_id
+LEFT JOIN disputed d ON d.cde_id = s.cde_id;
+
+-- ---------------------------------------------------------------
+-- v_check_escalation — which breaches go to triage
+-- ---------------------------------------------------------------
+-- One row per breaching check per run. A breach ESCALATES — becomes something the
+-- triage job groups and a steward is asked about — unless its element sat within
+-- tolerance on that run. Two exceptions escalate regardless:
+--
+--   * P1_block. Severity belongs to the rule, and a blocking rule blocks whatever the
+--     element's score. This keeps criticality and severity apart: the element decides
+--     how much failure is acceptable, never how serious one check's failure is.
+--   * A breach on no registered element, or on one with no tolerance, no score or a
+--     scope mismatch. Nothing has said it is acceptable, so it is not held back.
+--
+-- A held breach is not hidden: check_run still reads `breach`, the scorecard and the
+-- Rules page still show it, and held_reason says why it did not reach triage.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_check_escalation
+COMMENT 'One row per breaching check per run: its element, severity, whether the element sat within tolerance, and whether the breach escalates to triage. Held breaches stay breaches everywhere else; only triage reads escalates.'
+AS
+WITH breaches AS (
+  SELECT run_id, run_ts, rule_id, severity, violation_count, rows_scanned
+  FROM (
+    SELECT k.*, ROW_NUMBER() OVER (PARTITION BY k.run_id, k.rule_id
+                                   ORDER BY k.result_id) AS rn
+    FROM   sdpt_data_trnf.udp_brnz.dq_results_check_run k
+    WHERE  k.status = 'breach'
+  ) WHERE rn = 1
+),
+element_of AS (
+  -- A rule attaches to the one element it names; read through coverage so attachment
+  -- has one definition.
+  SELECT DISTINCT x.rule_id, cv.cde_id
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_v_cde_coverage cv
+  LATERAL VIEW explode(cv.rule_ids) x AS rule_id
+)
+SELECT
+  b.run_id,
+  b.run_ts,
+  b.rule_id,
+  b.severity,
+  b.violation_count,
+  b.rows_scanned,
+  e.cde_id,
+  t.score_pct                                  AS element_score_pct,
+  t.target_pct                                 AS element_target_pct,
+  COALESCE(t.within_tolerance, FALSE)          AS element_within_tolerance,
+  NOT (COALESCE(t.within_tolerance, FALSE)
+       AND b.severity <> 'P1_block')           AS escalates,
+  CASE
+    WHEN b.severity = 'P1_block'               THEN NULL
+    WHEN COALESCE(t.within_tolerance, FALSE)   THEN 'element_within_tolerance'
+  END                                          AS held_reason
+FROM   breaches b
+LEFT JOIN element_of e ON e.rule_id = b.rule_id
+LEFT JOIN sdpt_data_trnf.udp_brnz.dq_results_v_element_tolerance t
+  ON   t.run_id = b.run_id AND t.cde_id = e.cde_id;
+
+-- ---------------------------------------------------------------
+-- v_tolerance_proposal_current — where each element's latest advice has got to
+-- ---------------------------------------------------------------
+-- The latest proposal per element with its latest review folded in. The app's twin
+-- is dq-app/dq_app/domain/tolerance.derive_proposal_current, pinned by
+-- tests/test_tolerance.py.
+--
+-- review_state:
+--   no_change  the advice was keep; nothing to decide
+--   in_force   a tightening the register now carries, by amendment or otherwise. It
+--              outranks the decision: once the register says it, it is so
+--   rejected / deferred (with review_by_date) / accepted
+--              accepted means a person agreed. For a tightening the register has not
+--              caught up yet: the amendment goes through the Elements page
+--   open       nobody has decided
+--
+-- NO current_date() HERE, ON PURPOSE, for the reason 14_views_threshold.sql gives: a
+-- view whose output changes overnight with nothing written cannot be pinned.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_tolerance_proposal_current
+COMMENT 'The latest tolerance proposal per element with its latest review folded in. review_state: no_change, open, accepted, rejected, deferred (with review_by_date), in_force (the register carries the proposed tolerance).'
+AS
+WITH latest_proposal AS (
+  SELECT p.*,
+         ROW_NUMBER() OVER (PARTITION BY p.cde_id ORDER BY p.proposed_ts DESC, p.proposal_id) AS rn
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_tolerance_proposal p
+),
+latest_review AS (
+  SELECT r.*,
+         ROW_NUMBER() OVER (PARTITION BY r.proposal_id ORDER BY r.event_ts DESC, r.review_id) AS rn
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_tolerance_review r
+)
+SELECT
+  p.proposal_id,
+  p.proposal_run_id,
+  p.proposed_ts,
+  p.cde_id,
+  p.cde_version,
+  c.cde_name,
+  c.criticality,
+  c.owner_group,
+  p.current_tolerance_pct,
+  p.proposed_tolerance_pct,
+  c.tolerance_pct                                     AS register_tolerance_pct,
+  p.advice,
+  p.rationale,
+  p.reviewer,
+  p.runs_observed,
+  p.runs_outside,
+  p.fail_pct_min,
+  p.fail_pct_median,
+  p.fail_pct_p90,
+  p.fail_pct_max,
+  p.latest_fail_pct,
+  p.scope_disputed,
+  p.model_endpoint,
+  r.decision                                          AS latest_decision,
+  r.event_ts                                          AS latest_review_ts,
+  r.actor_display_name                                AS latest_reviewer,
+  r.reason                                            AS latest_reason,
+  r.review_by_date,
+  CASE
+    WHEN p.advice = 'keep'                            THEN 'no_change'
+    WHEN p.advice = 'tighten'
+         AND c.tolerance_pct = p.proposed_tolerance_pct THEN 'in_force'
+    WHEN r.decision = 'rejected'                      THEN 'rejected'
+    WHEN r.decision = 'deferred'                      THEN 'deferred'
+    WHEN r.decision = 'accepted'                      THEN 'accepted'
+    ELSE                                                   'open'
+  END                                                 AS review_state
+FROM latest_proposal p
+LEFT JOIN latest_review r
+  ON  r.proposal_id = p.proposal_id AND r.rn = 1
+LEFT JOIN sdpt_data_trnf.udp_brnz.dq_config_v_cde_registry_current c
+  ON  c.cde_id = p.cde_id
+WHERE p.rn = 1;
+
+
+-- =====================================================================
+-- [20/21]  sql/ddl/21_config_population.sql
+-- =====================================================================
+
+-- The population — which rows of a table are the records a check is about
+--
+-- Substitute {catalog} before execution. Reads nothing; read by jobs/run_checks.py.
+--
+-- WHAT THIS IS (2026-10-12). Most source tables here are HISTORY tables: one row per
+-- version of a record, stamped with a change sequence and an operation type. A check
+-- that reads such a table raw counts every old version, and a uniqueness check flags
+-- every record that was ever changed (CLAUDE.md, LATEST_RECORD_GAP). A cross-table check
+-- is worse: it matches an old version on one side against an old version on the other.
+--
+-- A row here tells the runner how to find the record: the CURRENT version of each
+-- `record_key`, by `version_by` (newest is highest), dropped when that version is a
+-- deletion. The runner applies it before the table's slice and before any rule, on
+-- every table of a join -- unlike the slice, which only narrows the driving table.
+-- The order is load-bearing: the latest version is chosen FIRST and a deleted one is
+-- dropped AFTER. Filtering deletions first would resurrect a deleted record's previous
+-- version as its current one.
+--
+-- NOT ON monitored_table, ON PURPOSE. Six writers append monitored_table versions and
+-- the app copies its columns forward on every pause and resume; a column there that one
+-- of them forgot would silently put a table back on its raw history. This table has one
+-- writer (a migration or onboard.py, signed by whoever runs it), no app write and no
+-- grant. A table with no row here is read whole, which is every table before this file.
+--
+-- APPEND-ONLY. A changed declaration is a new population_version, the latest is in
+-- force, and the runner stamps it on every verdict as check_run.population_version. A
+-- version with nothing declared puts the table back on all its rows.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_table_population (
+  target_table       STRING        NOT NULL COMMENT 'catalog.schema.table as config.rule_registry names it',
+  population_version INT           NOT NULL COMMENT 'incremented on every change; the latest is in force',
+  record_key         ARRAY<STRING>          COMMENT 'the column(s) identifying one record across its versions. Required with version_by',
+  version_by         ARRAY<STRING>          COMMENT 'the column(s) ordering a record''s versions, newest highest, compared left to right. Declare enough to break ties: tied versions are picked arbitrarily. A STRING column sorts as text. NULL: one row per record already',
+  deleted_column     STRING                 COMMENT 'a record whose CURRENT version holds deleted_value here is not in the population. NULL: no deletions recorded',
+  deleted_value      STRING                 COMMENT 'the value in deleted_column marking a deletion, e.g. D for OP_TYPE',
+  effective_from     TIMESTAMP     NOT NULL COMMENT 'when this version took effect',
+  declared_by        STRING        NOT NULL COMMENT 'who wrote this version',
+  note               STRING        NOT NULL COMMENT 'why, and what the declaration was checked against'
+)
+USING DELTA
+CLUSTER BY (target_table)
+COMMENT 'How to find the current record in a history table. Read by the check runner before the slice and before any rule. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_table_population
+  ADD CONSTRAINT table_population_version_positive
+  CHECK (population_version >= 1);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_table_population
+  ADD CONSTRAINT table_population_versions_need_a_key
+  CHECK (version_by IS NULL OR (size(version_by) >= 1 AND size(record_key) >= 1));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_table_population
+  ADD CONSTRAINT table_population_deleted_pair
+  CHECK ((deleted_column IS NULL) = (deleted_value IS NULL));
+
+
+-- =====================================================================
+-- [21/21]  sql/ddl/22_config_consistency.sql
+-- =====================================================================
+
+-- Consistency checks proposed in the app — a check across two tables, written from a
+-- spec, decided by a second person, written to the rule register by the job
+--
+-- Substitute {catalog} before execution. Runs after 01 (the view reads rule_registry).
+--
+-- WHAT THIS IS (2026-10-13). The Consistency page's "New check" builder writes a check
+-- as a SPEC: kind, tables, key columns, compared columns, policies -- structured fields,
+-- never SQL a person typed. A second person approves or rejects it. Then
+-- `onboard.py apply_consistency` renders the spec with onboarding/consistency.py and
+-- writes the rule to config.rule_registry IN SHADOW. Promotion is the usual decision on
+-- the Rules page. Same shape as a binding and a key-attribute change.
+--
+-- TWO APP WRITES, THE TENTH AND ELEVENTH, AND A DECISION, NOT A DEPLOY. 07_grants.sql
+-- names them. The rule register is not one of them: no app writes a consistency rule.
+--
+-- WHAT IS STORED AS WELL AS THE SPEC. The rule the app rendered (join_sql, rule_expr,
+-- scope_filter), so the reviewer approves exactly what will run and the job can refuse a
+-- spec it renders differently; the logic fingerprint, so a duplicate is refused; and what
+-- the proposer's test measured, so the review can set it beside a test run now.
+--
+-- APPEND-ONLY. A proposal is never edited: a changed mind is a new proposal. A proposal
+-- has at most one decision.
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal (
+  proposal_id      STRING    NOT NULL COMMENT 'uuid',
+  proposed_at      TIMESTAMP NOT NULL,
+  rule_id          STRING    NOT NULL COMMENT 'the id the rule will carry, assigned now so the review names it. CS_ + 8 hex',
+  rule_name        STRING    NOT NULL,
+  kind             STRING    NOT NULL COMMENT 'orphan | agreement | totals -- shown as Missing record / Same value / Same total',
+  spec             STRING    NOT NULL COMMENT 'the check as JSON, see onboarding/consistency.py. The source of truth: the job renders the rule from it',
+  target_table     STRING    NOT NULL COMMENT 'the table a failure is reported against',
+  other_tables     ARRAY<STRING> NOT NULL COMMENT 'every other table the check reads',
+  cde_id           STRING    NOT NULL COMMENT 'the key attribute the rule names',
+  severity         STRING    NOT NULL,
+  rule_type        STRING    NOT NULL,
+  target_column    STRING,
+  join_sql         STRING    NOT NULL COMMENT 'as the app rendered it from the spec',
+  rule_expr        STRING    NOT NULL,
+  scope_filter     STRING,
+  fingerprint      STRING    NOT NULL COMMENT 'onboarding/consistency.fingerprint of the rendered rule',
+  test_compared    BIGINT             COMMENT 'rows (groups, for totals) the proposer''s test compared. NULL: not tested (no warehouse)',
+  test_failing     BIGINT,
+  test_match_pct   DOUBLE             COMMENT 'lowest share of rows finding a match across the links. NULL for totals or untested',
+  test_fanout      BIGINT             COMMENT 'keys matching more than one record, summed over the links. The proposer acknowledged it when non-zero',
+  proposed_by      STRING    NOT NULL,
+  reason           STRING    NOT NULL COMMENT 'why this check'
+)
+USING DELTA
+CLUSTER BY (proposal_id)
+COMMENT 'A consistency check proposed in the app, as a spec. The rule register is written by the onboarding job once a second person approves. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal
+  ADD CONSTRAINT consistency_proposal_kind_enum
+  CHECK (kind IN ('orphan', 'agreement', 'totals'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal
+  ADD CONSTRAINT consistency_proposal_severity_enum
+  CHECK (severity IN ('P1_block', 'P2_alert', 'P3_monitor'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal
+  ADD CONSTRAINT consistency_proposal_has_reason
+  CHECK (length(trim(reason)) > 0 AND length(trim(rule_name)) > 0);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal
+  ADD CONSTRAINT consistency_proposal_signed_by_a_person
+  CHECK (proposed_by NOT LIKE 'job:%');
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal
+  ADD CONSTRAINT consistency_proposal_rule_id_shape
+  CHECK (rule_id RLIKE '^CS_[0-9A-F]{8}$');
+
+CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_consistency_review (
+  proposal_id   STRING    NOT NULL,
+  decision      STRING    NOT NULL COMMENT 'approved | rejected',
+  reviewed_by   STRING    NOT NULL,
+  reviewed_at   TIMESTAMP NOT NULL,
+  reason        STRING             COMMENT 'required to reject. A waived self-approval starts [second approver waived]',
+  test_compared BIGINT             COMMENT 'what the test measured when the reviewer opened the proposal. NULL: not tested',
+  test_failing  BIGINT
+)
+USING DELTA
+CLUSTER BY (proposal_id)
+COMMENT 'A second person deciding a consistency proposal. One decision per proposal. Append-only.'
+TBLPROPERTIES (delta.appendOnly = true);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_review
+  ADD CONSTRAINT consistency_review_decision_enum
+  CHECK (decision IN ('approved', 'rejected'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_review
+  ADD CONSTRAINT consistency_review_rejection_has_reason
+  CHECK (decision <> 'rejected' OR length(trim(reason)) > 0);
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_consistency_review
+  ADD CONSTRAINT consistency_review_signed_by_a_person
+  CHECK (reviewed_by NOT LIKE 'job:%');
+
+-- Where a proposal has got to. `applied` is read off the rule register: the job starts
+-- the note of the version it writes with `[consistency_proposal <id>]`.
+-- dq_app/domain/consistency.proposal_state is the labelled copy.
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_config_v_consistency_proposal_current AS
+SELECT p.*,
+       r.decision, r.reviewed_by, r.reviewed_at, r.reason AS review_reason,
+       r.test_compared AS review_test_compared, r.test_failing AS review_test_failing,
+       CASE WHEN r.decision = 'rejected' THEN 'rejected'
+            WHEN r.decision = 'approved' AND EXISTS (
+                   SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry x
+                   WHERE  x.rule_id = p.rule_id
+                     AND  x.note LIKE concat('[consistency_proposal ', p.proposal_id, ']%'))
+                 THEN 'applied'
+            WHEN r.decision = 'approved' THEN 'approved'
+            ELSE 'open' END AS state
+FROM   sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal p
+LEFT JOIN sdpt_data_trnf.udp_brnz.dq_config_consistency_review r ON r.proposal_id = p.proposal_id;
+
