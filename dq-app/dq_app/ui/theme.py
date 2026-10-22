@@ -2303,21 +2303,21 @@ h1, h2, h3 {{ letter-spacing: 0; }}
 
 /* The table card (and Triage's queue card, which is built the same way): a keyed container, because its header holds a search field and a
    switch and its body is clickable rows. Same construction as `dq_elcard`. */
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) {{ border: 1px solid var(--dq-border); border-radius: 10px;
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) {{ border: 1px solid var(--dq-border); border-radius: 10px;
   background: {NEUTRAL["surface"]}; gap: 0; padding: 0; overflow: hidden; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) > [data-testid="stLayoutWrapper"]:first-child,
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) > [data-testid="stHorizontalBlock"]:first-child {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) > [data-testid="stLayoutWrapper"]:first-child,
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) > [data-testid="stHorizontalBlock"]:first-child {{
   padding: clamp(.8rem, 1.2vw, 1.05rem) 1rem .7rem; }}
 /* The header row wraps the same way: title, then search and switch, each with a floor. */
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .5rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: .5rem; }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) [data-testid="stColumn"]:has(.dq-tmcard-hd) {{
   flex: 1 1 13rem !important; min-width: 13rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) [data-testid="stColumn"]:has([data-testid="stTextInput"]):has([data-testid="stButtonGroup"]) {{
   flex: 1.6 1 21rem !important; min-width: min(21rem, 100%); }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has([data-testid="stTextInput"]):not(:has([data-testid="stButtonGroup"])) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) [data-testid="stColumn"]:has([data-testid="stTextInput"]):not(:has([data-testid="stButtonGroup"])) {{
   flex: 1 1 10rem !important; min-width: 10rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) [data-testid="stColumn"]:has([data-testid="stButtonGroup"]):not(:has([data-testid="stTextInput"])) {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) [data-testid="stColumn"]:has([data-testid="stButtonGroup"]):not(:has([data-testid="stTextInput"])) {{
   flex: 0 0 auto !important; width: auto !important; min-width: 0; }}
 .dq-tmcard-hd .t {{ font-size: clamp(.98rem, 1.15vw, 1.1rem); font-weight: 650;
   color: {NEUTRAL["text"]}; display: flex; align-items: center; gap: .5rem; }}
@@ -2325,66 +2325,112 @@ h1, h2, h3 {{ letter-spacing: 0; }}
   margin-top: .2rem; }}
 .dq-count {{ font-size: .74rem; font-weight: 600; color: {ACCENT};
   background: {ACCENT_TINT}; border-radius: 999px; padding: .05rem .5rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .dq-rowgrid.head {{ background: {NEUTRAL["canvas"]};
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) .dq-rowgrid.head {{ background: {NEUTRAL["canvas"]};
   border-top: 1px solid var(--dq-border); padding: .55rem 1rem; }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .st-key-dqrows_tables {{ border: none; border-radius: 0;
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) .st-key-dqrows_tables {{ border: none; border-radius: 0;
   border-top: 1px solid var(--dq-border); }}
 .st-key-dqrows_tables [class*="st-key-dqrow_"] {{ border-radius: 0 !important;
   min-height: 4.6rem; }}
 .st-key-dqrows_tables .dq-rowgrid {{ padding: .7rem 1rem; gap: .9rem; }}
 /* --- Consistency (2026-10-13). The checks card is the table card above; the rest is
    the relationship rows, the kinds card and the picked check's pane. */
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .st-key-dqrows_cschecks {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) .st-key-dqrows_cschecks {{
   border: none; border-radius: 0; border-top: 1px solid var(--dq-border); }}
 .st-key-dqrows_cschecks [class*="st-key-dqrow_"] {{ border-radius: 0 !important;
-  min-height: 3.9rem; }}
-.st-key-dqrows_cschecks .dq-rowgrid {{ padding: .6rem 1rem; gap: .8rem; }}
-.st-key-dq_csrels {{ border: 1px solid var(--dq-border); border-radius: 10px;
-  background: {NEUTRAL["surface"]}; padding: clamp(.8rem, 1.2vw, 1.05rem) 1rem;
-  gap: .55rem; height: 100%; }}
-.st-key-dq_csrels [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
-.st-key-dqrows_csrels .dq-rowgrid {{ padding: .55rem .75rem; gap: .75rem;
+  min-height: 4.4rem; }}
+.st-key-dqrows_cschecks .dq-rowgrid {{ padding: .7rem 1rem .7rem .2rem; gap: .75rem;
   align-items: center; }}
-.dq-cs-rel {{ display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; min-width: 0; }}
+.dq-rowgrid .stack.dq-cs-check .t1.wrap {{ display: block; white-space: normal;
+  -webkit-line-clamp: unset; overflow: visible; line-height: 1.35; }}
+.dq-rowgrid .stack.dq-cs-check .t2 {{ white-space: normal; overflow: visible;
+  font-family: inherit; }}
+.dq-cs-check .mono {{ font-size: .8rem; }}
+.st-key-dqrows_cschecks .num {{ text-align: right; align-items: flex-end; }}
+.st-key-dqrows_cschecks .num .big {{ font-size: .98rem; font-weight: 700; }}
+.dq-cs-badges {{ display: flex; flex-direction: column; align-items: flex-end; gap: .25rem; }}
+.dq-cs-rowshd .dq-cs-badges {{ flex-direction: row; flex-wrap: wrap; }}
+.dq-cs-under {{ margin-left: .3rem; font-size: .72rem; padding: 0 .4rem; cursor: help; }}
+.dq-cs-kpi .f.fail {{ box-shadow: inset 0 3px 0 {TONE["critical"]["fg"]}; }}
+/* Table links, one full-width card. */
+/* A card whose first block is its markdown header gets no padding from the shell. */
+:is(.st-key-dq_cslinks, .st-key-dq_csprops) > [data-testid="stElementContainer"]:first-child .dq-tmcard-hd {{
+  padding: clamp(.8rem, 1.2vw, 1.05rem) 1rem .7rem; }}
+.dq-cs-cardhd {{ display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: .3rem 1rem; }}
+.dq-cs-cardhd .q {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); }}
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) .st-key-dqrows_cslinks {{
+  border: none; border-radius: 0; border-top: 1px solid var(--dq-border); }}
+.st-key-dqrows_cslinks [class*="st-key-dqrow_"] {{ border-radius: 0 !important; min-height: 3.6rem; }}
+.st-key-dqrows_cslinks .dq-rowgrid {{ padding: .6rem 1rem .6rem .2rem; gap: .5rem 1rem;
+  align-items: center; }}
+.dq-cs-rel {{ display: flex; align-items: center; flex-wrap: wrap; gap: .35rem .45rem; min-width: 0; }}
+.dq-cs-rel + .dq-cs-rel {{ margin-top: .45rem; }}
+.dq-cs-rel .t2, .dq-cs-kinds {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2);
+  font-family: inherit; white-space: normal; }}
+.dq-cs-rel .t2 {{ margin-left: .35rem; }}
+.st-key-dq_cslinks {{ margin-bottom: clamp(.2rem, .6vw, .5rem); }}
 .dq-cs-node {{ font-family: var(--dq-mono, ui-monospace, monospace); font-size: .82rem;
-  padding: .3rem .55rem; border: 1.5px solid var(--dq-border-strong, {NEUTRAL["border_strong"]});
-  border-radius: 7px; background: {NEUTRAL["surface"]}; color: {NEUTRAL["text"]}; }}
+  padding: .28rem .55rem; border: 1.5px solid var(--dq-border-strong, {NEUTRAL["border_strong"]});
+  border-radius: 7px; background: {NEUTRAL["surface"]}; color: {NEUTRAL["text"]};
+  overflow-wrap: anywhere; }}
 .dq-cs-edge {{ width: clamp(1.4rem, 3vw, 2.6rem); height: 3px; border-radius: 2px;
-  background: var(--dq-edge); position: relative; }}
+  background: var(--dq-edge); position: relative; flex: 0 0 auto; }}
 .dq-cs-edge::after {{ content: ""; position: absolute; right: -1px; top: -4px;
   border-left: 7px solid var(--dq-edge); border-top: 5.5px solid transparent;
   border-bottom: 5.5px solid transparent; }}
-.dq-cs-relrow {{ display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }}
-.dq-cs-relbadges {{ display: flex; flex-wrap: wrap; gap: .3rem; margin-left: auto; }}
-.dq-cs-note {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); margin-top: .35rem; }}
-.dq-cs-kinds .dq-cs-kind {{ display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem;
-  gap: .75rem; align-items: center; padding: .6rem 0; border-top: 1px solid var(--dq-border); }}
-.dq-cs-kind .k {{ font-weight: 600; font-size: .9rem; color: {NEUTRAL["text"]}; }}
-.dq-cs-kind .q {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); margin-top: .1rem; }}
-.dq-cs-kind .n {{ text-align: right; font-size: .82rem; color: var(--dq-text-2); }}
-.dq-cov3.sm {{ height: 6px; margin: .35rem 0 0; }}
-.dq-cs-warn {{ display: flex; gap: .55rem; align-items: flex-start; font-size: .86rem;
-  color: {TONE["high"]["fg"]}; background: {TONE["high"]["bg"]};
-  border: 1px solid {TONE["high"]["bd"]}; border-radius: 8px;
-  padding: .6rem .8rem; margin-bottom: clamp(.8rem, 1.4vw, 1.2rem); }}
-.dq-cs-warn span {{ color: {NEUTRAL["text"]}; }}
+.dq-cs-relbadges {{ display: flex; flex-wrap: wrap; gap: .3rem; justify-content: flex-end; }}
+@media (max-width: 40rem) {{
+  .st-key-dqrows_cslinks .dq-rowgrid {{ grid-template-columns: minmax(0, 1fr) !important; }}
+  .dq-cs-relbadges {{ justify-content: flex-start; }}
+  .st-key-dqrows_cslinks .dq-rowgrid > :not(:first-child) {{ padding-left: 1rem; }}
+}}
+/* The picked check, beside the list. */
 .st-key-dq_cspane {{ border: 1px solid var(--dq-border); border-radius: 10px;
   background: {NEUTRAL["surface"]}; padding: clamp(.9rem, 1.4vw, 1.25rem);
-  margin-top: clamp(.8rem, 1.4vw, 1.2rem); gap: .8rem; }}
+  gap: .85rem; position: relative; overflow: hidden; }}
 .st-key-dq_cspane [data-testid="stMarkdownContainer"] {{ margin-bottom: 0; }}
 .dq-cs-panehd .t {{ font-size: clamp(1.02rem, 1.3vw, 1.2rem); font-weight: 650;
-  color: {NEUTRAL["text"]}; }}
+  color: {NEUTRAL["text"]}; line-height: 1.3; }}
 .dq-cs-panehd .b {{ display: flex; flex-wrap: wrap; gap: .35rem; align-items: center;
-  margin-top: .4rem; }}
-.dq-cs-figs {{ margin-bottom: 0; }}
-.dq-cs-figs .v {{ font-size: clamp(1.1rem, 1.6vw, 1.45rem); white-space: nowrap; }}
-.dq-cs-line {{ margin: .45rem 0 0; font-size: .9rem; color: {NEUTRAL["text"]}; line-height: 1.5; }}
-.dq-cs-side {{ display: flex; flex-direction: column; gap: .1rem; margin-top: .55rem; }}
-.dq-cs-side .l {{ font-size: var(--dq-fs-sub); color: var(--dq-text-3); }}
-.dq-cs-side .mono {{ font-size: .84rem; overflow-wrap: anywhere; }}
+  margin-top: .45rem; }}
+.dq-cs-id {{ font-family: var(--dq-mono, ui-monospace, monospace); font-size: .76rem;
+  color: var(--dq-text-3); }}
+.dq-cs-fig4 {{ display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--dq-border);
+  border-radius: 8px; overflow: hidden; }}
+.dq-cs-fig4 > div {{ padding: .6rem .75rem; min-width: 0; }}
+.dq-cs-fig4 > div:nth-child(odd) {{ border-right: 1px solid var(--dq-border); }}
+.dq-cs-fig4 > div:nth-child(n+3) {{ border-top: 1px solid var(--dq-border); }}
+.dq-cs-fig4 .l {{ font-size: var(--dq-fs-sub); color: var(--dq-text-2); }}
+.dq-cs-fig4 .v {{ font-size: clamp(1.05rem, 1.5vw, 1.3rem); font-weight: 700;
+  color: {NEUTRAL["text"]}; margin-top: .1rem; overflow-wrap: anywhere; }}
+.dq-cs-words {{ margin: .7rem 0 0; padding-left: 1.1rem; font-size: .88rem;
+  color: {NEUTRAL["text"]}; line-height: 1.5; }}
+.dq-cs-words li + li {{ margin-top: .2rem; }}
+.dq-cs-hist {{ margin-top: .8rem; }}
+.dq-cs-hist .bars {{ display: flex; align-items: flex-end; gap: .5rem; height: 66px;
+  margin-top: .35rem; }}
+.dq-cs-hist .col {{ flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-end; gap: .2rem; min-width: 0; height: 100%; }}
+.dq-cs-hist .bar {{ width: 100%; max-width: 2.6rem; border-radius: 3px 3px 0 0; }}
+.dq-cs-hist .col span {{ font-size: .7rem; color: var(--dq-text-3); white-space: nowrap; }}
+.dq-cs-rowshd {{ display: flex; flex-wrap: wrap; justify-content: space-between;
+  align-items: center; gap: .4rem .8rem; margin-bottom: .55rem; }}
+.dq-cs-rows {{ border: 1px solid var(--dq-border); border-radius: 8px; overflow-x: auto; }}
+.dq-cs-rows table {{ width: 100%; min-width: 26rem; border-collapse: collapse; font-size: .82rem; }}
+.dq-cs-rows th {{ font-size: .68rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--dq-text-2); background: {NEUTRAL["canvas"]};
+  text-align: left; padding: .5rem .6rem; white-space: nowrap; }}
+.dq-cs-rows td {{ padding: .5rem .6rem; border-top: 1px solid var(--dq-border);
+  color: {NEUTRAL["text"]}; overflow-wrap: anywhere; }}
+.dq-cs-rows .cmp {{ background: #f5f6ff; }}
+.dq-cs-rows th.cmp {{ background: {ACCENT_TINT}; color: #3730a3; }}
+.dq-cs-empty {{ display: inline-block; font-family: var(--dq-sans, inherit); font-size: .74rem;
+  font-weight: 600; color: #9a3412; background: #fff7ed; border: 1px dashed #fdba74;
+  border-radius: 5px; padding: 0 .4rem; }}
+.dq-cs-diff {{ background: #fde68a; border-radius: 2px; padding: 0; color: inherit; }}
 /* Proposals card, and the New check / Review pages (2026-10-13). */
 .st-key-dq_csprops {{ margin-bottom: clamp(.8rem, 1.4vw, 1.2rem); }}
-:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops) .st-key-dqrows_csprops {{
+:is(.st-key-dq_tmcard, .st-key-dq_tricard, .st-key-dq_cscard, .st-key-dq_csprops, .st-key-dq_cslinks) .st-key-dqrows_csprops {{
   border: none; border-radius: 0; border-top: 1px solid var(--dq-border); }}
 .st-key-dqrows_csprops [class*="st-key-dqrow_"] {{ border-radius: 0 !important; min-height: 3.6rem; }}
 .st-key-dqrows_csprops .dq-rowgrid {{ padding: .55rem 1rem; gap: .8rem; }}

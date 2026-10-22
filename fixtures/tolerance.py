@@ -143,7 +143,7 @@ def element_tolerance(runs: pd.DataFrame, cde_cov: pd.DataFrame,
 
 def check_escalation(runs: pd.DataFrame, cde_cov: pd.DataFrame,
                      element_tol: pd.DataFrame) -> pd.DataFrame:
-    """Fixture twin of v_check_escalation."""
+    """Fixture twin of v_check_escalation. Every breach escalates since 2026-10-22."""
     pairs = (cde_cov[["cde_id", "rule_ids"]]
              .assign(rule_id=lambda d: d.rule_ids.map(_as_list))
              .explode("rule_id").dropna(subset=["rule_id"])[["cde_id", "rule_id"]]
@@ -155,7 +155,8 @@ def check_escalation(runs: pd.DataFrame, cde_cov: pd.DataFrame,
     t = element_tol[["run_id", "cde_id", "score_pct", "target_pct", "within_tolerance"]]
     b = b.merge(t, on=["run_id", "cde_id"], how="left")
     inside = b.within_tolerance.fillna(False).astype(bool)
-    held = inside & (b.severity != P1)
+    # Since 2026-10-22 every breach escalates: the threshold is the rule's own.
+    held = inside & False
     return pd.DataFrame({
         "run_id": b.run_id, "run_ts": b.run_ts, "rule_id": b.rule_id,
         "severity": b.severity, "violation_count": b.violation_count,

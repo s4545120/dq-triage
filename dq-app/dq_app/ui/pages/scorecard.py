@@ -472,9 +472,16 @@ def _chart(points: list, target, width: int, height: int) -> str:
 # --- Targets ------------------------------------------------------------------
 # All three kinds come from `domain/targets.py`; this page only prints them.
 
-el_target = targets.element_targets(adapter.get_cde_registry_current())
+# Since 2026-10-22 a threshold lives on the rule only (fail_threshold_pct). An attribute,
+# a domain and the headline carry no target: they are failing when a rule under them
+# breaches. targets.element_targets / blended_target stay for a register that wants
+# them back; this page no longer reads them.
+el_target: dict = {}
 rule_cde = targets.rule_elements(cde_cov)
-overall_target = targets.blended_target(latest_scored, rule_cde, el_target)
+overall_target = None
+_latest_raised = latest_scored[latest_scored["status"].isin(("pass", "breach"))]
+rules_ran_now = _latest_raised["rule_id"].nunique()
+rules_breaching_now = _latest_raised.loc[_latest_raised["status"] == "breach", "rule_id"].nunique()
 overall_gap = targets.shortfall(score, overall_target)
 history = _in_window(run_index)
 
@@ -505,7 +512,8 @@ hero, cov_col = st.columns([1.9, 1])
 
 with hero:
     if overall_target is None:
-        against = "No target — the register declares no tolerance on these attributes."
+        against = (f"{rules_breaching_now} of {rules_ran_now} active rules breaching their "
+                   "own threshold")
     elif targets.meets(score, overall_target):
         against = f"Target {_target_text(overall_target)} · met"
     else:
@@ -517,12 +525,10 @@ with hero:
         + theme.hint(
             "Rows that passed their checks, over rows evaluated, on the run shown. "
             "Weighted by rows, so a check over 2,000 rows counts for more than a "
-            "check over 40. Shadow checks are in neither half. The target is each "
-            "attribute's own — 100 minus the tolerance the key attribute register declares on "
-            "it — weighted by the same rows, so it is the figure this would read if "
-            "every attribute sat exactly on its tolerance. The line is the score per "
-            f"run over {TREND_DAYS} days.", side="right")
-        + '<span class="dq-lg"><i></i>Pass rate<i class="dash"></i>Target</span></div>'
+            "check over 40. Shadow checks are in neither half. There is no overall "
+            "target: each rule has its own threshold, and a rule over it breaches. The "
+            f"line is the score per run over {TREND_DAYS} days.", side="right")
+        + '<span class="dq-lg"><i></i>Pass rate</span></div>'
         f'<div class="val"><span>{theme.pct_text(score, 1)}'
         '<span class="of unit">%</span></span>'
         + (theme.delta(score_delta, " pts", 1) if prior is not None else "")
@@ -658,30 +664,34 @@ def _elements_and_pane() -> None:
     el_rows = []
     for _, r in _elements.iterrows():
         cid = r["cde_id"]
-        el_score, target = el_scores.get(cid), el_target.get(cid)
-        is_assessed = targets.assessed(gaps_of[cid], el_score, target)
-        met = is_assessed and targets.meets(el_score, target)
+        el_score, target = el_scores.get(cid), None
         coverage_word = theme.COVERAGE_GAP_LABEL.get(r["coverage_gap"], r["coverage_gap"])
-        if not is_assessed:
-            # Why there is no verdict, in the register's own word for it. A missing score
-            # is a dash, never a zero: nothing watching an element is a gap in the
-            # register, and zero percent would report it as a data defect.
-            line = (f"No check ran · {coverage_word}" if el_score is None else
-                    f"Not assessed · {coverage_word}" if target is not None else
-                    f"No target declared · {coverage_word}")
-        elif met:
-            line = f"Meets target · {_target_text(target)}"
+        mine = rules_of.get(cid, set())
+        n_ran, n_breach = len(mine & ran_ids), len(mine & failing_ids)
+        disputed = "scope_mismatch" in gaps_of[cid]
+        # A CDE fails when any of its rules breaches its own threshold. A disputed scope
+        # keeps its count but not the verdict: the breach is the rule's, not the data's.
+        is_assessed = n_ran > 0 and not disputed
+        met = is_assessed and n_breach == 0
+        if el_score is None or n_ran == 0:
+            line = f"No rule ran · {coverage_word}"
+        elif disputed:
+            line = f"Rule scope disputed · {n_breach} of {n_ran} rules breaching"
+        elif n_breach:
+            line = f"{n_breach} of {n_ran} rules breaching"
         else:
-            line = (f"{_pts(targets.shortfall(el_score, target))} below target · "
-                    f"{_target_text(target)}")
+            # A pass on presence checks alone vouches for nothing the column holds, so the
+            # register's word for that rides along.
+            line = (f"All {n_ran} rules passing" if r["coverage_gap"] == "covered" else
+                    f"All {n_ran} rules passing · {coverage_word}")
         el_rows.append({
             "key": cid, "Attribute": r["cde_name"], "Criticality": r["criticality"],
             "Kind": theme.data_class_label(r["data_class"]), "Coverage": coverage_word,
             "Score": el_score, "Target": target, "Assessed": is_assessed, "Met": met,
+            "Breaching": n_breach, "Ran": n_ran,
             "Line": line, "Change": _change_words(el_score, el_before.get(cid)),
             "Colour": UNASSESSED if not is_assessed else MET if met else BELOW,
-            "_order": ((0, -targets.shortfall(el_score, target), r["cde_name"])
-                       if is_assessed else
+            "_order": ((0, -n_breach, r["cde_name"]) if is_assessed and not met else
                        (1, _crit_rank.get(r["criticality"], 9),
                         101.0 if el_score is None else el_score, r["cde_name"])),
         })
@@ -748,8 +758,8 @@ def _elements_and_pane() -> None:
                 "scope mismatch scores low because of the rule, not the data — both "
                 "keep their figure, in grey, and are counted as unassessed.", side="right")
             + "</div>"
-            f'<div class="q">{n_below} below target · {n_met} meeting target · '
-            f"{len(el_rows) - n_below - n_met} unassessed</div></div>",
+            f'<div class="q">{n_below} failing · {n_met} passing · '
+            f"{len(el_rows) - n_below - n_met} not assessed</div></div>",
             unsafe_allow_html=True,
         )
         # Five by default: the list is sorted so that the top of it is the answer to
@@ -890,23 +900,22 @@ def _elements_and_pane() -> None:
                 # The register's own account of why this score carries no verdict.
                 note = theme.COVERAGE_GAP_MEANING.get(er["coverage_gap"], "")
             elif sel["Met"]:
-                note = (f"<b>Meets its {_pct(sel['Target'])} target.</b> "
+                note = (f"<b>All {len(checks)} rules within their own thresholds.</b> "
                         + (f"{bad:,} {'row still fails' if bad == 1 else 'rows still fail'} "
-                           "a check; passing the threshold does not mean zero defects."
-                           if bad else "No row failed a check on this run."))
+                           "a rule; within threshold does not mean zero defects."
+                           if bad else "No row failed a rule on this run."))
             else:
                 # Failures, not rows: one row can fail more than one check, and
                 # `check_run` keeps a count per check and no keys to de-duplicate on.
-                note = (f"<b>{_pts(targets.shortfall(sel['Score'], sel['Target']))} below "
-                        f"its {_pct(sel['Target'])} target.</b> {bad:,} failures across "
-                        f"{failing} of {len(checks)} checks.")
+                note = (f"<b>{failing} of {len(checks)} rules over their threshold.</b> "
+                        f"{bad:,} failures across them.")
 
-        verdict = ("" if sel["Target"] is None else
-                   f'<span>Target {_target_text(sel["Target"])}</span>'
-                   + ('<span>Not assessed</span>' if not sel["Assessed"] else
-                      '<span>Meets target</span>' if sel["Met"] else
-                      f'<span class="dq-below">'
-                      f'{_pts(targets.shortfall(sel["Score"], sel["Target"]))} below</span>'))
+        # Rule-level thresholds since 2026-10-22: the verdict is how many of the
+        # attribute's rules are over their own limit, never a distance from a target.
+        verdict = ('<span>Not assessed</span>' if not sel["Assessed"] else
+                   '<span>All rules within threshold</span>' if sel["Met"] else
+                   f'<span class="dq-below">{sel.get("Breaching", 0)} of '
+                   f'{sel.get("Ran", 0)} rules breaching</span>')
         change = _change_words(hist[-1][1], hist[-2][1]) if len(hist) > 1 else ""
         # The target is drawn only where the score is assessed against it. A dashed line
         # forty-nine points above a scope mismatch's series is "below target" said with a

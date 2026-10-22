@@ -14,10 +14,11 @@ bundle:
 include:
   - resources/*.yml
 
-# Only what the jobs execute; sql/ is run by a person in the SQL editor.
+# Only what the jobs execute; sql/ and dashboard/ are pasted by a person.
 sync:
   exclude:
     - sql/**
+    - dashboard/**
     - README.md
 
 variables:

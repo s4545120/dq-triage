@@ -118,9 +118,14 @@ def relationships(rows: list[dict]) -> list[dict]:
         rel = out.setdefault(c["rel_key"], {
             "key": c["rel_key"], "Driving": c["Driving"], "Others": c["Others"],
             "Label": c["Relationship"], "Checks": [], "Failing": 0, "Passing": 0,
-            "Shadow": 0, "Not run": 0})
+            "Shadow": 0, "Not run": 0, "Kinds": [], "On": []})
         rel["Checks"].append(c["key"])
         rel[c["State"]] += 1
+        if c["Kind"] not in rel["Kinds"]:
+            rel["Kinds"].append(c["Kind"])
+        on = link_keys(c["join_sql"])
+        if on and on not in rel["On"]:
+            rel["On"].append(on)
     return sorted(out.values(), key=lambda r: (-r["Failing"], r["Label"]))
 
 
@@ -141,6 +146,126 @@ def summary(rows: list[dict]) -> dict:
     }
 
 
+# --- Reading a join for people (2026-10-13, the page redraw) ------------------------------
+
+_ALIASED = re.compile(r"(?<![\w.`])([A-Za-z_]\w*\.[A-Za-z_]\w*\.[A-Za-z_]\w*)\s+"
+                      r"(?:AS\s+)?([A-Za-z_]\w*)\b", re.IGNORECASE)
+_KEYWORDS = {"on", "join", "left", "right", "full", "inner", "outer", "cross", "where"}
+_PAIR = re.compile(r"\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)")
+_REF = re.compile(r"\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\b")
+
+
+def aliases(join_sql) -> dict[str, str]:
+    """alias -> short table name, for every table a join names with an alias."""
+    out = {}
+    for t, a in _ALIASED.findall(_LITERAL.sub("''", str(join_sql or ""))):
+        if a.lower() not in _KEYWORDS:
+            out[a] = short(t)
+    return out
+
+
+def resolve(text: str, join_sql) -> str:
+    """`s.CTCT_KEY = c.CTCT_KEY` -> `subs_c.CTCT_KEY = ctct_c.CTCT_KEY`: a reader knows
+    the tables, not the aliases the SQL gave them."""
+    names = aliases(join_sql)
+    return _REF.sub(lambda m: f"{names.get(m.group(1), m.group(1))}.{m.group(2)}", str(text))
+
+
+def link_pairs(join_sql) -> list[tuple[str, str]]:
+    """Every `a.X = b.Y` the join matches on, as (`table.X`, `table.Y`) in join order."""
+    names = aliases(join_sql)
+    out = []
+    for a, x, b, y in _PAIR.findall(_LITERAL.sub("''", str(join_sql or ""))):
+        if a in names and b in names:
+            out.append((f"{names[a]}.{x}", f"{names[b]}.{y}"))
+    return out
+
+
+def link_keys(join_sql) -> str | None:
+    """The key column(s) a link matches on, said once: `CTCT_KEY`, or `ORG_ID → CONTACT_ID`
+    when a join runs through a third table. None for a join of two totals."""
+    cols = []
+    for a, b in link_pairs(join_sql):
+        x, y = a.split(".", 1)[1], b.split(".", 1)[1]
+        cols.append(x if x == y else f"{x} = {y}")
+    return " → ".join(dict.fromkeys(cols)) or None
+
+
+def rate_label(c: dict) -> str:
+    """The one figure a check row carries under its failed count."""
+    if c["Checked"] is None:
+        return "not measured"
+    if c["Kind"] == "Same total":
+        return "match" if not c["Failing rows"] else f"{c['Failing rows']} off"
+    word = "found" if c["Kind"] == "Missing record" else "match"
+    return f"{c['Rate']:.1f}% {word}".replace(".0% ", "% ")
+
+
+def compared_columns(c: dict) -> list[str]:
+    """The columns a Same value check compares, as they appear in its sample rows (the
+    runner keeps plain column names). Two names when the sides differ; one when both
+    tables call it the same, because a sample then keeps one value of the two."""
+    if c["Kind"] != "Same value":
+        return []
+    names = aliases(c["join_sql"])
+    cols = [col for a, col in _REF.findall(_LITERAL.sub("''", str(c["rule_expr"])))
+            if a in names]
+    return list(dict.fromkeys(cols))
+
+
+def _empty(v) -> bool:
+    return v is None or (isinstance(v, float) and v != v) or not str(v).strip()
+
+
+def split_diff(left, right) -> tuple[str, str]:
+    """(the part of `right` it shares with `left`, the part that differs). A shared start
+    shorter than three characters is no shared start: the whole value differs."""
+    a, b = str(left), str(right)
+    n = 0
+    while n < min(len(a), len(b)) and a[n] == b[n]:
+        n += 1
+    return (b[:n], b[n:]) if n >= 3 else ("", b)
+
+
+def sample_view(rows: list[dict], c: dict) -> dict:
+    """A check's sample rows for the side-by-side table: {'keys', 'left', 'right', 'rows',
+    'counts'}. Each row carries its key values, both compared values (None = empty), the
+    differing part of the right value, and why it failed. `left`/`right` are None when
+    the check has no two distinct compared columns -- the page then shows the rows as
+    stored."""
+    cols = compared_columns(c)
+    if len(cols) != 2:
+        return {"keys": [], "left": None, "right": None, "rows": [], "counts": {}}
+    left, right = cols
+    # The driving table's key: the first column the runner kept that is not compared.
+    keys = [k for k in (rows[0].keys() if rows else []) if k not in cols][:1]
+    out, counts = [], {}
+    for r in rows:
+        lv, rv = r.get(left), r.get(right)
+        if _empty(lv) or _empty(rv):
+            why, same, diff = "One side empty", "" if _empty(rv) else str(rv), ""
+        else:
+            why = "Different"
+            same, diff = split_diff(lv, rv)
+        counts[why] = counts.get(why, 0) + 1
+        out.append({"key": [r.get(k) for k in keys], "left": None if _empty(lv) else str(lv),
+                    "right": None if _empty(rv) else str(rv), "same": same, "diff": diff,
+                    "why": why})
+    return {"keys": keys, "left": left, "right": right, "rows": out, "counts": counts}
+
+
+def history(runs: pd.DataFrame, rule_id: str, n: int = 5) -> list[tuple[pd.Timestamp, int]]:
+    """A check's failed count on its last `n` measured days, oldest first."""
+    if runs.empty:
+        return []
+    mine = runs[(runs["rule_id"] == rule_id) & runs["violation_count"].notna()]
+    if mine.empty:
+        return []
+    mine = mine.sort_values("run_ts").assign(_d=lambda d: pd.to_datetime(d["run_ts"]).dt.date)
+    last = mine.drop_duplicates("_d", keep="last").tail(n)
+    return [(pd.Timestamp(r["run_ts"]), int(r["violation_count"])) for _, r in last.iterrows()]
+
+
 def plain_words(c: dict) -> list[str]:
     """How the two sides are matched and what fails, said without SQL. Read off the
     expression's shape; a hand-written rule gets the generic sentence."""
@@ -148,7 +273,7 @@ def plain_words(c: dict) -> list[str]:
     me = short(c["Driving"])
     on = re.search(r"\bON\s+(.+?)(?:\s+(?:LEFT\s+|FULL\s+OUTER\s+|CROSS\s+)?JOIN\b|$)",
                    str(c["join_sql"]), re.IGNORECASE)
-    match = on.group(1).strip() if on else None
+    match = resolve(on.group(1).strip(), c["join_sql"]) if on else None
     lines = []
     if c["Kind"] == "Missing record":
         lines.append(f"Each row of {me} is looked up on {other}"

@@ -100,8 +100,9 @@ def test_a_p1_breach_always_escalates():
 
 
 def test_a_p1_escalates_even_inside_a_tolerant_element():
-    """The fixture has no P1 inside a tolerant element, so build one: two breaching
-    checks on an element at 99.9% against a 0.5% tolerance, one P2 and one P1."""
+    """Since 2026-10-22 every breach escalates, P1 or not, whatever the element's
+    tolerance: the threshold is the rule's own. Two breaching checks on an element at
+    99.9% against a 0.5% tolerance, one P2 and one P1 -- both go to triage."""
     ts = pd.Timestamp("2026-10-08 03:00")
     runs = pd.DataFrame([
         dict(run_id="r", run_ts=ts, result_id=f"x{i}", rule_id=rid, status="breach",
@@ -112,11 +113,9 @@ def test_a_p1_escalates_even_inside_a_tolerant_element():
     reg = pd.DataFrame([dict(cde_id="E", cde_version=1, cde_name="E", criticality="high",
                              status="registered", tolerance_pct=0.5)])
     et = tolerance.element_tolerance(runs, cov, reg)
-    assert bool(et.iloc[0]["within_tolerance"])
     esc = tolerance.check_escalation(runs, cov, et).set_index("rule_id")
-    assert bool(esc.loc["R_P1", "escalates"]) and pd.isna(esc.loc["R_P1", "held_reason"])
-    assert not bool(esc.loc["R_P2", "escalates"])
-    assert esc.loc["R_P2", "held_reason"] == "element_within_tolerance"
+    for rid in ("R_P1", "R_P2"):
+        assert bool(esc.loc[rid, "escalates"]) and pd.isna(esc.loc[rid, "held_reason"])
 
 
 def test_a_scope_mismatch_is_never_held_back():
@@ -138,17 +137,12 @@ def test_within_needs_a_tolerance_a_score_and_no_dispute():
 
 
 def test_the_queue_leaves_out_what_the_tolerance_holds():
+    """Nothing is held since 2026-10-22, so the queue is every breaching check."""
     runs, cov, cohorts = (_load("results.check_run"), _load("results.v_cde_coverage"),
                           _load("results.cohort"))
     held = tolerance.held_on_run(runs, cov, _registry(), metrics.queue_run_id(runs))
-    assert held == {"SUBS_NTWK_NOT_NULL", "XREF_NAME_AGREEMENT", "XREF_OPEN_TS_AGREEMENT"}
-    before, after = metrics.live_cohorts(runs, cohorts), metrics.live_cohorts(runs, cohorts, held)
-    assert set(before) - set(after) == held
-    c = metrics.cohort_compression(runs, cohorts, held)
-    assert (c.numerator, c.denominator) == (len(after), len(set(after.values())))
-
-
-# --- The advice ------------------------------------------------------------------
+    assert held == set()
+    assert metrics.live_cohorts(runs, cohorts) == metrics.live_cohorts(runs, cohorts, held)
 
 
 def test_no_proposal_raises_a_tolerance():
@@ -291,8 +285,9 @@ def test_an_accepted_tightening_points_at_the_elements_page():
 
 
 def test_the_triage_queue_says_what_it_held_back():
+    """With nothing held, the queue says nothing about tolerance."""
     at = _run("dq_app/ui/pages/triage.py")
     body = _text(at)
-    assert "3 within tolerance" in body
-    assert "within their attribute's agreed tolerance" in body
-    assert "Network technology" in body
+    assert "within tolerance" not in body
+
+

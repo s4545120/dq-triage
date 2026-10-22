@@ -350,30 +350,33 @@ def test_the_element_list_shows_five_by_default_and_every_element_on_request():
 
 
 def test_the_element_counts_add_up_to_the_register():
-    """Below, meeting and unassessed are one partition of the register. If the three
-    ever stop summing to the number of elements, a row is being counted twice or
+    """Failing, passing and not assessed are one partition of the register. If the
+    three ever stop summing to the number of elements, a row is being counted twice or
     dropped, and the line is the only place a reader would see it."""
     body = _body(_run(SCORECARD))
-    counts = re.search(r"(\d+) below target · (\d+) meeting target · (\d+) unassessed", body)
+    counts = re.search(r"(\d+) failing · (\d+) passing · (\d+) not assessed", body)
     assert counts, "the list no longer states how the register splits"
     assert sum(int(n) for n in counts.groups()) == 19
 
 
+
 def test_the_largest_shortfall_is_first_and_picked_by_default():
-    """Largest target gap first, and the page opens on it. Customer email address
-    carries the 240 malformed addresses against a 0.5% tolerance. (Vulnerable customer
-    indicator led at 0% until it was retired on 2026-10-01.)"""
+    """Since 2026-10-22 an attribute fails when its rules breach their own thresholds,
+    so the attribute with the most rules breaching leads, and the page opens on it.
+    (Vulnerable customer indicator led at 0% until it was retired on 2026-10-01.)"""
     at = _run(SCORECARD)
     first = _rows(at, "elements")[0]
-    assert "Customer email address" in first
-    assert "below target" in first
+    assert "rules breaching" in first, first
     head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
-    assert head and "Customer email address" in head[0]
-    # A retired element and its retired rule leave the page entirely: not listed,
-    # and not swept into "Not on a registered element" by a run that predates it.
+    assert head
+    from dq_app.data import adapter
+    names = sorted(adapter.get_cde_registry_current()["cde_name"], key=len, reverse=True)
+    lead = next(n for n in names if n in first)
+    assert lead in head[0], (lead, head[0][:300])
     body = " ".join(str(m.value) for m in at.markdown)
     assert "Vulnerable customer indicator" not in body
     assert "Not on a registered element" not in body
+
 
 
 def test_the_element_band_recommends_nothing():
@@ -388,16 +391,16 @@ def test_the_element_band_recommends_nothing():
 
 
 def test_an_unvalidated_element_is_not_assessed_against_its_target():
-    """The quietest failure on the page. `Identity document number` is registered
-    critical, has one check, and that check passes on every row — so it scores 100%
-    while nothing examines what the column contains. "Meets target" beside that
-    would be the page vouching for data nobody has looked at; the row says what the
-    register says instead."""
+    """The quietest failure on the page. `Identity document number` has one presence
+    check that passes on every row, while nothing examines what the column contains.
+    Its row says its rules pass and, beside that, what the register says: not
+    validated."""
     at = _run(SCORECARD, _elist_show="all")
     row = [r for r in _rows(at, "elements") if "Identity document number" in r]
     assert row, "the identity document element is not on the list"
-    assert "Not assessed · Not validated" in row[0], row[0]
-    assert "Meets target" not in row[0]
+    assert "Not validated" in row[0], row[0]
+    assert "breaching" not in row[0] and "Meets target" not in row[0]
+
 
 
 def test_picking_an_element_lists_its_checks_and_no_other_element_s():
@@ -487,27 +490,25 @@ def test_the_unattached_entry_is_absent_when_every_check_names_an_element():
 
 def test_an_element_shows_its_score_against_its_target():
     """The pane's point: the element's score, the same row-weighted arithmetic as the
-    headline over that element's own checks, beside the target the register sets on
-    it. Customer email address is nine checks, 522 bad rows of 8,993 scanned — 94.2%
-    — against a 0.5% tolerance."""
+    headline over that element's own checks, and how many of its rules are over their
+    own threshold. No attribute target since 2026-10-22."""
     at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
     head = [str(m.value) for m in at.markdown if 'class="dq-elhd"' in str(m.value)]
     assert head, "the pane has no element header"
     assert "Customer email address" in head[0]
     assert ">94.2%<" in head[0], head[0]
-    assert "Target \u2265 99.5%" in head[0]
-    assert "5.3 pts below" in head[0]
+    assert re.search(r"\d+ of \d+ rules breaching", head[0]), head[0]
+    assert "Target \u2265" not in head[0]
     over = [str(m.value) for m in at.markdown if 'class="dq-elover"' in str(m.value)]
     assert over and "since last run" in over[0] and "dq-trend" in over[0], \
         "the Overview tab has no trend"
 
 
+
 def test_every_run_on_a_trend_can_be_hovered_for_its_reading():
     """Both trend charts carry one hover column per run drawn, each with the run's
-    date, its score and where that stood against the target. Customer email address
-    sat at 100% until its checks began failing and ends 5.3 points under a 99.5%
-    target, so the one chart exercises both wordings — and the latest run's reading
-    has to be the figure in the header above it."""
+    date and its score. With no attribute target there is no verdict in a bubble, and
+    the latest run's reading has to be the figure in the header above it."""
     import re
 
     at = _run(SCORECARD, _elem_scope="CDE_CUST_EMAIL")
@@ -515,17 +516,14 @@ def test_every_run_on_a_trend_can_be_hovered_for_its_reading():
     tips = re.findall(r'<span class="tip"[^>]*><b>([^<]+)</b><span>([^<]+)</span>', over)
     drawn = over.split("<polyline points=\"")[1].split('"')[0].split()
     assert tips and len(tips) == len(drawn), (len(tips), len(drawn))
-    assert tips[0][1] == "100% · meets target", tips[0]
-    assert tips[-1][1] == "94.2% · 5.3 pts below target", tips[-1]
+    assert tips[0][1] == "100%", tips[0]
+    assert tips[-1][1] == "94.2%", tips[-1]
+    assert "target" not in over.split('class="pts"')[1]
 
     hero = [str(m.value) for m in at.markdown if 'class="dq-card dq-hero"' in str(m.value)][0]
     assert hero.count('<span class="pt"') == len(
         hero.split("<polyline points=\"")[1].split('"')[0].split())
 
-    # No target drawn means no verdict in the bubble either — same rule as the line.
-    at = _run(SCORECARD, _elem_scope="CDE_BILLING_ACCOUNT", _elist_show="all")
-    over = [str(m.value) for m in at.markdown if 'class="dq-elover"' in str(m.value)][0]
-    assert 'class="tip"' in over and "target" not in over.split('class="pts"')[1]
 
 
 def test_the_element_card_is_four_tabs_labelled_with_what_is_behind_them():
@@ -565,22 +563,22 @@ def test_the_sample_rows_tab_shows_the_actual_rows_of_the_check_picked():
 
 
 def test_the_overall_figure_states_its_target():
-    """The headline's target is the element tolerances weighted by the rows the
-    score is — `targets.blended_target`. The card has to print it, say how far off
-    the score is, and draw it."""
+    """No overall target since 2026-10-22: thresholds live on rules. The headline says
+    how many active rules are over their own threshold, draws no target line, and
+    keeps its operands."""
     hero = [str(m.value) for m in _run(SCORECARD).markdown
             if 'class="dq-card dq-hero"' in str(m.value)]
     assert hero, "no headline card"
-    assert re.search(r"Target \u2265 9\d(\.\d+)?%", hero[0]), hero[0]
-    assert "below</span>" in hero[0]
-    assert "stroke-dasharray" in hero[0], "the target line is not drawn"
+    assert re.search(r"\d+ of \d+ active rules breaching their own threshold", hero[0]), hero[0][-400:]
+    assert "Target \u2265" not in hero[0]
+    assert "stroke-dasharray" not in hero[0], "a target line is drawn"
     assert "checked rows passed" in hero[0], "the operands are gone"
 
 
+
 def test_the_page_renders_with_no_tolerance_declared(monkeypatch):
-    """The workspace until `migrate_cde_scope.sql` runs: `config.cde_registry` has no
-    `tolerance_pct` column at all, and the deployed app reads that table. The page
-    has to say there is no target, not assume one and not fall over."""
+    """A registry with no `tolerance_pct` column at all. Since 2026-10-22 the page reads
+    no tolerance anyway, so it renders the same: every attribute, no target."""
     from dq_app.data import adapter
 
     current = adapter.get_cde_registry_current()
@@ -589,12 +587,11 @@ def test_the_page_renders_with_no_tolerance_declared(monkeypatch):
 
     at = _run(SCORECARD, _elist_show="all")
     body = _body(at)
-    assert "No target" in body
     assert "Target \u2265" not in body
-    assert "0 below target · 0 meeting target · 19 unassessed" in body
     rows = _rows(at, "elements")
     assert len(rows) == 19
     assert not any("Meets target" in r or "pts below" in r for r in rows)
+
 
 
 def test_a_scope_mismatch_score_is_not_coloured_as_bad_data():

@@ -109,6 +109,48 @@ apart from `01` is safe to re-run.
 The bundle deploys in `development` mode, so job names carry a `[dev <you>]` prefix and
 run as you. Your grants are what the jobs have.
 
+## The dashboard
+
+An AI/BI dashboard over the same tables. **Stage 1 is two pages**: Executive summary and
+Domain view (key attributes, monitored tables and breaches). The wireframe is the canvas "DQ Genie
+Dashboard Wireframe", page *Stage 1*. The triage and pipeline pages are on its *Later
+stages* page, and their datasets are in `dashboard/later/`; leave both for now.
+`01_ddl.sql` already created the view the trends count runs from,
+`{pre}results_v_scheduled_run`.
+
+1. **Dashboards → Create dashboard → Data → Create from SQL**, once per file in
+   `dashboard/` (not `later/`). Name each dataset after its file (`ds_quality_trend`, …)
+   and paste the query. There are {ds_count}.
+2. **Build the two pages** from the wireframe. Its *Build spec · stage 1* sheet gives
+   every widget's type, dataset and settings. Only built-in widget types are used:
+   counter, line, table, text and filter.
+3. **Filters** sit on each page as filter widgets.
+   * **Executive summary:** Run date only, bound to `run_week` (default last 12 weeks). The page is the whole
+     register, already split by business domain, so a domain or CDE filter would only
+     empty most of its tiles.
+   * **Domain view:** field filters on `run_week`, `business_domain`, `target_table`,
+     `cde_name` and `severity`. A filter reaches only the datasets that carry its field:
+     severity narrows Breaches, not the CDE scores or the monitored tables. The tables
+     show the latest run whatever the Run date says.
+4. **Counters**: Overall quality takes `score_pct` as Value and `threshold_pct` as Target;
+   each domain tile does the same with a widget filter on its domain; CDEs under
+   monitoring and Not assessed take `cdes_registered` as Target. All use row 1 with no
+   aggregation, which is why those datasets are ordered newest first. Trends are weekly: those datasets keep each
+   week's last scheduled run, and a counter compares with last week (date field `run_week`,
+   days-ago offset -7). The Domain view's
+   counters aggregate instead (`SUM`, or a custom calculation for the score), because its
+   filters can leave many CDEs.
+5. **Publish** and choose whose permissions viewers query with. With embedded
+   credentials, everyone you share it with sees what you can see. No dataset reads
+   `violation_sample` or `model_input_payload`, so failing values never reach a viewer.
+6. **Genie**: create a Genie space over the tables and views on the wireframe's last
+   sheet, paste its instructions and sample questions, and link it in the dashboard's
+   Publish dialog. Ask Genie answers from the full dataset queries, not only what a
+   widget shows. It is in Public Preview.
+
+Until a rule is promoted, the breach and P1 counters read zero and every CDE reads "Not
+assessed".
+
 ## Files
 
 | File | What it does |
@@ -118,6 +160,7 @@ run as you. Your grants are what the jobs have.
 | `notebooks/03_group_and_advise.ipynb` | Triage: groups escalating breaches by run history, reads the register, one model call per group, writes `results.cohort`. No row values go to the model |
 | `notebooks/06_suggest_thresholds.ipynb` | Tolerance advice, one model call per attribute. Writes `results.tolerance_proposal` only. Leave it until there are weeks of runs: on a few days it has nothing to say |
 | `databricks.yml`, `resources/dq_pipeline.yml` | The two jobs as a bundle, target `sandpit` |
+{ds_rows}
 
 ## Things that will look wrong and are not
 

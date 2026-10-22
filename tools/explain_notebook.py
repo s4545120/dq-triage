@@ -56,6 +56,7 @@ NAMES = {
     "PROPOSAL_CUR": _t("results", "v_tolerance_proposal_current"),
     "RULE_CURRENT": _t("config", "v_rule_registry_current"),
     "CDE_CURRENT": _t("config", "v_cde_registry_current"),
+    "MONITORED_TABLE": _t("config", "monitored_table"),
 }
 
 # Run-time values the notebook does not have yet. Shape is checked, values are not,
@@ -87,8 +88,15 @@ def statements(nb: dict):
         if cell["cell_type"] != "code":
             continue
         src = "".join(cell["source"])
+        # A cell may share SQL between its statements through a constant (03's cell 8
+        # keeps its sample CTEs in SAMPLES). Inline it, or `{SAMPLES}` reads as a value.
+        shared = {m.group(1): m.group(2)
+                  for m in re.finditer(r'^([A-Z_]+) = f?"""(.*?)"""', src, re.S | re.M)}
         for m in re.finditer(r'spark\.sql\(f?"""(.*?)"""', src, re.S):
-            yield i, m.group(1)
+            sql = m.group(1)
+            for name, body in shared.items():
+                sql = sql.replace("{" + name + "}", body)
+            yield i, sql
         for m in re.finditer(r'spark\.sql\(\s*\n?\s*f?"([^"]{20,})"', src):
             yield i, m.group(1)
 

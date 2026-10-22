@@ -171,23 +171,24 @@ def check_escalation(check_run: pd.DataFrame, cde_cov: pd.DataFrame,
         cde_id = rule_cde.get(b.rule_id)
         t = tol.get((b.run_id, cde_id))
         inside = bool(t.within_tolerance) if t is not None else False
-        p1 = b.severity == ALWAYS_ESCALATES
         out.append(dict(
             run_id=b.run_id, run_ts=b.run_ts, rule_id=b.rule_id, severity=b.severity,
             violation_count=b.violation_count, rows_scanned=b.rows_scanned, cde_id=cde_id,
             element_score_pct=None if t is None else t.score_pct,
             element_target_pct=None if t is None else t.target_pct,
             element_within_tolerance=inside,
-            escalates=not (inside and not p1),
-            held_reason=HELD_WITHIN_TOLERANCE if inside and not p1 else None,
+            # Since 2026-10-22 every breach escalates: a threshold is the rule's own
+            # (fail_threshold_pct), and the element's tolerance holds nothing back.
+            escalates=True,
+            held_reason=None,
         ))
     return pd.DataFrame(out, columns=ESCALATION_COLUMNS)
 
 
 def held_on_run(check_run: pd.DataFrame, cde_cov: pd.DataFrame,
                 cde_registry_current: pd.DataFrame, run_id) -> set:
-    """The breaching checks on one run that do NOT go to triage: their element sat
-    within tolerance and none is a P1. Empty when nothing is held."""
+    """The breaching checks on one run that do NOT go to triage. Always empty since
+    2026-10-22, when every breach began to escalate; kept so callers keep one shape."""
     if check_run.empty or run_id is None:
         return set()
     run = check_run[check_run["run_id"] == run_id]

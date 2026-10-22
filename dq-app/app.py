@@ -102,7 +102,10 @@ SIDEBAR = {
     # made there are about rules, never about problems.
     # `Consistency` (2026-10-13) next to `Rules`: its checks are rules, gathered by
     # what they compare across tables.
-    "Monitor": ["scorecard", "tables", "rules", "consistency", "thresholds"],
+    # Thresholds left the sidebar on 2026-10-22: a threshold lives on the rule now
+    # (set on the Rules page's rule), and the page decides element tolerances, which
+    # no longer decide anything. Still registered, so a link to it keeps working.
+    "Monitor": ["scorecard", "tables", "rules", "consistency"],
     "Work": ["triage"],
 }
 

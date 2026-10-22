@@ -135,8 +135,8 @@ current = current[~current["cohort_id"].isin(_history)]
 # slightly different denominator is how a headline starts disagreeing with the
 # scorecard that reports it. The queue below lists exactly the cohorts it divides by.
 #
-# Breaches whose element sat within the tolerance the business declared are held
-# back: still breaches on every other page, not work here. P1s are never held.
+# Nothing is held back since 2026-10-22: a threshold is the rule's own, so every breach
+# is work. held_on_run returns an empty set; the plumbing stays for one shape.
 held = tolerance.held_on_run(runs, cde_cov, adapter.get_cde_registry_current(),
                              metrics.queue_run_id(runs))
 compression = metrics.cohort_compression(runs, cohorts, held)

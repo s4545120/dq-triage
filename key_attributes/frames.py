@@ -83,7 +83,8 @@ def rule_rows() -> list[dict]:
     return [dict(
         rule_id=r.rule_id, rule_version=1, rule_name=r.rule_name, target_table=r.table,
         target_column=r.column, cde_id=r.cde_id, rule_type=r.rule_type, rule_expr=r.rule_expr,
-        join_sql=None, scope_filter=r.scope_filter, fail_threshold_pct=0.0,
+        join_sql=None, scope_filter=r.scope_filter,
+        fail_threshold_pct=float(ka.TOLERANCE[r.cde_id]),  # thresholds live on rules
         severity=r.severity, business_domain=ka.TABLE_DOMAIN[r.table],
         owner_group=ka.OWNER_GROUP, source_layer="L2", status="shadow", effective_from=WHEN,
         created_by=WHO, created_at=WHEN, promoted_by=None, promoted_at=pd.NaT, note=r.note,

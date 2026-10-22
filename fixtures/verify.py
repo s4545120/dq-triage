@@ -20,6 +20,9 @@
   8. No current cross-table rule compares with `<>` or `!=` (onboarding/consistency.py
      `unsafe_comparisons`): a NULL on one side drops the pair from the count, which is
      the disagreement such a rule exists to catch. Two known rules are listed as known.
+  9. Notebook 03 sends the masked brief, and its masking code, run on a test payload,
+     leaves no table, column, rule, element, team, domain, person, value or free text
+     in it, keeps the SQL and regexes, and unmasks an answer to the real names.
 
     ../.venv/bin/python verify.py [out_dir]
 
@@ -192,6 +195,80 @@ for nb in sorted((Path(__file__).parent.parent / "notebooks").glob("*.ipynb")):
     if "sample_row" in code:
         findings.append(f"pii_to_model: {nb.name} reads violation_sample.sample_row -- "
                         "row values must not be put in a model brief")
+
+# --- 9. The triage brief is masked before it is sent ---------------------------
+# Since 2026-10-21 every name with business meaning in notebook 03's brief is a
+# placeholder and every free-text field is withheld. Two halves: the model call takes
+# the masked brief, and the notebook's own masking code, run here on a payload built
+# to be awkward, leaves no real name in what it would send.
+_nb03 = _json.loads((Path(__file__).parent.parent / "notebooks" /
+                     "03_group_and_advise.ipynb").read_text())
+_cells = ["".join(c["source"]) for c in _nb03["cells"] if c["cell_type"] == "code"]
+_advise = next((c for c in _cells if c.startswith("def advise(")), "")
+if "sent, key = masked_brief(payload)" not in _advise or "input=sent" not in _advise:
+    findings.append("unmasked_brief: notebook 03's advise() does not send masked_brief()")
+else:
+    _g = {"re": re, "json": _json}
+    for _c in _cells:
+        if _c.startswith(("def rule_block(", "# ---- Masking")):
+            exec(_c.rsplit("\nprint(", 1)[0], _g)
+    _real = {"rule_id": "CTCT_STTS_DECEASED", "rule_name": "Deceased contact named estate",
+             "rule_type": "consistency", "target_table": "prod.customer.ctct_c",
+             "target_column": "FRST_NM", "severity": "P2_alert", "status": "active",
+             "rule_expr": "cast(STATUS AS STRING) = '5' AND upper(c.FRST_NM) NOT LIKE "
+                          "'%ESTATE OF%' AND upper(FRST_NM) NOT IN ('NULL', 'POSTPAID') "
+                          "AND FRST_NM NOT RLIKE '^[A-Z]+$' AND contact.LAST_NM IS NULL "
+                          "AND dq.fn.is_blank_v1(MID_NM)",
+             "scope_filter": "PRODUCT_LINE = 'Fixed Broadband'", "cde_id": "CDE_CUST_NAME",
+             "violation_count": 3, "rows_scanned": 10, "violation_pct": 30.0,
+             "threshold_pct": 0.0, "result_id": "r1", "kind": "chronic",
+             "first_breach_date": "2026-10-01", "clean_runs_before": 0, "runs_total": 3,
+             "violation_series": [3, 3, 3]}
+    _p = {"group_key": "g", "grouping_basis": "shared rows: CTCT_STTS_DECEASED and CTCT_X",
+          "raised_ts": "2026-10-21 03:00:00", "severity": "P2_alert",
+          "business_domain": "mixed: Customer, Billing", "owner_group": "dq-stewards-customer",
+          "member_count": 1, "total_violation_rows": 3,
+          "affected_tables": ["prod.customer.ctct_c"], "member_result_ids": ["r1"],
+          "members": [_real], "is_recurrence": False, "cohort_id": "c1",
+          "critical_data_elements": [{
+              "cde_id": "CDE_CUST_NAME", "cde_name": "Customer name", "data_class": "person_name",
+              "criticality": "critical", "pii": True, "regulatory_basis": "Privacy Act APP 10",
+              "definition": "The customer's legal name as held by Acme Telco",
+              "tolerance_pct": 0.5, "expected_scope_filter": ["PRODUCT_LINE <> 'Prepaid'"],
+              "coverage_findings": ["covered"]}],
+          "playbook_candidates": [{
+              "playbook_id": "PB_X", "rule_id": "CTCT_STTS_DECEASED", "rule_type": "format",
+              "approach_name": "Ask dq-stewards-customer", "approach_type": "upstream_ticket",
+              "description": "Raise it with the owner of prod.customer.ctct_c",
+              "typical_owner": "CRM Platform Team", "prior_use_count": 1, "recurrence_rate": 0.0}],
+          "prior_decisions": [{
+              "cohort_id": "COH-B", "covers_rules": ["CTCT_STTS_DECEASED", "CTCT_X"],
+              "raised": "2026-09-01", "lifecycle_state": "closed_rejected",
+              "advised_then": None, "approach_taken": None, "violations_before": None,
+              "violations_after": None, "review_by_date": None, "reopen_count": 0,
+              "chain": ["recommended", "reviewed (rejected)"],
+              "steward_notes": [{"when": "2026-09-02", "event": "reviewed (rejected)",
+                                 "who": "Jordan Example",
+                                 "reason": "These are prepaid rows for Mrs Smith's account"}]}]}
+    try:
+        _sent, _key = _g["masked_brief"](_p)
+    except ValueError as _e:                   # the notebook's own leak check refused it
+        findings.append(f"unmasked_brief: notebook 03 refuses its own test brief -- {_e}")
+        _sent, _key = "", None
+    _left = [w for w in ("CTCT_STTS_DECEASED", "CTCT_X", "Deceased contact", "ctct_c",
+                         "FRST_NM", "STATUS", "LAST_NM", "MID_NM", "contact.", "PRODUCT_LINE",
+                         "Fixed Broadband", "Prepaid", "POSTPAID", "ESTATE", "CDE_CUST_NAME",
+                         "Customer name", "Acme", "Privacy Act", "Customer", "Billing",
+                         "dq-stewards-customer", "CRM Platform", "PB_X", "COH-B", "Jordan",
+                         "Smith", "dq.fn.") if w in _sent]
+    if _left:
+        findings.append(f"unmasked_brief: notebook 03's masked brief still carries {_left}")
+    for _w in ("'^[A-Z]+$'", "is_blank_v1(", "IS NULL", "person_name element"):
+        if _sent and _w not in _sent:
+            findings.append(f"unmasked_brief: masking removed {_w!r}, which is not a name")
+    if _key and _key.unmask("RULE_1 on COLUMN_1 for TEAM_1") != \
+            "CTCT_STTS_DECEASED on FRST_NM for CRM Platform Team":
+        findings.append("unmasked_brief: an answer does not unmask to the real names")
 
 # --- 6. The onboarding writers against 15 and 17 -------------------------------
 # No fixture stands in for the onboarding tables; two writers do the real thing. The

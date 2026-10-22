@@ -42,8 +42,11 @@ ROW_KEY = {CONTACT: ["CONTACT_ID"], ADDRESS: ["OBJID"], BUS_ORG: ["OBJID"],
            CONTACT_ROLE: ["OBJID"], CUSTOMER: ["OBJID"]}
 TABLE_CODE = {CONTACT: "KA_CONTACT", ADDRESS: "KA_ADDRESS", BUS_ORG: "KA_BUS_ORG",
               CONTACT_ROLE: "KA_CONTACT_ROLE", CUSTOMER: "KA_CUSTOMER"}
-TABLE_DOMAIN = {CONTACT: "Contact", ADDRESS: "Address", BUS_ORG: "Account",
-                CONTACT_ROLE: "Contact", CUSTOMER: "Account"}
+# Business domain, the dashboard's filter and small multiples. Every key attribute is
+# Consumer for now (decided 2026-10-19); Business and IT come when attributes of theirs
+# are registered.
+TABLE_DOMAIN = {CONTACT: "Consumer", ADDRESS: "Consumer", BUS_ORG: "Consumer",
+                CONTACT_ROLE: "Consumer", CUSTOMER: "Consumer"}
 
 # Said once, quoted by the migration and CLAUDE.md. Every analysis query scoped to
 # migration_scope_flag = 1 and took the latest non-deleted version of each record.

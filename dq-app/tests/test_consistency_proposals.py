@@ -209,12 +209,20 @@ def test_a_proposal_is_reviewed_by_someone_else_and_shows_on_the_consistency_pag
     (review,) = rv.session_state["_pending_consistency_reviews"]
     assert (review["decision"], review["reviewed_by"]) == ("rejected", "p.nguyen@example.com")
 
+    waiting = AppTest.from_file(HOME, default_timeout=90)
+    waiting.session_state["_pending_consistency_proposals"] = rows
+    waiting.run()
+    assert "Needs review" in " ".join(str(m.value) for m in waiting.markdown)
     home = AppTest.from_file(HOME, default_timeout=90)
-    home.session_state["_pending_consistency_proposals"] = rows
     home.session_state["_pending_consistency_reviews"] = [review]
+    home.session_state["_pending_consistency_proposals"] = rows
     home.run()
     body = " ".join(str(m.value) for m in home.markdown)
-    assert "subs_c SUBS_FRST_NM = ctct_c FRST_NM" in body and "Rejected" in body
+    # Waiting, it is listed; decided, it leaves the Proposals card (the review page
+    # keeps it, with its decision).
+    assert ">Proposals<" not in body and "Needs review" not in body
+    rv.run()
+    assert "Rejected" in " ".join(str(m.value) for m in rv.markdown)
 
 
 def test_changing_a_table_picks_its_key_afresh():

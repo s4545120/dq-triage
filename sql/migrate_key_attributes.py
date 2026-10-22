@@ -208,7 +208,9 @@ def build(catalog: str, schema: str, prefix: str) -> tuple[list[str], list[tuple
                 "cde_id": lit(r.cde_id), "rule_type": lit(r.rule_type),
                 "rule_expr": lit(r.rule_expr),
                 "scope_filter": lit(r.scope_filter) if r.scope_filter else "CAST(NULL AS STRING)",
-                "join_sql": "CAST(NULL AS STRING)", "fail_threshold_pct": "CAST(0.0 AS DOUBLE)",
+                "join_sql": "CAST(NULL AS STRING)",
+                # Thresholds live on rules (2026-10-22), seeded from the attribute's tolerance.
+                "fail_threshold_pct": f"CAST({float(ka.TOLERANCE[r.cde_id])!r} AS DOUBLE)",
                 "severity": lit(r.severity), "business_domain": lit(ka.TABLE_DOMAIN[r.table]),
                 "owner_group": lit(ka.OWNER_GROUP), "source_layer": "'L2'",
                 "status": "'shadow'", "effective_from": "current_timestamp()",

@@ -3,7 +3,7 @@
 -- target: sdpt_data_trnf.udp_brnz, prefix dq_. Rendered from sql/ddl/ by sql/render.py's rules:
 -- the config/results/fn schemas become name prefixes in this one schema.
 --
--- Expected when complete: 21 tables, 15 views, 7 functions, 93 CHECK constraints.
+-- Expected when complete: 21 tables, 17 views, 7 functions, 93 CHECK constraints.
 --
 -- ADD CONSTRAINT is not idempotent: a second pass fails on every constraint. If it
 -- stops partway, fix that one statement and continue from its banner.
@@ -12,7 +12,7 @@
 -- =====================================================================
 
 -- =====================================================================
--- [1/21]  sql/ddl/01_config_rule_registry.sql
+-- [1/22]  sql/ddl/01_config_rule_registry.sql
 -- =====================================================================
 
 -- rule_registry — what we check
@@ -127,7 +127,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
 
 
 -- =====================================================================
--- [2/21]  sql/ddl/02_config_playbook.sql
+-- [2/22]  sql/ddl/02_config_playbook.sql
 -- =====================================================================
 
 -- playbook — remediation APPROACHES as reference material
@@ -177,7 +177,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_playbook
 
 
 -- =====================================================================
--- [3/21]  sql/ddl/03_results_check_run.sql
+-- [3/22]  sql/ddl/03_results_check_run.sql
 -- =====================================================================
 
 -- check_run — every verdict, one row per rule per run
@@ -247,7 +247,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_check_run
 
 
 -- =====================================================================
--- [4/21]  sql/ddl/04_results_violation_sample.sql
+-- [4/22]  sql/ddl/04_results_violation_sample.sql
 -- =====================================================================
 
 -- violation_sample — up to 100 example bad rows per breach
@@ -289,7 +289,7 @@ COMMENT 'Bounded evidence for a breach — at most 100 rows. The cap is the AI-e
 
 
 -- =====================================================================
--- [5/21]  sql/ddl/05_results_cohort.sql
+-- [5/22]  sql/ddl/05_results_cohort.sql
 -- =====================================================================
 
 -- cohort — grouped breaches, one root-cause hypothesis, one recommendation
@@ -426,7 +426,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cohort
 
 
 -- =====================================================================
--- [6/21]  sql/ddl/06_results_disposition.sql
+-- [6/22]  sql/ddl/06_results_disposition.sql
 -- =====================================================================
 
 -- disposition — THE AUDIT REGISTER
@@ -549,7 +549,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_disposition
 
 
 -- =====================================================================
--- [7/21]  sql/ddl/09_config_cde_registry.sql
+-- [7/22]  sql/ddl/09_config_cde_registry.sql
 -- =====================================================================
 
 -- cde_registry — the critical data elements, registered before anything profiles them
@@ -673,7 +673,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_registry
 
 
 -- =====================================================================
--- [8/21]  sql/ddl/10_results_cde_profile.sql
+-- [8/22]  sql/ddl/10_results_cde_profile.sql
 -- =====================================================================
 
 -- cde_profile — what the data in a critical element actually looks like
@@ -764,7 +764,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_cde_profile
 
 
 -- =====================================================================
--- [9/21]  sql/ddl/12_functions.sql
+-- [9/22]  sql/ddl/12_functions.sql
 -- =====================================================================
 
 -- Shared predicate helpers — the idioms that repeat across rule_expr
@@ -1034,7 +1034,7 @@ RETURN upper(trim(x)) IN (
 
 
 -- =====================================================================
--- [10/21]  sql/ddl/13_results_threshold.sql
+-- [10/22]  sql/ddl/13_results_threshold.sql
 -- =====================================================================
 
 -- threshold_proposal and threshold_review — the detection limit, advised and decided
@@ -1171,7 +1171,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_threshold_review
 
 
 -- =====================================================================
--- [11/21]  sql/ddl/08_views.sql
+-- [11/22]  sql/ddl/08_views.sql
 -- =====================================================================
 
 -- Views — derived state, because none of it is stored
@@ -1364,7 +1364,7 @@ WHERE NOT EXISTS (
 
 
 -- =====================================================================
--- [12/21]  sql/ddl/11_views_cde.sql
+-- [12/22]  sql/ddl/11_views_cde.sql
 -- =====================================================================
 
 -- CDE views — current definitions, and the coverage question they exist to answer
@@ -1568,7 +1568,7 @@ LEFT JOIN profiled p
 
 
 -- =====================================================================
--- [13/21]  sql/ddl/14_views_threshold.sql
+-- [13/22]  sql/ddl/14_views_threshold.sql
 -- =====================================================================
 
 -- Threshold views — where each rule's latest proposal has got to
@@ -1651,7 +1651,7 @@ WHERE p.rn = 1;
 
 
 -- =====================================================================
--- [14/21]  sql/ddl/15_config_onboarding.sql
+-- [14/22]  sql/ddl/15_config_onboarding.sql
 -- =====================================================================
 
 -- Onboarding — which tables are checked, the checks written once per kind of data, and
@@ -1866,7 +1866,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_binding_review
 
 
 -- =====================================================================
--- [15/21]  sql/ddl/16_views_onboarding.sql
+-- [15/22]  sql/ddl/16_views_onboarding.sql
 -- =====================================================================
 
 -- Onboarding views — where a selected table has got to, derived and never stored
@@ -1988,7 +1988,7 @@ LEFT JOIN c USING (target_table);
 
 
 -- =====================================================================
--- [16/21]  sql/ddl/17_config_cde_onboarding.sql
+-- [16/22]  sql/ddl/17_config_cde_onboarding.sql
 -- =====================================================================
 
 -- CDE onboarding — a person proposes an element, a second person decides, a job registers it
@@ -2121,7 +2121,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_cde_review
 
 
 -- =====================================================================
--- [17/21]  sql/ddl/18_views_cde_onboarding.sql
+-- [17/22]  sql/ddl/18_views_cde_onboarding.sql
 -- =====================================================================
 
 -- CDE onboarding views — where each element proposal has got to, derived and never stored
@@ -2163,7 +2163,7 @@ LEFT JOIN a ON a.proposal_id = p.proposal_id;
 
 
 -- =====================================================================
--- [18/21]  sql/ddl/19_results_tolerance.sql
+-- [18/22]  sql/ddl/19_results_tolerance.sql
 -- =====================================================================
 
 -- tolerance_proposal and tolerance_review — the element's tolerance, advised and decided
@@ -2295,7 +2295,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_results_tolerance_review
 
 
 -- =====================================================================
--- [19/21]  sql/ddl/20_views_tolerance.sql
+-- [19/22]  sql/ddl/20_views_tolerance.sql
 -- =====================================================================
 
 -- Tolerance views — is each element inside what the business accepts, and which
@@ -2404,21 +2404,18 @@ LEFT JOIN disputed d ON d.cde_id = s.cde_id;
 -- ---------------------------------------------------------------
 -- v_check_escalation — which breaches go to triage
 -- ---------------------------------------------------------------
--- One row per breaching check per run. A breach ESCALATES — becomes something the
--- triage job groups and a steward is asked about — unless its element sat within
--- tolerance on that run. Two exceptions escalate regardless:
+-- One row per breaching check per run. Since 2026-10-22 EVERY breach escalates: a
+-- threshold lives on the rule (fail_threshold_pct), so a rule over its own limit is
+-- the whole test, and the element's tolerance no longer holds anything back.
+-- `escalates` is always TRUE and `held_reason` always NULL; both columns stay so the
+-- notebook, the app's twin and the dashboard keep their shape. The element's score
+-- is still carried for context.
 --
---   * P1_block. Severity belongs to the rule, and a blocking rule blocks whatever the
---     element's score. This keeps criticality and severity apart: the element decides
---     how much failure is acceptable, never how serious one check's failure is.
---   * A breach on no registered element, or on one with no tolerance, no score or a
---     scope mismatch. Nothing has said it is acceptable, so it is not held back.
---
--- A held breach is not hidden: check_run still reads `breach`, the scorecard and the
--- Rules page still show it, and held_reason says why it did not reach triage.
+-- Until 2026-10-22 a breach whose element sat within tolerance was held back unless
+-- the rule was P1_block. That gate is gone, by decision.
 
 CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_check_escalation
-COMMENT 'One row per breaching check per run: its element, severity, whether the element sat within tolerance, and whether the breach escalates to triage. Held breaches stay breaches everywhere else; only triage reads escalates.'
+COMMENT 'One row per breaching check per run: its element, severity and the element score for context. Every breach escalates to triage (since 2026-10-22 the threshold is the rule''s own); escalates is always TRUE, held_reason always NULL.'
 AS
 WITH breaches AS (
   SELECT run_id, run_ts, rule_id, severity, violation_count, rows_scanned
@@ -2447,12 +2444,8 @@ SELECT
   t.score_pct                                  AS element_score_pct,
   t.target_pct                                 AS element_target_pct,
   COALESCE(t.within_tolerance, FALSE)          AS element_within_tolerance,
-  NOT (COALESCE(t.within_tolerance, FALSE)
-       AND b.severity <> 'P1_block')           AS escalates,
-  CASE
-    WHEN b.severity = 'P1_block'               THEN NULL
-    WHEN COALESCE(t.within_tolerance, FALSE)   THEN 'element_within_tolerance'
-  END                                          AS held_reason
+  TRUE                                         AS escalates,
+  CAST(NULL AS STRING)                         AS held_reason
 FROM   breaches b
 LEFT JOIN element_of e ON e.rule_id = b.rule_id
 LEFT JOIN sdpt_data_trnf.udp_brnz.dq_results_v_element_tolerance t
@@ -2537,7 +2530,7 @@ WHERE p.rn = 1;
 
 
 -- =====================================================================
--- [20/21]  sql/ddl/21_config_population.sql
+-- [20/22]  sql/ddl/21_config_population.sql
 -- =====================================================================
 
 -- The population — which rows of a table are the records a check is about
@@ -2598,7 +2591,7 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_table_population
 
 
 -- =====================================================================
--- [21/21]  sql/ddl/22_config_consistency.sql
+-- [21/22]  sql/ddl/22_config_consistency.sql
 -- =====================================================================
 
 -- Consistency checks proposed in the app — a check across two tables, written from a
@@ -2716,4 +2709,77 @@ SELECT p.*,
             ELSE 'open' END AS state
 FROM   sdpt_data_trnf.udp_brnz.dq_config_consistency_proposal p
 LEFT JOIN sdpt_data_trnf.udp_brnz.dq_config_consistency_review r ON r.proposal_id = p.proposal_id;
+
+
+-- =====================================================================
+-- [22/22]  sql/ddl/23_views_bi.sql
+-- =====================================================================
+
+-- =====================================================================
+-- 23_views_bi.sql — two views for the AI/BI dashboard and its Genie space
+--
+-- Neither adds a fact. One names the runs every dashboard trend should count; the
+-- other is results.cohort without the column a dashboard viewer should not see.
+-- Both are read by tools/dashboard_datasets.py's queries (production/dashboard/).
+--
+-- Reads 03 and 05 only. Appended to sql/render.py's order like 15-22.
+-- =====================================================================
+
+-- ---------------------------------------------------------------
+-- v_scheduled_run — the runs a trend counts
+-- ---------------------------------------------------------------
+-- dq-app/dq_app/domain/metrics.scheduled_runs, in SQL. A run whose every verdict is
+-- 'skipped' measured shadow rules only and is not a run to a reader: it has no score,
+-- and counted as "the previous run" it turned every delta into nan. Of the runs left,
+-- a day's last one replaces the earlier ones, the day being Sydney's. Nothing is
+-- removed from check_run: cohorts reference its rows by result_id.
+--
+-- run_ts is read as UTC, which is what the check runner writes and what a serverless
+-- session's time zone is.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_scheduled_run
+COMMENT 'One row per scheduled check run: runs with at least one verdict other than skipped, and of those the last run of each Sydney day. What every dashboard trend and "latest run" counts.'
+AS
+WITH runs AS (
+  SELECT run_id,
+         MAX(run_ts)                                                        AS run_ts,
+         COUNT(*)                                                           AS checks,
+         SUM(CASE WHEN status <> 'skipped' THEN 1 ELSE 0 END)               AS raised_checks
+  FROM   sdpt_data_trnf.udp_brnz.dq_results_check_run
+  GROUP  BY run_id
+),
+dated AS (
+  SELECT run_id, run_ts, checks,
+         to_date(from_utc_timestamp(run_ts, 'Australia/Sydney'))           AS run_day
+  FROM   runs
+  WHERE  raised_checks > 0
+)
+SELECT run_id, run_ts, run_day, checks,
+       run_ts = MAX(run_ts) OVER ()                                         AS is_latest
+FROM (
+  SELECT d.*, ROW_NUMBER() OVER (PARTITION BY run_day ORDER BY run_ts DESC) AS n
+  FROM   dated d
+)
+WHERE n = 1;
+
+-- ---------------------------------------------------------------
+-- v_cohort_for_bi — results.cohort without the model's input
+-- ---------------------------------------------------------------
+-- model_input_payload holds the brief sent to the model and its reasoning. Briefs
+-- written since 2026-10-08 carry no row values, but the eight cohorts written before
+-- then hold violation samples in it, and a dashboard is shared more widely than the
+-- stewards who may see failing values. Every other column passes through unchanged.
+
+CREATE OR REPLACE VIEW sdpt_data_trnf.udp_brnz.dq_results_v_cohort_for_bi
+COMMENT 'results.cohort without model_input_payload, for the dashboard and its Genie space. Nothing else is changed.'
+AS
+SELECT cohort_id, raised_run_id, raised_ts, member_result_ids, member_rule_ids, member_count,
+       affected_tables, total_violation_rows, root_cause_hypothesis, evidence_summary,
+       evidence_points, rival_hypothesis, confidence, defect_location, grouping_verdict,
+       members_not_covered, blast_radius_tables, blast_radius_count, severity,
+       business_domain, owner_group, rank_score, recommended_approach,
+       recommended_approach_type, recommended_steps, recommended_owner,
+       verification_expectation, prior_state, differs_from_prior, playbook_id,
+       recommendation_source, model_endpoint, triage_job_run_id, is_recurrence
+FROM   sdpt_data_trnf.udp_brnz.dq_results_cohort;
 

@@ -113,12 +113,54 @@ apart from `01` is safe to re-run.
 The bundle deploys in `development` mode, so job names carry a `[dev <you>]` prefix and
 run as you. Your grants are what the jobs have.
 
+## The dashboard
+
+An AI/BI dashboard over the same tables. **Stage 1 is two pages**: Executive summary and
+Domain view (key attributes, monitored tables and breaches). The wireframe is the canvas "DQ Genie
+Dashboard Wireframe", page *Stage 1*. The triage and pipeline pages are on its *Later
+stages* page, and their datasets are in `dashboard/later/`; leave both for now.
+`01_ddl.sql` already created the view the trends count runs from,
+`dq_results_v_scheduled_run`.
+
+1. **Dashboards → Create dashboard → Data → Create from SQL**, once per file in
+   `dashboard/` (not `later/`). Name each dataset after its file (`ds_quality_trend`, …)
+   and paste the query. There are 7.
+2. **Build the two pages** from the wireframe. Its *Build spec · stage 1* sheet gives
+   every widget's type, dataset and settings. Only built-in widget types are used:
+   counter, line, table, text and filter.
+3. **Filters** sit on each page as filter widgets.
+   * **Executive summary:** Run date only, bound to `run_week` (default last 12 weeks). The page is the whole
+     register, already split by business domain, so a domain or CDE filter would only
+     empty most of its tiles.
+   * **Domain view:** field filters on `run_week`, `business_domain`, `target_table`,
+     `cde_name` and `severity`. A filter reaches only the datasets that carry its field:
+     severity narrows Breaches, not the CDE scores or the monitored tables. The tables
+     show the latest run whatever the Run date says.
+4. **Counters**: Overall quality takes `score_pct` as Value and `threshold_pct` as Target;
+   each domain tile does the same with a widget filter on its domain; CDEs under
+   monitoring and Not assessed take `cdes_registered` as Target. All use row 1 with no
+   aggregation, which is why those datasets are ordered newest first. Trends are weekly: those datasets keep each
+   week's last scheduled run, and a counter compares with last week (date field `run_week`,
+   days-ago offset -7). The Domain view's
+   counters aggregate instead (`SUM`, or a custom calculation for the score), because its
+   filters can leave many CDEs.
+5. **Publish** and choose whose permissions viewers query with. With embedded
+   credentials, everyone you share it with sees what you can see. No dataset reads
+   `violation_sample` or `model_input_payload`, so failing values never reach a viewer.
+6. **Genie**: create a Genie space over the tables and views on the wireframe's last
+   sheet, paste its instructions and sample questions, and link it in the dashboard's
+   Publish dialog. Ask Genie answers from the full dataset queries, not only what a
+   widget shows. It is in Public Preview.
+
+Until a rule is promoted, the breach and P1 counters read zero and every CDE reads "Not
+assessed".
+
 ## Files
 
 | File | What it does |
 |---|---|
 | `sql/00_preflight.sql` | read-only checks: privileges, source tables readable, CDC columns present |
-| `sql/01_ddl.sql` | 21 tables, 15 views, 7 functions, 93 constraints. **Run once** |
+| `sql/01_ddl.sql` | 21 tables, 17 views, 7 functions, 93 constraints. **Run once** |
 | `sql/02_key_attributes.sql` | 22 key attributes, 119 shadow rules, 5 tables selected |
 | `sql/03_tolerances.sql` | placeholder tolerance per attribute; decides what escalates |
 | `sql/05_current_records.sql` | current record per source table (newest version, OP_TYPE 'D' dropped) |
@@ -128,6 +170,13 @@ run as you. Your grants are what the jobs have.
 | `notebooks/03_group_and_advise.ipynb` | Triage: groups escalating breaches by run history, reads the register, one model call per group, writes `results.cohort`. No row values go to the model |
 | `notebooks/06_suggest_thresholds.ipynb` | Tolerance advice, one model call per attribute. Writes `results.tolerance_proposal` only. Leave it until there are weeks of runs: on a few days it has nothing to say |
 | `databricks.yml`, `resources/dq_pipeline.yml` | The two jobs as a bundle, target `sandpit` |
+| `dashboard/01_ds_quality_trend.sql` | Overall quality per week (the last scheduled run of each week, Monday-start). No overall threshold: thresholds live on rules. Executive summary: Overall quality counter (value, sparkline). Whole register: the page's only filter is Run date. |
+| `dashboard/02_ds_element_scores.sql` | One row per week (its last scheduled run) and key attribute: the score, how many of its active rules ran and how many are over their own threshold, and its status. No attribute threshold: since 2026-10-22 a threshold lives on the rule, and a CDE is Failing when any of its rules breaches. Disputed scope reads Scope disputed. change_pts is against last week. Domain view: Score counter, CDE counters, CDE scores. |
+| `dashboard/03_ds_coverage.sql` | One row per binding: what checks each bound column. On no stage-1 widget; kept for Genie. |
+| `dashboard/04_ds_check_latest.sql` | One row per check on the latest scheduled run. Domain view: Breaches (widget filter is_breach = 1) and the Rules breaching and P1 counters. days_failing counts days since the current breach streak began. |
+| `dashboard/05_ds_exec_weekly.sql` | One row per week (its last scheduled run) with the executive summary's headline counts. Counters show the latest row and compare it with last week (run_week, days-ago offset -7). New failures are breaching now and not on last week's run. A CDE is failing when any of its active rules breaches its own threshold (rule-level thresholds since 2026-10-22). Executive summary: CDEs under monitoring, CDEs failing, Active rules, Rules breaching, P1 breaches, New breaches, CDEs not monitored. Whole register: no filter but Run date. |
+| `dashboard/06_ds_domain_scores.sql` | One row per week (its last scheduled run) and business domain: the domain's score (rows passed over rows checked across its CDEs), its CDEs under monitoring and failing, and its active and breaching rules. No domain threshold since 2026-10-22. Executive summary: the Business view tiles, one per domain. |
+| `dashboard/07_ds_table_latest.sql` | One row per selected source table on the latest scheduled run: the app's Tables page as a dataset. How many key attributes the table carries and how many are monitored, its active rules, how many pass, breach or are P1, and its rows. The domain is its key attributes' (the register's), not the monitored table's own label. Domain view: Monitored tables. Pipeline: Rows each run reads. |
 
 ## Things that will look wrong and are not
 

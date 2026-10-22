@@ -58,6 +58,22 @@ that advice is the ninth write (`results.tolerance_review`). Accepting changes n
 else: the register still changes only through the Elements page. The app no longer
 writes `threshold_review`. See *Element tolerance decides escalation*.
 
+**Since 2026-10-22 a threshold lives on the rule only, by decision.** A rule breaches when
+its failure % reaches its own `fail_threshold_pct`, and **every breach escalates**:
+`v_check_escalation.escalates` is always TRUE, so nothing is held back from Triage and the
+element-tolerance gate described under *Element tolerance decides escalation* is gone.
+Nothing above a rule has a threshold: a CDE, a domain and the headline show a score and
+how many rules breach (a CDE is failing when any of its rules breaches; a disputed scope
+reads "Scope disputed"). The 122 key-attribute rules in `dq_triage` were given their
+CDE's placeholder tolerance as their threshold (`sql/migrate_rule_threshold.py`, applied
+2026-10-22, re-run inserts 0); `production/` and `key_attributes/frames.py` seed the same.
+`tolerance_pct` stays on the register as the seed and decides nothing. In the app the
+Scorecard dropped attribute and overall targets, Triage holds nothing, and Thresholds left
+the sidebar (still registered); 507 tests pass. **Deployed 2026-10-21 as `01f1cd12c5c2…`**
+after eight pages rendered headlessly against `dq_triage` with no exception (the app's
+compute had been stopped by the workspace and was started first). Notebook 06 still
+advises on tolerances that no longer decide anything.
+
 **Since 2026-10-13 a person can propose a consistency check, and that is two more writes,
 the tenth and eleventh** (`config.consistency_proposal`, `config.consistency_review`,
 `sql/ddl/22`). Both are labelled in `07_grants.sql` as a decision. **Applied to
@@ -88,9 +104,10 @@ register*.
 | `databricks.yml` + `resources/` | **Draft, never deployed** (2026-10-06). The two jobs above as a bundle: run as a job service principal (not yet created), code from git, failure email, timeouts. `resources/README.md` has the cutover — bind to the existing job ids, never deploy beside them. `onboard.py` takes `--catalog` and `--fn-prefix` since the same day (call-time in `wh`, like `--schema`); still one schema in the sandpit layout, so no `prod` target yet. |
 | `key_attributes/` + `sql/migrate_key_attributes.py` | **Applied to `dq_triage` 2026-10-12** (not to `dq_onboard`); the app with the rename is not yet redeployed. The real register, its migration rules and universe rules, the migration that retires the mock register, a pandas copy of it (`frames.py`) and a warehouse probe (`probe.py`). See *Key attributes replace the mock register*. |
 | `sql/ddl/21_config_population.sql` + `jobs/run_checks.py` | **Built 2026-10-12, applied to no schema.** A history table's current record (`config.table_population`) applied under the slice and on every side of a join, and cross-table rules sharing a join run as one query. See *The runner reads current records*. |
-| `sql/ddl/22_config_consistency.sql`, `dq-app/.../pages/consistency_new.py`, `consistency_review.py`, `onboard.py apply_consistency` | **Applied to `dq_triage`, deployed (latest `01f1c6aa…`) and granted 2026-10-13.** Propose a consistency check as a spec, a second person reviews it, the job writes it in shadow. See *Proposing consistency checks*. |
+| `sql/ddl/22_config_consistency.sql`, `dq-app/.../pages/consistency_new.py`, `consistency_review.py`, `onboard.py apply_consistency` | **Applied to `dq_triage`, deployed (latest `01f1c6b7…`) and granted 2026-10-13.** Propose a consistency check as a spec, a second person reviews it, the job writes it in shadow. See *Proposing consistency checks*. |
 | `onboarding/consistency.py` | **Built 2026-10-13, nothing registered.** Orphan / agreement / reconciliation specs rendered to rule rows, and the `<>` lint `verify.py` runs. See *Consistency checks from a spec*. |
 | `production/` + `tools/build_production.py` | **Rebuilt 2026-10-16 for the sandpit, without the app; never run there.** Rendered for one schema (default `sdpt_data_trnf.udp_brnz`, sources in `prod`): preflight, DDL, the key-attribute register, tolerances, current records, a SQL promote step, verify queries, `run_checks.py`, notebooks 03 and 06, and a bundle (`dq_daily`: checks then triage). `production/README.md` is the setup order. Bundle validates; the new SQL was `EXPLAIN`ed on `dq_triage`. |
+| `sql/ddl/23_views_bi.sql` + `tools/dashboard_datasets.py` | **Built 2026-10-16, applied to no schema.** Two views for the AI/BI dashboard: `v_scheduled_run` (the SQL twin of `metrics.scheduled_runs`) and `v_cohort_for_bi` (cohort without `model_input_payload`). The dataset queries render into `production/dashboard/`: 7 for stage 1 (executive and detailed summary), 12 for the later triage and pipeline pages in `later/` (2026-10-19); all `EXPLAIN`ed and ran on `dq_triage` with the views as session temp views (`ds_table_latest` needs `population_rows`, which `dq_triage` lacks). Since 2026-10-21 the executive summary has one filter (Run date) and no `:domain`/`:cde` parameters; its headlines are CDE and rule counts, split by business domain. The second page is the **Domain view**: field filters, Monitored tables (`ds_table_latest`, the app's Tables page counts, domain taken from the key attributes), CDE scores and Breaches (`ds_check_latest`, `is_breach = 1`). `ds_dimension_scores` moved to `later/`. Trends and comparisons are weekly (each week's last scheduled run, `run_week`; `ds_exec_daily` became `ds_exec_weekly`). All 7 stage-1 queries re-ran on `dq_triage`. The wireframe is the canvas "DQ Genie Dashboard Wireframe". |
 | `notebooks/` | `03` current, the triage job's advice endpoint — **executed** on `workspace.dq_triage` against `system.ai.gpt-oss-120b`. `04` is the notification sender, **never executed**: it needs a job, a secret scope and an SMTP host that do not exist yet. |
 
 **There is a real workspace and it is LOADED — which is not the same as having been
@@ -340,7 +357,64 @@ shared-row count reaches the brief. `fixtures/verify.py` check 7 fails if any no
 code names `sample_row`. The cost is real: COH-A's "six malformation classes" was read
 off the values, and a model without them can only say a steward should look. The eight
 cohorts already written hold samples in `model_input_payload`; this does not touch them.
-Steward `reason` text is still sent and may name a customer.
+
+**Nothing with business context goes to the model either (2026-10-21).** Asked for by
+the user: "mask any field with business context before sending to AI". Notebook 03 (§4b,
+`mask_payload` / `masked_brief`) builds the brief from a masked copy of the payload:
+
+* **Placeholders.** Tables, columns, rule ids, element ids, problem ids, playbook ids,
+  owner groups, domains and steward names become `TABLE_1`, `COLUMN_2`, `TEAM_1` and so
+  on, numbered per brief.
+* **Inside expressions.** Columns get the same placeholder as elsewhere, and word-like
+  string literals become `'VALUE_n'`. SQL keywords, function names, regexes and date
+  formats are kept.
+* **Rebuilt names.** A rule name is rebuilt from its type and column, and an element
+  name from its data class.
+* **Withheld text.** Element definitions, regulatory basis and steward `reason` text are
+  shown as `(withheld)`.
+* **Kept as written.** Counts, dates, severities, criticality, tolerance, data class and
+  lifecycle vocabulary.
+
+The key stays in the run, and the answer is unmasked before `validate`, so
+`results.cohort` holds real names. `model_input_payload.brief` is the masked brief, and
+`masking` holds per-kind counts, never the key. Two refusals:
+
+* a brief still carrying a real name or withheld text is not sent (`Mask.leaks`);
+* an answer naming a placeholder the brief did not carry is rejected.
+
+`fixtures/verify.py` check 9 pins both halves. It was negative-tested with the masker
+broken, and with the masker and the leak check both broken.
+
+**Run read-only against `dq_triage`'s 2026-10-21 run.** The read cells were run through
+a stand-in `spark`, with no model call and no write. It produced 17 briefs and none was
+refused. Scanning every sent brief for 692 real register names found none.
+`notebooks/03_masked_brief_samples.md` has the field-by-field table and a full brief.
+
+**The cost:**
+* prompt rule 17 sees that a rejection happened, not why;
+* a placeholder-list rule reads as an `IN` list of thirteen `VALUE_n`;
+* COH-B-style scope reasoning now rests on `COLUMN_n = 'VALUE_n'` alone.
+
+The notebook has not been run as a job since this change.
+
+**Shared rows count records with an identity (2026-10-21).** Notebook 03's cell 8 joined
+samples on `row_key` as stored, and on `table_contact_hist` (key `CONTACT_ID`, no
+`OBJID`) that key often identifies nothing. Three cases:
+
+* blank keys matched each other: 29 × 7 gave "203 shared, 2900%";
+* a history table repeats a key per version, so rows multiplied;
+* a rule on the key column itself has the defective value as its key: 22 rows, one key.
+
+On the 2026-10-13 run those causes merged contact-ID, email, orphan and first-name rules
+into one 12-rule problem. The cell now uses distinct keys only, drops blank keys
+(including a composite with a blank part), and leaves out any rule whose `target_column`
+is in the table's `monitored_table.row_key`. It prints what it dropped and asserts that
+every ratio is ≤ 1.
+
+Re-run read-only on that run: 28 pairs became 10, and the groups are first name (6),
+birth date (3) and phone (2). `tools/explain_notebook.py` now inlines a cell's shared SQL
+constant (`SAMPLES`) and plans all 13 statements clean. The seven cohorts already written
+are unchanged. `production/notebooks/03` was not regenerated.
 
 **A violation sample is no longer the whole row (2026-10-12).** The runner's sample
 query is still `SELECT *` (it is also the rule logic the Rules page prints), but
@@ -1849,7 +1923,12 @@ made, and each holds the rest of this section together:
   a placeholder since 2026-10-13** (`register.TOLERANCE`), set by attribute kind, not
   by the business: keys 0, first/last/role name 0.5, DOB and address-from 1.0, email,
   phone, ARBN, G-NAF id and address-to 2.0, the nine optional or descriptive fields
-  5.0. See *Placeholder tolerances*.
+  5.0. See *Placeholder tolerances*. **Business domain is Consumer for all 22 since
+  2026-10-19** (`register.TABLE_DOMAIN`; it was Contact / Address / Account by table).
+  `sql/migrate_key_attribute_domain.py` writes it to the attributes only. **Applied to `dq_triage` 2026-10-19**: 23
+  statements `EXPLAIN`ed clean, 22 versions appended, a re-run inserted 0;
+  rules and monitored tables keep their old label, so the dashboard reads the domain
+  off the attribute.
 * `rules.py` has one rule per validation category in the PDF, 119 in all and all
   shadow. The PDF is masked, so the numbers come from the unmasked queries in the
   sheet ('#1 - DQ Issues' Query column, DEVIATION sheet) and from the 'DQ Queries'
@@ -2142,6 +2221,29 @@ It writes nothing.
   two XREF agreement rules compare with `<>`. Their failed rows are exactly the pairs
   with a name on one side only: the fixture's pandas evaluator counts them, and the
   stored SQL would not.
+
+**Redrawn the same day from the mockup's second version (screens 1 and 2), deployed
+as `01f1c6c1…`.**
+* **Proposals** lists only what waits: open, or approved and not yet written by the job.
+* **Table links** is one full-width card. Each link shows its two tables with an arrow
+  in the link's worst state colour, the key it matches on, its check types and state
+  badges. A click filters the checks.
+* **The checks sit beside the picked check.** Status and type chips, a status stripe
+  per row, names that wrap, and the first check in view opened by default.
+* **The pane** has a top edge in the check's state colour, a 2×2 of figures, and three
+  tabs:
+  * Overview: the match drawn `table.COL → table.COL`, plain words, the last five runs;
+  * Rows: the compared columns tinted, an empty side tagged "— empty", the differing
+    part highlighted, at most 10 rows;
+  * Definition.
+* **The amber `<>` banner and the Check types card are gone.** An unsafe check carries
+  a "May undercount" badge, explained on hover.
+* **Aliases are resolved to table names** everywhere a reader sees them
+  (`consistency.resolve`, `link_pairs`, `link_keys`). The stored SQL under Definition
+  keeps its aliases.
+* **When both tables call the compared column the same**, a sample keeps one value
+  (samples are keyed by plain column name). `sample_view` then returns no left/right,
+  and the Rows tab shows the rows as stored and says why.
 
 ## Proposing consistency checks — 2026-10-13
 

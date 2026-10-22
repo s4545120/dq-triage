@@ -86,7 +86,7 @@ def test_the_lint_copy_agrees_with_the_one_in_onboarding(checks):
 def test_plain_words_say_what_fails_and_flag_an_unsafe_comparison(checks):
     by = {c["key"]: c for c in checks}
     orphan = cs.plain_words(by["XREF_SUBS_CTCT_ORPHAN"])
-    assert orphan[0] == "Each row of subs_c is looked up on ctct_c by s.CTCT_KEY = c.CTCT_KEY."
+    assert orphan[0] == "Each row of subs_c is looked up on ctct_c by subs_c.CTCT_KEY = ctct_c.CTCT_KEY."
     assert "A row with no key fails too" in orphan[2]
     assert any("not null-safe" in x for x in cs.plain_words(by["XREF_NAME_AGREEMENT"]))
     assert "group found on one side only" in " ".join(cs.plain_words(by["XREF_SUBS_CTCT_COUNT"]))
@@ -107,22 +107,33 @@ def _body(at) -> str:
     return " ".join(str(m.value) for m in at.markdown)
 
 
-def test_the_page_lists_every_check_and_warns_about_the_two_unsafe_ones():
+def test_the_page_lists_every_check_and_marks_the_two_unsafe_ones():
     body = _body(_run())
     for name in ("Every subscription resolves to a contact",
                  "Subscriber first name agrees with contact first name",
                  "Subscriptions and contacts carry the same number of customers"):
         assert name in body
-    assert "2 checks compare with" in body
+    assert body.count(">May undercount<") == 2
+    assert "dq-cs-warn" not in body and "Check types" not in body
 
 
-def test_picking_a_check_opens_its_rows_and_definition():
+def test_the_first_check_in_view_is_open_without_a_pick():
+    at = _run()
+    assert any(t.label == "Overview" for t in at.tabs)
+    assert any(b.label == "Open in Rules" for b in at.button)
+
+
+def test_picking_a_check_opens_its_rows_side_by_side_and_its_definition():
     at = _run(_cs_pick="XREF_NAME_AGREEMENT")
     body = _body(at)
-    assert "How the two sides are matched" in body
-    assert "2 of 2 captured." in [c.value for c in at.caption]
-    assert any("XREF" not in c.value and "lower(trim(s.SUBS_FRST_NM))" in c.value
-               for c in at.code)
+    assert "subs_c.CTCT_KEY" in body and "ctct_c.CTCT_KEY" in body
+    assert "Match" in body and "Different" in body
+    # The Rows tab: both compared columns, an empty side tagged, counts as chips.
+    assert "subs_c.CTCT_KEY" in body and "ctct_c.CTCT_KEY" in body
+    assert "— empty" in body and "One side empty 2" in body
+    assert ">Isla<" in body and ">Jack<" in body      # the side that has a value shows it
+    assert any(t.label == "Rows · 2" for t in at.tabs)
+    assert any("lower(trim(s.SUBS_FRST_NM))" in c.value for c in at.code)
     assert any(b.label == "Open in Rules" for b in at.button)
 
 
@@ -132,3 +143,18 @@ def test_a_relationship_filters_the_checks_and_nothing_here_writes():
     # Promotion lives on the Rules page; this page has no write of its own.
     src = (APP_DIR / PAGE).read_text()
     assert "adapter.promote" not in src and "record_event" not in src
+
+
+def test_the_new_helpers_read_tables_not_aliases(checks):
+    by = {c["key"]: c for c in checks}
+    j = by["XREF_SUBS_CTCT_ORPHAN"]["join_sql"]
+    assert cs.link_pairs(j) == [("subs_c.CTCT_KEY", "ctct_c.CTCT_KEY")]
+    assert cs.link_keys(j) == "CTCT_KEY"
+    via = ("prod.x.bus_org o JOIN prod.x.role r ON o.ORG_ID = r.ORG_ID "
+           "JOIN prod.x.contact c ON r.CONTACT_ID = c.CONTACT_ID")
+    assert cs.link_keys(via) == "ORG_ID → CONTACT_ID"
+    assert cs.split_diff("03 5550 7712", "03 5550 7713") == ("03 5550 771", "3")
+    assert cs.split_diff("02 1", "0491") == ("", "0491")
+    assert cs.compared_columns(by["XREF_NAME_AGREEMENT"]) == ["SUBS_FRST_NM", "FRST_NM"]
+    assert cs.rate_label(by["XREF_SUBS_CTCT_COUNT"]) in ("match", "not measured") \
+        or cs.rate_label(by["XREF_SUBS_CTCT_COUNT"]).endswith("off")

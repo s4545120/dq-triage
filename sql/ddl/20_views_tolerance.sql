@@ -104,21 +104,18 @@ LEFT JOIN disputed d ON d.cde_id = s.cde_id;
 -- ---------------------------------------------------------------
 -- v_check_escalation — which breaches go to triage
 -- ---------------------------------------------------------------
--- One row per breaching check per run. A breach ESCALATES — becomes something the
--- triage job groups and a steward is asked about — unless its element sat within
--- tolerance on that run. Two exceptions escalate regardless:
+-- One row per breaching check per run. Since 2026-10-22 EVERY breach escalates: a
+-- threshold lives on the rule (fail_threshold_pct), so a rule over its own limit is
+-- the whole test, and the element's tolerance no longer holds anything back.
+-- `escalates` is always TRUE and `held_reason` always NULL; both columns stay so the
+-- notebook, the app's twin and the dashboard keep their shape. The element's score
+-- is still carried for context.
 --
---   * P1_block. Severity belongs to the rule, and a blocking rule blocks whatever the
---     element's score. This keeps criticality and severity apart: the element decides
---     how much failure is acceptable, never how serious one check's failure is.
---   * A breach on no registered element, or on one with no tolerance, no score or a
---     scope mismatch. Nothing has said it is acceptable, so it is not held back.
---
--- A held breach is not hidden: check_run still reads `breach`, the scorecard and the
--- Rules page still show it, and held_reason says why it did not reach triage.
+-- Until 2026-10-22 a breach whose element sat within tolerance was held back unless
+-- the rule was P1_block. That gate is gone, by decision.
 
 CREATE OR REPLACE VIEW {catalog}.results.v_check_escalation
-COMMENT 'One row per breaching check per run: its element, severity, whether the element sat within tolerance, and whether the breach escalates to triage. Held breaches stay breaches everywhere else; only triage reads escalates.'
+COMMENT 'One row per breaching check per run: its element, severity and the element score for context. Every breach escalates to triage (since 2026-10-22 the threshold is the rule''s own); escalates is always TRUE, held_reason always NULL.'
 AS
 WITH breaches AS (
   SELECT run_id, run_ts, rule_id, severity, violation_count, rows_scanned
@@ -147,12 +144,8 @@ SELECT
   t.score_pct                                  AS element_score_pct,
   t.target_pct                                 AS element_target_pct,
   COALESCE(t.within_tolerance, FALSE)          AS element_within_tolerance,
-  NOT (COALESCE(t.within_tolerance, FALSE)
-       AND b.severity <> 'P1_block')           AS escalates,
-  CASE
-    WHEN b.severity = 'P1_block'               THEN NULL
-    WHEN COALESCE(t.within_tolerance, FALSE)   THEN 'element_within_tolerance'
-  END                                          AS held_reason
+  TRUE                                         AS escalates,
+  CAST(NULL AS STRING)                         AS held_reason
 FROM   breaches b
 LEFT JOIN element_of e ON e.rule_id = b.rule_id
 LEFT JOIN {catalog}.results.v_element_tolerance t
