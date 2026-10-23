@@ -74,6 +74,22 @@ after eight pages rendered headlessly against `dq_triage` with no exception (the
 compute had been stopped by the workspace and was started first). Notebook 06 still
 advises on tolerances that no longer decide anything.
 
+**Since 2026-10-23 every rule records the function it implements** (`function_source`
+uc | dqx | sql, `function_name`), at the end of `config.rule_registry` (sql/ddl/01, two
+CHECKs). A record, not an execution path: the runner still runs `rule_expr`, and a dqx
+name says which DQX library check that SQL is equivalent to. `onboarding/functions.py`
+classifies conservatively (a `dq.fn` helper is uc; a whole-expression match of not-null,
+not-null-and-not-empty, regex, not-in-list, not-in-future, uniqueness or an orphan join
+is dqx; anything else is sql) and is the one classifier: the fixture, the key-attribute
+register, `production/`, `onboard.py generate` and `apply_consistency` all call it.
+`sql/migrate_rule_function.py` added the columns, re-created `v_rule_registry_current`
+and appended one version per current rule in `dq_triage` (136: 62 sql, 67 dqx, 7 uc;
+re-run inserts 0); `dq_onboard` got the columns only. The jobs' copy of `onboard.py` and
+`functions.py` in `dq-onboard-jobs` was updated the same day, and generated rules now
+start at their element's tolerance as their threshold. The app's Rules page prints the
+function in the definition tab; **deployed 2026-10-23 as `01f1ce79b215…`** after eight pages
+rendered against `dq_triage` with no exception.
+
 **Since 2026-10-13 a person can propose a consistency check, and that is two more writes,
 the tenth and eleventh** (`config.consistency_proposal`, `config.consistency_review`,
 `sql/ddl/22`). Both are labelled in `07_grants.sql` as a decision. **Applied to

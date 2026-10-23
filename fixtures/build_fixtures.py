@@ -46,6 +46,10 @@ from pathlib import Path
 
 import pandas as pd
 
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent.parent / "onboarding"))
+import functions as rule_functions  # noqa: E402  onboarding/functions.py, the one classifier
+
 import cdes
 import coverage
 import profile as cde_profiler
@@ -258,6 +262,9 @@ def build_rule_registry() -> pd.DataFrame:
                 note=prior.get("note", ""),
                 template_id=None,
                 template_version=None,
+                # Versions before 2026-10-23 recorded no function.
+                function_source=None,
+                function_name=None,
             ))
         eff = base_authored if not r.superseded else SNAPSHOT - timedelta(days=45)
         if r.status == "retired":
@@ -293,6 +300,9 @@ def build_rule_registry() -> pd.DataFrame:
             # here so the column diff in verify.py holds the DDL to them.
             template_id=None,
             template_version=None,
+            # Which function the rule implements (sql/ddl/01, onboarding/functions.py).
+            **dict(zip(("function_source", "function_name"),
+                       rule_functions.classify(r.rule_expr, r.rule_type, r.join_sql))),
         ))
     return pd.DataFrame(rows)
 

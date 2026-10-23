@@ -577,7 +577,7 @@ WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_cde_registry 
 -- =====================================================================
 
 -- KA_CONTACT_FIRST_NAME_NULL_OR_BLANK  [not_null, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_NULL_OR_BLANK',
        1,
        'First name is present',
@@ -599,11 +599,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_NULL_OR_BLANK',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: NULL_OR_BLANK. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: NULL_OR_BLANK. Recommended solution: customer amends.',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_NULL_OR_BLANK');
 
 -- KA_CONTACT_FIRST_NAME_LEADING_OR_TRAILING_WHITESPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_LEADING_OR_TRAILING_WHITESPACE',
        1,
        'First name has no leading or trailing whitespace',
@@ -625,11 +627,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_LEADING_OR_TRAILING_WHITESPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: LEADING_OR_TRAILING_WHITESPACE. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: LEADING_OR_TRAILING_WHITESPACE. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_LEADING_OR_TRAILING_WHITESPACE');
 
 -- KA_CONTACT_FIRST_NAME_CONTROL_CHARACTERS  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_CONTROL_CHARACTERS',
        1,
        'First name has no control characters',
@@ -651,11 +655,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_CONTROL_CHARACTERS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: CONTAINS_CONTROL_CHARACTERS. Recommended solution: not stated (NA).'
+       'migration-scope DQ analysis: CONTAINS_CONTROL_CHARACTERS. Recommended solution: not stated (NA).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_CONTROL_CHARACTERS');
 
 -- KA_CONTACT_FIRST_NAME_PLACEHOLDER_VALUE  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_PLACEHOLDER_VALUE',
        1,
        'First name is not a placeholder',
@@ -677,11 +683,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_PLACEHOLDER_VALUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PLACEHOLDER_VALUE. Recommended solution: delete, and ask the customer to update after consent.'
+       'migration-scope DQ analysis: PLACEHOLDER_VALUE. Recommended solution: delete, and ask the customer to update after consent.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_PLACEHOLDER_VALUE');
 
 -- KA_CONTACT_FIRST_NAME_HYPHEN_OR_APOSTROPHE_EDGE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_HYPHEN_OR_APOSTROPHE_EDGE',
        1,
        'First name does not start or end with a hyphen or apostrophe',
@@ -703,11 +711,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_HYPHEN_OR_APOSTROPHE_EDGE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_OR_ENDS_WITH_HYPHEN_OR_APOSTROPHE. Recommended solution: delete or customer amends.'
+       'migration-scope DQ analysis: STARTS_OR_ENDS_WITH_HYPHEN_OR_APOSTROPHE. Recommended solution: delete or customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_HYPHEN_OR_APOSTROPHE_EDGE');
 
 -- KA_CONTACT_FIRST_NAME_CONSECUTIVE_PUNCTUATION  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_CONSECUTIVE_PUNCTUATION',
        1,
        'First name has no consecutive punctuation',
@@ -729,11 +739,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_CONSECUTIVE_PUNCTUATION',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: CONSECUTIVE_PUNCTUATION. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: CONSECUTIVE_PUNCTUATION. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_CONSECUTIVE_PUNCTUATION');
 
 -- KA_CONTACT_FIRST_NAME_STARTS_WITH_TITLE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_STARTS_WITH_TITLE',
        1,
        'First name does not start with a title',
@@ -755,11 +767,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_STARTS_WITH_TITLE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_WITH_TITLE. Recommended solution: amend the name.'
+       'migration-scope DQ analysis: STARTS_WITH_TITLE. Recommended solution: amend the name.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_STARTS_WITH_TITLE');
 
 -- KA_CONTACT_FIRST_NAME_COMPANY_NAME_INDICATOR  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_COMPANY_NAME_INDICATOR',
        1,
        'First name carries no company-name indicator',
@@ -781,11 +795,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_COMPANY_NAME_INDICATOR',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: COMPANY_NAME_INDICATOR. Recommended solution: customer amends. The analysis asks whether a company name can be valid for an SMB customer; until that is answered this flags both.'
+       'migration-scope DQ analysis: COMPANY_NAME_INDICATOR. Recommended solution: customer amends. The analysis asks whether a company name can be valid for an SMB customer; until that is answered this flags both.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_COMPANY_NAME_INDICATOR');
 
 -- KA_CONTACT_FIRST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS',
        1,
        'First name holds no address, note or link',
@@ -807,11 +823,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS. Recommended solution: customer amends. STREET can be a real surname; the analysis raises it as a question.'
+       'migration-scope DQ analysis: UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS. Recommended solution: customer amends. STREET can be a real surname; the analysis raises it as a question.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS');
 
 -- KA_CONTACT_FIRST_NAME_STARTS_WITH_NON_LETTER  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_STARTS_WITH_NON_LETTER',
        1,
        'First name starts with a letter',
@@ -833,11 +851,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_STARTS_WITH_NON_LETTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_WITH_NON_LETTER. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: STARTS_WITH_NON_LETTER. Recommended solution: customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_STARTS_WITH_NON_LETTER');
 
 -- KA_CONTACT_FIRST_NAME_INVALID_CHARACTERS_OR_STRUCTURE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_INVALID_CHARACTERS_OR_STRUCTURE',
        1,
        'First name is letters separated by single spaces, hyphens or apostrophes',
@@ -859,11 +879,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_INVALID_CHARACTERS_OR_STRUCTURE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: INVALID_CHARACTERS_OR_STRUCTURE. Recommended solution: customer amends. The widest of the name rules: most rows another name rule flags fail this one too.'
+       'migration-scope DQ analysis: INVALID_CHARACTERS_OR_STRUCTURE. Recommended solution: customer amends. The widest of the name rules: most rows another name rule flags fail this one too.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_INVALID_CHARACTERS_OR_STRUCTURE');
 
 -- KA_CONTACT_FIRST_NAME_EXCEEDS_40_CHARACTERS  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_EXCEEDS_40_CHARACTERS',
        1,
        'First name is at most 40 characters',
@@ -885,11 +907,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_EXCEEDS_40_CHARACTERS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: EXCEEDS_N_CHARACTERS. Recommended solution: not stated (NA). The PDF masks the limit; 40 is the \'DQ Queries\' figure.'
+       'migration-scope DQ analysis: EXCEEDS_N_CHARACTERS. Recommended solution: not stated (NA). The PDF masks the limit; 40 is the \'DQ Queries\' figure.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_EXCEEDS_40_CHARACTERS');
 
 -- KA_CONTACT_FIRST_NAME_DECEASED_WITHOUT_ESTATE_NAME  [consistency, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_DECEASED_WITHOUT_ESTATE_NAME',
        1,
        'A deceased contact\'s first name reads ESTATE OF THE LATE',
@@ -911,11 +935,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_DECEASED_WITHOUT_ESTATE_NAME',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: DECEASED CONTACT NOT HAVING "ESTATE OF THE LATE". Recommended solution: Optus amends. Deceased is STATUS = \'5\', the value the \'DQ Queries\' exploration used; the PDF masks it. Confirm before promoting.'
+       'migration-scope DQ analysis: DECEASED CONTACT NOT HAVING "ESTATE OF THE LATE". Recommended solution: Optus amends. Deceased is STATUS = \'5\', the value the \'DQ Queries\' exploration used; the PDF masks it. Confirm before promoting.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_DECEASED_WITHOUT_ESTATE_NAME');
 
 -- KA_CONTACT_FIRST_NAME_ESTATE_NAME_NOT_DECEASED  [consistency, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_FIRST_NAME_ESTATE_NAME_NOT_DECEASED',
        1,
        'A first name reading ESTATE OF THE LATE is on a deceased contact',
@@ -937,11 +963,13 @@ SELECT 'KA_CONTACT_FIRST_NAME_ESTATE_NAME_NOT_DECEASED',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: CONTACT HAVING "ESTATE OF THE LATE" IN FIRST NAME BUT STATUS NOT DECEASED. Recommended solution: Optus amends. Deceased is STATUS = \'5\', the value the \'DQ Queries\' exploration used; the PDF masks it. Confirm before promoting.'
+       'migration-scope DQ analysis: CONTACT HAVING "ESTATE OF THE LATE" IN FIRST NAME BUT STATUS NOT DECEASED. Recommended solution: Optus amends. Deceased is STATUS = \'5\', the value the \'DQ Queries\' exploration used; the PDF masks it. Confirm before promoting.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_FIRST_NAME_ESTATE_NAME_NOT_DECEASED');
 
 -- KA_CONTACT_MIDDLE_NAME_LEADING_OR_TRAILING_WHITESPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_LEADING_OR_TRAILING_WHITESPACE',
        1,
        'Middle name has no leading or trailing whitespace',
@@ -963,11 +991,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_LEADING_OR_TRAILING_WHITESPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: LEADING_OR_TRAILING_WHITESPACE. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: LEADING_OR_TRAILING_WHITESPACE. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_LEADING_OR_TRAILING_WHITESPACE');
 
 -- KA_CONTACT_MIDDLE_NAME_CONTROL_CHARACTERS  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_CONTROL_CHARACTERS',
        1,
        'Middle name has no control characters',
@@ -989,11 +1019,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_CONTROL_CHARACTERS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: CONTAINS_CONTROL_CHARACTERS. Recommended solution: not stated (NA).'
+       'migration-scope DQ analysis: CONTAINS_CONTROL_CHARACTERS. Recommended solution: not stated (NA).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_CONTROL_CHARACTERS');
 
 -- KA_CONTACT_MIDDLE_NAME_PLACEHOLDER_VALUE  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_PLACEHOLDER_VALUE',
        1,
        'Middle name is not a placeholder',
@@ -1015,11 +1047,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_PLACEHOLDER_VALUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PLACEHOLDER_VALUE. Recommended solution: delete, and ask the customer to update after consent.'
+       'migration-scope DQ analysis: PLACEHOLDER_VALUE. Recommended solution: delete, and ask the customer to update after consent.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_PLACEHOLDER_VALUE');
 
 -- KA_CONTACT_MIDDLE_NAME_HYPHEN_OR_APOSTROPHE_EDGE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_HYPHEN_OR_APOSTROPHE_EDGE',
        1,
        'Middle name does not start or end with a hyphen or apostrophe',
@@ -1041,11 +1075,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_HYPHEN_OR_APOSTROPHE_EDGE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_OR_ENDS_WITH_HYPHEN_OR_APOSTROPHE. Recommended solution: delete or customer amends.'
+       'migration-scope DQ analysis: STARTS_OR_ENDS_WITH_HYPHEN_OR_APOSTROPHE. Recommended solution: delete or customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_HYPHEN_OR_APOSTROPHE_EDGE');
 
 -- KA_CONTACT_MIDDLE_NAME_CONSECUTIVE_PUNCTUATION  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_CONSECUTIVE_PUNCTUATION',
        1,
        'Middle name has no consecutive punctuation',
@@ -1067,11 +1103,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_CONSECUTIVE_PUNCTUATION',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: CONSECUTIVE_PUNCTUATION. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: CONSECUTIVE_PUNCTUATION. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_CONSECUTIVE_PUNCTUATION');
 
 -- KA_CONTACT_MIDDLE_NAME_STARTS_WITH_TITLE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_STARTS_WITH_TITLE',
        1,
        'Middle name does not start with a title',
@@ -1093,11 +1131,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_STARTS_WITH_TITLE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_WITH_TITLE. Recommended solution: amend the name.'
+       'migration-scope DQ analysis: STARTS_WITH_TITLE. Recommended solution: amend the name.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_STARTS_WITH_TITLE');
 
 -- KA_CONTACT_MIDDLE_NAME_COMPANY_NAME_INDICATOR  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_COMPANY_NAME_INDICATOR',
        1,
        'Middle name carries no company-name indicator',
@@ -1119,11 +1159,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_COMPANY_NAME_INDICATOR',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: COMPANY_NAME_INDICATOR. Recommended solution: customer amends. The analysis asks whether a company name can be valid for an SMB customer; until that is answered this flags both.'
+       'migration-scope DQ analysis: COMPANY_NAME_INDICATOR. Recommended solution: customer amends. The analysis asks whether a company name can be valid for an SMB customer; until that is answered this flags both.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_COMPANY_NAME_INDICATOR');
 
 -- KA_CONTACT_MIDDLE_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS',
        1,
        'Middle name holds no address, note or link',
@@ -1145,11 +1187,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS. Recommended solution: customer amends. STREET can be a real surname; the analysis raises it as a question.'
+       'migration-scope DQ analysis: UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS. Recommended solution: customer amends. STREET can be a real surname; the analysis raises it as a question.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS');
 
 -- KA_CONTACT_MIDDLE_NAME_STARTS_WITH_NON_LETTER  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_STARTS_WITH_NON_LETTER',
        1,
        'Middle name starts with a letter',
@@ -1171,11 +1215,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_STARTS_WITH_NON_LETTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_WITH_NON_LETTER. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: STARTS_WITH_NON_LETTER. Recommended solution: customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_STARTS_WITH_NON_LETTER');
 
 -- KA_CONTACT_MIDDLE_NAME_INVALID_CHARACTERS_OR_STRUCTURE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_INVALID_CHARACTERS_OR_STRUCTURE',
        1,
        'Middle name is letters separated by single spaces, hyphens or apostrophes',
@@ -1197,11 +1243,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_INVALID_CHARACTERS_OR_STRUCTURE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: INVALID_CHARACTERS_OR_STRUCTURE. Recommended solution: customer amends. The widest of the name rules: most rows another name rule flags fail this one too.'
+       'migration-scope DQ analysis: INVALID_CHARACTERS_OR_STRUCTURE. Recommended solution: customer amends. The widest of the name rules: most rows another name rule flags fail this one too.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_INVALID_CHARACTERS_OR_STRUCTURE');
 
 -- KA_CONTACT_MIDDLE_NAME_EXCEEDS_40_CHARACTERS  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_MIDDLE_NAME_EXCEEDS_40_CHARACTERS',
        1,
        'Middle name is at most 40 characters',
@@ -1223,11 +1271,13 @@ SELECT 'KA_CONTACT_MIDDLE_NAME_EXCEEDS_40_CHARACTERS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: EXCEEDS_N_CHARACTERS. Recommended solution: not stated (NA). The PDF masks the limit; 40 is the \'DQ Queries\' figure.'
+       'migration-scope DQ analysis: EXCEEDS_N_CHARACTERS. Recommended solution: not stated (NA). The PDF masks the limit; 40 is the \'DQ Queries\' figure.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_MIDDLE_NAME_EXCEEDS_40_CHARACTERS');
 
 -- KA_CONTACT_LAST_NAME_NULL_OR_BLANK  [not_null, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_NULL_OR_BLANK',
        1,
        'Last name is present',
@@ -1249,11 +1299,13 @@ SELECT 'KA_CONTACT_LAST_NAME_NULL_OR_BLANK',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: NULL_OR_BLANK. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: NULL_OR_BLANK. Recommended solution: customer amends.',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_NULL_OR_BLANK');
 
 -- KA_CONTACT_LAST_NAME_LEADING_OR_TRAILING_WHITESPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_LEADING_OR_TRAILING_WHITESPACE',
        1,
        'Last name has no leading or trailing whitespace',
@@ -1275,11 +1327,13 @@ SELECT 'KA_CONTACT_LAST_NAME_LEADING_OR_TRAILING_WHITESPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: LEADING_OR_TRAILING_WHITESPACE. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: LEADING_OR_TRAILING_WHITESPACE. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_LEADING_OR_TRAILING_WHITESPACE');
 
 -- KA_CONTACT_LAST_NAME_CONTROL_CHARACTERS  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_CONTROL_CHARACTERS',
        1,
        'Last name has no control characters',
@@ -1301,11 +1355,13 @@ SELECT 'KA_CONTACT_LAST_NAME_CONTROL_CHARACTERS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: CONTAINS_CONTROL_CHARACTERS. Recommended solution: not stated (NA).'
+       'migration-scope DQ analysis: CONTAINS_CONTROL_CHARACTERS. Recommended solution: not stated (NA).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_CONTROL_CHARACTERS');
 
 -- KA_CONTACT_LAST_NAME_PLACEHOLDER_VALUE  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_PLACEHOLDER_VALUE',
        1,
        'Last name is not a placeholder',
@@ -1327,11 +1383,13 @@ SELECT 'KA_CONTACT_LAST_NAME_PLACEHOLDER_VALUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PLACEHOLDER_VALUE. Recommended solution: delete, and ask the customer to update after consent.'
+       'migration-scope DQ analysis: PLACEHOLDER_VALUE. Recommended solution: delete, and ask the customer to update after consent.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_PLACEHOLDER_VALUE');
 
 -- KA_CONTACT_LAST_NAME_HYPHEN_OR_APOSTROPHE_EDGE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_HYPHEN_OR_APOSTROPHE_EDGE',
        1,
        'Last name does not start or end with a hyphen or apostrophe',
@@ -1353,11 +1411,13 @@ SELECT 'KA_CONTACT_LAST_NAME_HYPHEN_OR_APOSTROPHE_EDGE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_OR_ENDS_WITH_HYPHEN_OR_APOSTROPHE. Recommended solution: delete or customer amends.'
+       'migration-scope DQ analysis: STARTS_OR_ENDS_WITH_HYPHEN_OR_APOSTROPHE. Recommended solution: delete or customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_HYPHEN_OR_APOSTROPHE_EDGE');
 
 -- KA_CONTACT_LAST_NAME_CONSECUTIVE_PUNCTUATION  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_CONSECUTIVE_PUNCTUATION',
        1,
        'Last name has no consecutive punctuation',
@@ -1379,11 +1439,13 @@ SELECT 'KA_CONTACT_LAST_NAME_CONSECUTIVE_PUNCTUATION',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: CONSECUTIVE_PUNCTUATION. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: CONSECUTIVE_PUNCTUATION. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_CONSECUTIVE_PUNCTUATION');
 
 -- KA_CONTACT_LAST_NAME_STARTS_WITH_TITLE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_STARTS_WITH_TITLE',
        1,
        'Last name does not start with a title',
@@ -1405,11 +1467,13 @@ SELECT 'KA_CONTACT_LAST_NAME_STARTS_WITH_TITLE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_WITH_TITLE. Recommended solution: amend the name.'
+       'migration-scope DQ analysis: STARTS_WITH_TITLE. Recommended solution: amend the name.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_STARTS_WITH_TITLE');
 
 -- KA_CONTACT_LAST_NAME_COMPANY_NAME_INDICATOR  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_COMPANY_NAME_INDICATOR',
        1,
        'Last name carries no company-name indicator',
@@ -1431,11 +1495,13 @@ SELECT 'KA_CONTACT_LAST_NAME_COMPANY_NAME_INDICATOR',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: COMPANY_NAME_INDICATOR. Recommended solution: customer amends. The analysis asks whether a company name can be valid for an SMB customer; until that is answered this flags both.'
+       'migration-scope DQ analysis: COMPANY_NAME_INDICATOR. Recommended solution: customer amends. The analysis asks whether a company name can be valid for an SMB customer; until that is answered this flags both.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_COMPANY_NAME_INDICATOR');
 
 -- KA_CONTACT_LAST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS',
        1,
        'Last name holds no address, note or link',
@@ -1457,11 +1523,13 @@ SELECT 'KA_CONTACT_LAST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS. Recommended solution: customer amends. STREET can be a real surname; the analysis raises it as a question.'
+       'migration-scope DQ analysis: UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS. Recommended solution: customer amends. STREET can be a real surname; the analysis raises it as a question.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_UNRELATED_IDENTIFIER_NOTE_OR_ADDRESS');
 
 -- KA_CONTACT_LAST_NAME_STARTS_WITH_NON_LETTER  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_STARTS_WITH_NON_LETTER',
        1,
        'Last name starts with a letter',
@@ -1483,11 +1551,13 @@ SELECT 'KA_CONTACT_LAST_NAME_STARTS_WITH_NON_LETTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: STARTS_WITH_NON_LETTER. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: STARTS_WITH_NON_LETTER. Recommended solution: customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_STARTS_WITH_NON_LETTER');
 
 -- KA_CONTACT_LAST_NAME_INVALID_CHARACTERS_OR_STRUCTURE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_LAST_NAME_INVALID_CHARACTERS_OR_STRUCTURE',
        1,
        'Last name is letters separated by single spaces, hyphens or apostrophes',
@@ -1509,11 +1579,13 @@ SELECT 'KA_CONTACT_LAST_NAME_INVALID_CHARACTERS_OR_STRUCTURE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: INVALID_CHARACTERS_OR_STRUCTURE. Recommended solution: customer amends. The widest of the name rules: most rows another name rule flags fail this one too.'
+       'migration-scope DQ analysis: INVALID_CHARACTERS_OR_STRUCTURE. Recommended solution: customer amends. The widest of the name rules: most rows another name rule flags fail this one too.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_LAST_NAME_INVALID_CHARACTERS_OR_STRUCTURE');
 
 -- KA_CONTACT_PHONE_NULL_OR_BLANK  [not_null, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_PHONE_NULL_OR_BLANK',
        1,
        'Contact phone is present',
@@ -1535,11 +1607,13 @@ SELECT 'KA_CONTACT_PHONE_NULL_OR_BLANK',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_NULL_OR_BLANK. Recommended solution: not stated (NA).'
+       'migration-scope DQ analysis: PHONE_NULL_OR_BLANK. Recommended solution: not stated (NA).',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_PHONE_NULL_OR_BLANK');
 
 -- KA_CONTACT_PHONE_LEADING_OR_TRAILING_SPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_PHONE_LEADING_OR_TRAILING_SPACE',
        1,
        'Contact phone has no leading or trailing space',
@@ -1561,11 +1635,13 @@ SELECT 'KA_CONTACT_PHONE_LEADING_OR_TRAILING_SPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_LEADING_OR_TRAILING_SPACE. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: PHONE_LEADING_OR_TRAILING_SPACE. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_PHONE_LEADING_OR_TRAILING_SPACE');
 
 -- KA_CONTACT_PHONE_WASHABLE_FORMATTING  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_PHONE_WASHABLE_FORMATTING',
        1,
        'Contact phone is digits only, with no spaces or punctuation to wash out',
@@ -1587,11 +1663,13 @@ SELECT 'KA_CONTACT_PHONE_WASHABLE_FORMATTING',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_WASHABLE_FORMATTING. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: PHONE_WASHABLE_FORMATTING. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_PHONE_WASHABLE_FORMATTING');
 
 -- KA_CONTACT_PHONE_UNSUPPORTED_CHARACTER  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_PHONE_UNSUPPORTED_CHARACTER',
        1,
        'Contact phone holds only digits and washable punctuation',
@@ -1613,11 +1691,13 @@ SELECT 'KA_CONTACT_PHONE_UNSUPPORTED_CHARACTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_UNSUPPORTED_CHARACTER. Recommended solution: delete or customer amends.'
+       'migration-scope DQ analysis: PHONE_UNSUPPORTED_CHARACTER. Recommended solution: delete or customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_PHONE_UNSUPPORTED_CHARACTER');
 
 -- KA_CONTACT_PHONE_INVALID_FORMAT  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_PHONE_INVALID_FORMAT',
        1,
        'Contact phone is an Australian mobile or landline once washed',
@@ -1639,11 +1719,13 @@ SELECT 'KA_CONTACT_PHONE_INVALID_FORMAT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_TOO_SHORT, PHONE_INVALID_AU_LENGTH, PHONE_INVALID_FORMAT. Recommended solution: delete or customer amends. Three categories in one rule: the PDF masks the lengths that separate them.'
+       'migration-scope DQ analysis: PHONE_TOO_SHORT, PHONE_INVALID_AU_LENGTH, PHONE_INVALID_FORMAT. Recommended solution: delete or customer amends. Three categories in one rule: the PDF masks the lengths that separate them.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_PHONE_INVALID_FORMAT');
 
 -- KA_CONTACT_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED',
        1,
        'Contact phone is not a known placeholder number',
@@ -1665,11 +1747,13 @@ SELECT 'KA_CONTACT_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED. Recommended solution: delete or customer amends.'
+       'migration-scope DQ analysis: PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED. Recommended solution: delete or customer amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED');
 
 -- KA_CONTACT_PHONE_ALL_ZEROS_PATTERN  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_PHONE_ALL_ZEROS_PATTERN',
        1,
        'Contact phone is not a run of zeros',
@@ -1691,11 +1775,13 @@ SELECT 'KA_CONTACT_PHONE_ALL_ZEROS_PATTERN',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_ALL_ZEROS_PATTERN. Recommended solution: delete or customer amends. Seven or more zeros in a row, the \'DQ Queries\' test.'
+       'migration-scope DQ analysis: PHONE_ALL_ZEROS_PATTERN. Recommended solution: delete or customer amends. Seven or more zeros in a row, the \'DQ Queries\' test.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_PHONE_ALL_ZEROS_PATTERN');
 
 -- KA_CONTACT_E_MAIL_NULL_OR_BLANK  [not_null, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_E_MAIL_NULL_OR_BLANK',
        1,
        'Email is present',
@@ -1717,11 +1803,13 @@ SELECT 'KA_CONTACT_E_MAIL_NULL_OR_BLANK',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: EMAIL ID with NULL VALUES. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer. Every migration-scope contact holds an email in the analysis.'
+       'migration-scope DQ analysis: EMAIL ID with NULL VALUES. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer. Every migration-scope contact holds an email in the analysis.',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_E_MAIL_NULL_OR_BLANK');
 
 -- KA_CONTACT_E_MAIL_INVALID_MALFORMED  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_E_MAIL_INVALID_MALFORMED',
        1,
        'Email is a well-formed address',
@@ -1743,11 +1831,13 @@ SELECT 'KA_CONTACT_E_MAIL_INVALID_MALFORMED',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: EMAIL_INVALID_MALFORMED. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer. Includes provider domains cut short to .co (gmail.co, hotmail.co), which is what the analysis\'s samples are.'
+       'migration-scope DQ analysis: EMAIL_INVALID_MALFORMED. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer. Includes provider domains cut short to .co (gmail.co, hotmail.co), which is what the analysis\'s samples are.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_E_MAIL_INVALID_MALFORMED');
 
 -- KA_CONTACT_E_MAIL_INVALID_OPTUS_GENERATED  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_E_MAIL_INVALID_OPTUS_GENERATED',
        1,
        'Email is not an Optus-generated stand-in',
@@ -1769,11 +1859,13 @@ SELECT 'KA_CONTACT_E_MAIL_INVALID_OPTUS_GENERATED',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: EMAIL_INVALID_OPTUS_GENERATED. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer.'
+       'migration-scope DQ analysis: EMAIL_INVALID_OPTUS_GENERATED. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_E_MAIL_INVALID_OPTUS_GENERATED');
 
 -- KA_CONTACT_E_MAIL_INVALID_GENERIC  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_E_MAIL_INVALID_GENERIC',
        1,
        'Email is not a no-reply address',
@@ -1795,11 +1887,13 @@ SELECT 'KA_CONTACT_E_MAIL_INVALID_GENERIC',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: EMAIL_INVALID_GENERIC. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer.'
+       'migration-scope DQ analysis: EMAIL_INVALID_GENERIC. Recommended solution: delete, and run the SMS campaign to get the correct address from the customer.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_E_MAIL_INVALID_GENERIC');
 
 -- KA_CONTACT_BIRTH_DATE_NULL_OR_ZERO  [not_null, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_BIRTH_DATE_NULL_OR_ZERO',
        1,
        'Date of birth is present',
@@ -1821,11 +1915,13 @@ SELECT 'KA_CONTACT_BIRTH_DATE_NULL_OR_ZERO',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: BIRTH_DATE_NULL_OR_ZERO. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: BIRTH_DATE_NULL_OR_ZERO. Recommended solution: customer amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_BIRTH_DATE_NULL_OR_ZERO');
 
 -- KA_CONTACT_BIRTH_DATE_PLACEHOLDER  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_BIRTH_DATE_PLACEHOLDER',
        1,
        'Date of birth is not a default date',
@@ -1847,11 +1943,13 @@ SELECT 'KA_CONTACT_BIRTH_DATE_PLACEHOLDER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: BIRTH_DATE_PLACEHOLDER. Recommended solution: delete. Dates from the DEVIATION query; 1980-01-01 is somebody\'s real birthday.'
+       'migration-scope DQ analysis: BIRTH_DATE_PLACEHOLDER. Recommended solution: delete. Dates from the DEVIATION query; 1980-01-01 is somebody\'s real birthday.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_BIRTH_DATE_PLACEHOLDER');
 
 -- KA_CONTACT_BIRTH_DATE_FUTURE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_BIRTH_DATE_FUTURE',
        1,
        'Date of birth is not in the future',
@@ -1873,11 +1971,13 @@ SELECT 'KA_CONTACT_BIRTH_DATE_FUTURE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: BIRTH_DATE_FUTURE. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: BIRTH_DATE_FUTURE. Recommended solution: customer amends.',
+       'dqx',
+       'is_not_in_future'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_BIRTH_DATE_FUTURE');
 
 -- KA_CONTACT_BIRTH_DATE_BEFORE_1900  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_BIRTH_DATE_BEFORE_1900',
        1,
        'Date of birth is not before 1900',
@@ -1899,11 +1999,13 @@ SELECT 'KA_CONTACT_BIRTH_DATE_BEFORE_1900',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: BIRTH_DATE_BEFORE_1900. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: BIRTH_DATE_BEFORE_1900. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_BIRTH_DATE_BEFORE_1900');
 
 -- KA_CONTACT_BIRTH_DATE_AGE_OVER_110  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_BIRTH_DATE_AGE_OVER_110',
        1,
        'Contact is at most 110 years old',
@@ -1925,11 +2027,13 @@ SELECT 'KA_CONTACT_BIRTH_DATE_AGE_OVER_110',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: BIRTH_DATE_AGE_OVER_110. Recommended solution: customer amends. Age is measured from current_date(), as the analysis did.'
+       'migration-scope DQ analysis: BIRTH_DATE_AGE_OVER_110. Recommended solution: customer amends. Age is measured from current_date(), as the analysis did.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_BIRTH_DATE_AGE_OVER_110');
 
 -- KA_CONTACT_BIRTH_DATE_UNDER_14  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_BIRTH_DATE_UNDER_14',
        1,
        'Contact is at least 14 years old',
@@ -1951,11 +2055,13 @@ SELECT 'KA_CONTACT_BIRTH_DATE_UNDER_14',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: BIRTH_DATE_UNDER_14. Recommended solution: customer amends. Age is measured from current_date(), as the analysis did.'
+       'migration-scope DQ analysis: BIRTH_DATE_UNDER_14. Recommended solution: customer amends. Age is measured from current_date(), as the analysis did.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_BIRTH_DATE_UNDER_14');
 
 -- KA_CONTACT_BIRTH_DATE_AGE_14_TO_17_REVIEW  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_BIRTH_DATE_AGE_14_TO_17_REVIEW',
        1,
        'Contact aged 14 to 17 is reviewed',
@@ -1977,11 +2083,13 @@ SELECT 'KA_CONTACT_BIRTH_DATE_AGE_14_TO_17_REVIEW',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: BIRTH_DATE_AGE_14_TO_17_REVIEW. Recommended solution: customer amends. Age is measured from current_date(), as the analysis did. Prepaid customers may be 14 or older; everyone else must be 18: a segment question, not a data defect, until the segment is joined in.'
+       'migration-scope DQ analysis: BIRTH_DATE_AGE_14_TO_17_REVIEW. Recommended solution: customer amends. Age is measured from current_date(), as the analysis did. Prepaid customers may be 14 or older; everyone else must be 18: a segment question, not a data defect, until the segment is joined in.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_BIRTH_DATE_AGE_14_TO_17_REVIEW');
 
 -- KA_CONTACT_CONTACT_ID_NOT_NULL  [not_null, P1_block]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_CONTACT_ID_NOT_NULL',
        1,
        'Contact ID is present',
@@ -2003,11 +2111,13 @@ SELECT 'KA_CONTACT_CONTACT_ID_NOT_NULL',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: NULL / blank. Recommended solution: source or technical correction.'
+       'migration-scope DQ analysis: NULL / blank. Recommended solution: source or technical correction.',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_CONTACT_ID_NOT_NULL');
 
 -- KA_CONTACT_CONTACT_ID_NUMERIC  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_CONTACT_ID_NUMERIC',
        1,
        'Contact ID is all digits',
@@ -2029,11 +2139,13 @@ SELECT 'KA_CONTACT_CONTACT_ID_NUMERIC',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: INVALID - non-numeric or contains characters. Recommended solution: outside the current migration scope; source correction if brought in.'
+       'migration-scope DQ analysis: INVALID - non-numeric or contains characters. Recommended solution: outside the current migration scope; source correction if brought in.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_CONTACT_ID_NUMERIC');
 
 -- KA_CONTACT_CONTACT_ID_UNIQUE  [uniqueness, P1_block]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_CONTACT_ID_UNIQUE',
        1,
        'Contact ID is unique',
@@ -2055,11 +2167,13 @@ SELECT 'KA_CONTACT_CONTACT_ID_UNIQUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: VALID - populated, numeric and unique. Recommended solution: source or technical correction. On a history table every record with two versions repeats its id. The analysis counted the latest non-deleted version of each record in migration scope (migration_scope_flag = 1). The check runner reads the whole history table, so its counts will be higher until the table gets a latest-record, migration-scope population.'
+       'migration-scope DQ analysis: VALID - populated, numeric and unique. Recommended solution: source or technical correction. On a history table every record with two versions repeats its id. The analysis counted the latest non-deleted version of each record in migration scope (migration_scope_flag = 1). The check runner reads the whole history table, so its counts will be higher until the table gets a latest-record, migration-scope population.',
+       'dqx',
+       'is_unique'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_CONTACT_ID_UNIQUE');
 
 -- KA_CONTACT_ROLE_ROLE_NAME_LOWERCASE_DEFAULT  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_ROLE_ROLE_NAME_LOWERCASE_DEFAULT',
        1,
        'Role name is \'Default\', capitalised',
@@ -2081,11 +2195,13 @@ SELECT 'KA_CONTACT_ROLE_ROLE_NAME_LOWERCASE_DEFAULT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: LOWERCASE_DEFAULT. Recommended solution: Optus amends: standardise to Default after BCC confirmation.'
+       'migration-scope DQ analysis: LOWERCASE_DEFAULT. Recommended solution: Optus amends: standardise to Default after BCC confirmation.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_ROLE_ROLE_NAME_LOWERCASE_DEFAULT');
 
 -- KA_CONTACT_ROLE_ROLE_NAME_NULL_OR_OTHER_VALUE  [consistency, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CONTACT_ROLE_ROLE_NAME_NULL_OR_OTHER_VALUE',
        1,
        'Role name is Default',
@@ -2107,11 +2223,13 @@ SELECT 'KA_CONTACT_ROLE_ROLE_NAME_NULL_OR_OTHER_VALUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: NULL_OR_OTHER_VALUE. Recommended solution: not stated (NA).'
+       'migration-scope DQ analysis: NULL_OR_OTHER_VALUE. Recommended solution: not stated (NA).',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CONTACT_ROLE_ROLE_NAME_NULL_OR_OTHER_VALUE');
 
 -- KA_ADDRESS_EFF_DT_SENTINEL_1753  [sentinel, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_EFF_DT_SENTINEL_1753',
        1,
        'Address active-from date is not the 1753-01-01 sentinel',
@@ -2133,11 +2251,13 @@ SELECT 'KA_ADDRESS_EFF_DT_SENTINEL_1753',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Sentinel value 1753-01-01. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The SQL Server minimum date, by far the largest finding on the table.'
+       'migration-scope DQ analysis: Sentinel value 1753-01-01. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The SQL Server minimum date, by far the largest finding on the table.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_EFF_DT_SENTINEL_1753');
 
 -- KA_ADDRESS_EFF_DT_BEFORE_1900  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_EFF_DT_BEFORE_1900',
        1,
        'Address active-from date is not before 1900',
@@ -2159,11 +2279,13 @@ SELECT 'KA_ADDRESS_EFF_DT_BEFORE_1900',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Invalid - EFF_DT before the cut-off year. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The PDF masks the cut-off year; 1900 is assumed, the cut-off the birth-date and establishment-date queries use. Includes the sentinel.'
+       'migration-scope DQ analysis: Invalid - EFF_DT before the cut-off year. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The PDF masks the cut-off year; 1900 is assumed, the cut-off the birth-date and establishment-date queries use. Includes the sentinel.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_EFF_DT_BEFORE_1900');
 
 -- KA_ADDRESS_END_DT_SENTINEL_1753  [sentinel, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_END_DT_SENTINEL_1753',
        1,
        'Address active-to date is not the 1753-01-01 sentinel',
@@ -2185,11 +2307,13 @@ SELECT 'KA_ADDRESS_END_DT_SENTINEL_1753',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Sentinel value 1753-01-01. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The SQL Server minimum date, by far the largest finding on the table.'
+       'migration-scope DQ analysis: Sentinel value 1753-01-01. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The SQL Server minimum date, by far the largest finding on the table.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_END_DT_SENTINEL_1753');
 
 -- KA_ADDRESS_END_DT_BEFORE_1900  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_END_DT_BEFORE_1900',
        1,
        'Address active-to date is not before 1900',
@@ -2211,11 +2335,13 @@ SELECT 'KA_ADDRESS_END_DT_BEFORE_1900',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Invalid - END_DT before the cut-off year. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The PDF masks the cut-off year; 1900 is assumed, the cut-off the birth-date and establishment-date queries use. Includes the sentinel.'
+       'migration-scope DQ analysis: Invalid - END_DT before the cut-off year. Recommended solution: confirm with the BCC/ODH team whether the sentinel and the cut-off are by design. The PDF masks the cut-off year; 1900 is assumed, the cut-off the birth-date and establishment-date queries use. Includes the sentinel.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_END_DT_BEFORE_1900');
 
 -- KA_ADDRESS_EFF_DT_FUTURE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_EFF_DT_FUTURE',
        1,
        'Address active-from date is not in the future',
@@ -2237,11 +2363,13 @@ SELECT 'KA_ADDRESS_EFF_DT_FUTURE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Future - EFF_DT after the current date. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Future - EFF_DT after the current date. Recommended solution: Optus amends.',
+       'dqx',
+       'is_not_in_future'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_EFF_DT_FUTURE');
 
 -- KA_ADDRESS_END_DT_BEFORE_EFF_DT  [consistency, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_END_DT_BEFORE_EFF_DT',
        1,
        'Address active-to date is not before its active-from date',
@@ -2263,11 +2391,13 @@ SELECT 'KA_ADDRESS_END_DT_BEFORE_EFF_DT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: END_DT < EFF_DT. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: END_DT < EFF_DT. Recommended solution: not stated (no records found).',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_END_DT_BEFORE_EFF_DT');
 
 -- KA_ADDRESS_X_ADDRESS_ID_NUMERIC_LEGACY  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_X_ADDRESS_ID_NUMERIC_LEGACY',
        1,
        'G-NAF ID is not a legacy numeric identifier',
@@ -2289,11 +2419,13 @@ SELECT 'KA_ADDRESS_X_ADDRESS_ID_NUMERIC_LEGACY',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Numeric legacy identifier. Recommended solution: confirm whether it is replaced with G-NAF.'
+       'migration-scope DQ analysis: Numeric legacy identifier. Recommended solution: confirm whether it is replaced with G-NAF.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_X_ADDRESS_ID_NUMERIC_LEGACY');
 
 -- KA_ADDRESS_X_ADDRESS_ID_PIPE_DELIMITED  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_X_ADDRESS_ID_PIPE_DELIMITED',
        1,
        'G-NAF ID holds one identifier, not several',
@@ -2315,11 +2447,13 @@ SELECT 'KA_ADDRESS_X_ADDRESS_ID_PIPE_DELIMITED',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Pipe-delimited value. Recommended solution: need confirmation from Salesforce before a solution is finalised. BCC sends this form today and UDP stores it.'
+       'migration-scope DQ analysis: Pipe-delimited value. Recommended solution: need confirmation from Salesforce before a solution is finalised. BCC sends this form today and UDP stores it.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_X_ADDRESS_ID_PIPE_DELIMITED');
 
 -- KA_ADDRESS_X_ADDRESS_ID_FREE_TEXT_OR_INVALID  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_X_ADDRESS_ID_FREE_TEXT_OR_INVALID',
        1,
        'G-NAF ID is a current G-NAF PID',
@@ -2341,11 +2475,13 @@ SELECT 'KA_ADDRESS_X_ADDRESS_ID_FREE_TEXT_OR_INVALID',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Free text or invalid value. Recommended solution: need confirmation from Salesforce before a solution is finalised. An underscore after the state code (GAWA_...) counts as invalid here: the analysis files those samples under this category.'
+       'migration-scope DQ analysis: Free text or invalid value. Recommended solution: need confirmation from Salesforce before a solution is finalised. An underscore after the state code (GAWA_...) counts as invalid here: the analysis files those samples under this category.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_X_ADDRESS_ID_FREE_TEXT_OR_INVALID');
 
 -- KA_ADDRESS_X_SUB_ADDRESS_NUMBER_LEADING_OR_TRAILING_WHITESPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_LEADING_OR_TRAILING_WHITESPACE',
        1,
        'Sub-address number has no leading or trailing whitespace',
@@ -2367,11 +2503,13 @@ SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_LEADING_OR_TRAILING_WHITESPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Leading/trailing whitespace. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Leading/trailing whitespace. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_LEADING_OR_TRAILING_WHITESPACE');
 
 -- KA_ADDRESS_X_SUB_ADDRESS_NUMBER_CONTROL_CHARACTER  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_CONTROL_CHARACTER',
        1,
        'Sub-address number has no control characters',
@@ -2393,11 +2531,13 @@ SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_CONTROL_CHARACTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Control character. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Control character. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_CONTROL_CHARACTER');
 
 -- KA_ADDRESS_X_SUB_ADDRESS_NUMBER_REPEATED_SPACES  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_REPEATED_SPACES',
        1,
        'Sub-address number has no repeated spaces',
@@ -2419,11 +2559,13 @@ SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_REPEATED_SPACES',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Repeated spaces. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Repeated spaces. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_REPEATED_SPACES');
 
 -- KA_ADDRESS_X_SUB_ADDRESS_NUMBER_DUPLICATES_STREET_NUMBER  [consistency, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_DUPLICATES_STREET_NUMBER',
        1,
        'Sub-address number does not repeat the street number',
@@ -2445,11 +2587,13 @@ SELECT 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_DUPLICATES_STREET_NUMBER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Duplicates STREET_NUMBER. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Duplicates STREET_NUMBER. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_X_SUB_ADDRESS_NUMBER_DUPLICATES_STREET_NUMBER');
 
 -- KA_ADDRESS_ADDRESS_3_LEADING_OR_TRAILING_WHITESPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_3_LEADING_OR_TRAILING_WHITESPACE',
        1,
        'Address line 3 has no leading or trailing whitespace',
@@ -2471,11 +2615,13 @@ SELECT 'KA_ADDRESS_ADDRESS_3_LEADING_OR_TRAILING_WHITESPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Leading/trailing whitespace. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Leading/trailing whitespace. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_3_LEADING_OR_TRAILING_WHITESPACE');
 
 -- KA_ADDRESS_ADDRESS_3_CONTROL_CHARACTER  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_3_CONTROL_CHARACTER',
        1,
        'Address line 3 has no control characters',
@@ -2497,11 +2643,13 @@ SELECT 'KA_ADDRESS_ADDRESS_3_CONTROL_CHARACTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Control character. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Control character. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_3_CONTROL_CHARACTER');
 
 -- KA_ADDRESS_ADDRESS_3_REPEATED_SPACES  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_3_REPEATED_SPACES',
        1,
        'Address line 3 has no repeated spaces',
@@ -2523,11 +2671,13 @@ SELECT 'KA_ADDRESS_ADDRESS_3_REPEATED_SPACES',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Repeated spaces. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Repeated spaces. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_3_REPEATED_SPACES');
 
 -- KA_ADDRESS_ADDRESS_3_EXCEEDS_80_CHARACTERS  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_3_EXCEEDS_80_CHARACTERS',
        1,
        'Address line 3 is at most 80 characters',
@@ -2549,11 +2699,13 @@ SELECT 'KA_ADDRESS_ADDRESS_3_EXCEEDS_80_CHARACTERS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Over N characters. Recommended solution: confirm the limit with the Salesforce SME. The PDF masks the limit; 80 is the DEVIATION query\'s. The source column is varchar(255).'
+       'migration-scope DQ analysis: Over N characters. Recommended solution: confirm the limit with the Salesforce SME. The PDF masks the limit; 80 is the DEVIATION query\'s. The source column is varchar(255).',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_3_EXCEEDS_80_CHARACTERS');
 
 -- KA_ADDRESS_ADDRESS_3_CONTAINS_STATE_OR_POSTCODE  [consistency, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_3_CONTAINS_STATE_OR_POSTCODE',
        1,
        'Address line 3 holds no state or postcode on an Australian address',
@@ -2575,11 +2727,13 @@ SELECT 'KA_ADDRESS_ADDRESS_3_CONTAINS_STATE_OR_POSTCODE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Contains suburb, state or postcode already held separately. Recommended solution: Optus amends. State and postcode only, on rows flagged Australian, as the DEVIATION query does. A suburb is not checked: matching it means comparing with CITY, which nobody has specified.'
+       'migration-scope DQ analysis: Contains suburb, state or postcode already held separately. Recommended solution: Optus amends. State and postcode only, on rows flagged Australian, as the DEVIATION query does. A suburb is not checked: matching it means comparing with CITY, which nobody has specified.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_3_CONTAINS_STATE_OR_POSTCODE');
 
 -- KA_ADDRESS_ADDRESS_4_LEADING_OR_TRAILING_WHITESPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_4_LEADING_OR_TRAILING_WHITESPACE',
        1,
        'Address line 4 has no leading or trailing whitespace',
@@ -2601,11 +2755,13 @@ SELECT 'KA_ADDRESS_ADDRESS_4_LEADING_OR_TRAILING_WHITESPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Leading/trailing whitespace. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Leading/trailing whitespace. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_4_LEADING_OR_TRAILING_WHITESPACE');
 
 -- KA_ADDRESS_ADDRESS_4_CONTROL_CHARACTER  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_4_CONTROL_CHARACTER',
        1,
        'Address line 4 has no control characters',
@@ -2627,11 +2783,13 @@ SELECT 'KA_ADDRESS_ADDRESS_4_CONTROL_CHARACTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Control character. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Control character. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_4_CONTROL_CHARACTER');
 
 -- KA_ADDRESS_ADDRESS_4_REPEATED_SPACES  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_4_REPEATED_SPACES',
        1,
        'Address line 4 has no repeated spaces',
@@ -2653,11 +2811,13 @@ SELECT 'KA_ADDRESS_ADDRESS_4_REPEATED_SPACES',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Repeated spaces. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Repeated spaces. Recommended solution: Optus amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_4_REPEATED_SPACES');
 
 -- KA_ADDRESS_ADDRESS_4_EXCEEDS_80_CHARACTERS  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_ADDRESS_ADDRESS_4_EXCEEDS_80_CHARACTERS',
        1,
        'Address line 4 is at most 80 characters',
@@ -2679,11 +2839,13 @@ SELECT 'KA_ADDRESS_ADDRESS_4_EXCEEDS_80_CHARACTERS',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Over N characters. Recommended solution: confirm the limit with the Salesforce SME. The PDF masks the limit; 80 is the DEVIATION query\'s. The source column is varchar(255).'
+       'migration-scope DQ analysis: Over N characters. Recommended solution: confirm the limit with the Salesforce SME. The PDF masks the limit; 80 is the DEVIATION query\'s. The source column is varchar(255).',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_ADDRESS_ADDRESS_4_EXCEEDS_80_CHARACTERS');
 
 -- KA_BUS_ORG_PHONE_NULL_OR_BLANK  [not_null, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_PHONE_NULL_OR_BLANK',
        1,
        'Business phone is present',
@@ -2705,11 +2867,13 @@ SELECT 'KA_BUS_ORG_PHONE_NULL_OR_BLANK',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_NULL_OR_BLANK. Recommended solution: Optus amends if another source has it.'
+       'migration-scope DQ analysis: PHONE_NULL_OR_BLANK. Recommended solution: Optus amends if another source has it.',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_PHONE_NULL_OR_BLANK');
 
 -- KA_BUS_ORG_PHONE_LEADING_OR_TRAILING_SPACE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_PHONE_LEADING_OR_TRAILING_SPACE',
        1,
        'Business phone has no leading or trailing space',
@@ -2731,11 +2895,13 @@ SELECT 'KA_BUS_ORG_PHONE_LEADING_OR_TRAILING_SPACE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_LEADING_OR_TRAILING_SPACE. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: PHONE_LEADING_OR_TRAILING_SPACE. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_PHONE_LEADING_OR_TRAILING_SPACE');
 
 -- KA_BUS_ORG_PHONE_WASHABLE_FORMATTING  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_PHONE_WASHABLE_FORMATTING',
        1,
        'Business phone is digits only, with no spaces or punctuation to wash out',
@@ -2757,11 +2923,13 @@ SELECT 'KA_BUS_ORG_PHONE_WASHABLE_FORMATTING',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_WASHABLE_FORMATTING. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: PHONE_WASHABLE_FORMATTING. Recommended solution: Optus amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_PHONE_WASHABLE_FORMATTING');
 
 -- KA_BUS_ORG_PHONE_UNSUPPORTED_CHARACTER  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_PHONE_UNSUPPORTED_CHARACTER',
        1,
        'Business phone holds only digits and washable punctuation',
@@ -2783,11 +2951,13 @@ SELECT 'KA_BUS_ORG_PHONE_UNSUPPORTED_CHARACTER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_UNSUPPORTED_CHARACTER. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: PHONE_UNSUPPORTED_CHARACTER. Recommended solution: customer amends.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_PHONE_UNSUPPORTED_CHARACTER');
 
 -- KA_BUS_ORG_PHONE_INVALID_FORMAT  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_PHONE_INVALID_FORMAT',
        1,
        'Business phone is an Australian mobile or landline once washed',
@@ -2809,11 +2979,13 @@ SELECT 'KA_BUS_ORG_PHONE_INVALID_FORMAT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_TOO_SHORT, PHONE_INVALID_AU_LENGTH, PHONE_INVALID_FORMAT. Recommended solution: customer amends. Three categories in one rule: the PDF masks the lengths that separate them.'
+       'migration-scope DQ analysis: PHONE_TOO_SHORT, PHONE_INVALID_AU_LENGTH, PHONE_INVALID_FORMAT. Recommended solution: customer amends. Three categories in one rule: the PDF masks the lengths that separate them.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_PHONE_INVALID_FORMAT');
 
 -- KA_BUS_ORG_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED',
        1,
        'Business phone is not a known placeholder number',
@@ -2835,11 +3007,13 @@ SELECT 'KA_BUS_ORG_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED. Recommended solution: customer amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_PHONE_KNOWN_PLACEHOLDER_OR_PROHIBITED');
 
 -- KA_BUS_ORG_PHONE_ALL_ZEROS_PATTERN  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_PHONE_ALL_ZEROS_PATTERN',
        1,
        'Business phone is not a run of zeros',
@@ -2861,11 +3035,13 @@ SELECT 'KA_BUS_ORG_PHONE_ALL_ZEROS_PATTERN',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: PHONE_ALL_ZEROS_PATTERN. Recommended solution: customer amends. Seven or more zeros in a row, the \'DQ Queries\' test.'
+       'migration-scope DQ analysis: PHONE_ALL_ZEROS_PATTERN. Recommended solution: customer amends. Seven or more zeros in a row, the \'DQ Queries\' test.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_PHONE_ALL_ZEROS_PATTERN');
 
 -- KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NON_NUMERIC_OR_TEXT  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NON_NUMERIC_OR_TEXT',
        1,
        'Number of employees is a number',
@@ -2887,11 +3063,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NON_NUMERIC_OR_TEXT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_NON_NUMERIC_OR_TEXT. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_NON_NUMERIC_OR_TEXT. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NON_NUMERIC_OR_TEXT');
 
 -- KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_CURRENCY_SEPARATOR_OR_UNIT_TEXT  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_CURRENCY_SEPARATOR_OR_UNIT_TEXT',
        1,
        'Number of employees carries no currency, separator or unit text',
@@ -2913,11 +3091,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_CURRENCY_SEPARATOR_OR_UNIT_TEXT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_CURRENCY_SEPARATOR_OR_UNIT_TEXT. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_CURRENCY_SEPARATOR_OR_UNIT_TEXT. Recommended solution: not stated (no records found).',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_CURRENCY_SEPARATOR_OR_UNIT_TEXT');
 
 -- KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_DECIMAL_OR_NON_WHOLE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_DECIMAL_OR_NON_WHOLE',
        1,
        'Number of employees is a whole number',
@@ -2939,11 +3119,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_DECIMAL_OR_NON_WHOLE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_DECIMAL_OR_NON_WHOLE. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_DECIMAL_OR_NON_WHOLE. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_DECIMAL_OR_NON_WHOLE');
 
 -- KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_SCIENTIFIC_NOTATION  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_SCIENTIFIC_NOTATION',
        1,
        'Number of employees is not in scientific notation',
@@ -2965,11 +3147,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_SCIENTIFIC_NOTATION',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_SCIENTIFIC_NOTATION. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_SCIENTIFIC_NOTATION. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_SCIENTIFIC_NOTATION');
 
 -- KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NEGATIVE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NEGATIVE',
        1,
        'Number of employees is not negative',
@@ -2991,11 +3175,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NEGATIVE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_NEGATIVE. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_NEGATIVE. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_NEGATIVE');
 
 -- KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_ZERO_OR_ZERO_PADDED  [sentinel, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_ZERO_OR_ZERO_PADDED',
        1,
        'Number of employees is not zero',
@@ -3017,11 +3203,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_ZERO_OR_ZERO_PADDED',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_ZERO_OR_ZERO_PADDED. Recommended solution: Optus to confirm whether zero is a real count or unknown. Zero passes every numeric rule; the question is what it means.'
+       'migration-scope DQ analysis: X_NUMBER_OF_EMPLOYEE_ZERO_OR_ZERO_PADDED. Recommended solution: Optus to confirm whether zero is a real count or unknown. Zero passes every numeric rule; the question is what it means.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_EMPLOYEE_ZERO_OR_ZERO_PADDED');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_NON_NUMERIC_OR_TEXT  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_NON_NUMERIC_OR_TEXT',
        1,
        'Number of offices is a number',
@@ -3043,11 +3231,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_NON_NUMERIC_OR_TEXT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_NON_NUMERIC_OR_TEXT. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_NON_NUMERIC_OR_TEXT. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_NON_NUMERIC_OR_TEXT');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_CURRENCY_SEPARATOR_OR_UNIT_TEXT  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_CURRENCY_SEPARATOR_OR_UNIT_TEXT',
        1,
        'Number of offices carries no currency, separator or unit text',
@@ -3069,11 +3259,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_CURRENCY_SEPARATOR_OR_UNIT_TEXT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_CURRENCY_SEPARATOR_OR_UNIT_TEXT. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_CURRENCY_SEPARATOR_OR_UNIT_TEXT. Recommended solution: not stated (no records found).',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_CURRENCY_SEPARATOR_OR_UNIT_TEXT');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_DECIMAL_OR_NON_WHOLE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_DECIMAL_OR_NON_WHOLE',
        1,
        'Number of offices is a whole number',
@@ -3095,11 +3287,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_DECIMAL_OR_NON_WHOLE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_DECIMAL_OR_NON_WHOLE. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_DECIMAL_OR_NON_WHOLE. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_DECIMAL_OR_NON_WHOLE');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_SCIENTIFIC_NOTATION  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_SCIENTIFIC_NOTATION',
        1,
        'Number of offices is not in scientific notation',
@@ -3121,11 +3315,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_SCIENTIFIC_NOTATION',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_SCIENTIFIC_NOTATION. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_SCIENTIFIC_NOTATION. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_SCIENTIFIC_NOTATION');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_NEGATIVE  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_NEGATIVE',
        1,
        'Number of offices is not negative',
@@ -3147,11 +3343,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_NEGATIVE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_NEGATIVE. Recommended solution: not stated (no records found).'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_NEGATIVE. Recommended solution: not stated (no records found).',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_NEGATIVE');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_ZERO_PLACEHOLDER  [sentinel, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_ZERO_PLACEHOLDER',
        1,
        'Number of offices is not zero',
@@ -3173,11 +3371,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_ZERO_PLACEHOLDER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_ZERO_PLACEHOLDER. Recommended solution: confirm with the business before remediation.'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_ZERO_PLACEHOLDER. Recommended solution: confirm with the business before remediation.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_ZERO_PLACEHOLDER');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_LEADING_ZERO_FORMAT  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_LEADING_ZERO_FORMAT',
        1,
        'Number of offices has no leading zero',
@@ -3199,11 +3399,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_LEADING_ZERO_FORMAT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_LEADING_ZERO_FORMAT. Recommended solution: Optus amends, standardise after confirmation.'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_LEADING_ZERO_FORMAT. Recommended solution: Optus amends, standardise after confirmation.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_LEADING_ZERO_FORMAT');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_POSSIBLE_PHONE_NUMBER  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_POSSIBLE_PHONE_NUMBER',
        1,
        'Number of offices is not a phone number',
@@ -3225,11 +3427,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_POSSIBLE_PHONE_NUMBER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_POSSIBLE_PHONE_NUMBER. Recommended solution: customer amends or correct the source mapping.'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_POSSIBLE_PHONE_NUMBER. Recommended solution: customer amends or correct the source mapping.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_POSSIBLE_PHONE_NUMBER');
 
 -- KA_BUS_ORG_X_NUMBER_OF_OFFICE_IMPLAUSIBLE_OUTLIER  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_IMPLAUSIBLE_OUTLIER',
        1,
        'Number of offices is at most 1000',
@@ -3251,11 +3455,13 @@ SELECT 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_IMPLAUSIBLE_OUTLIER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_IMPLAUSIBLE_OUTLIER. Recommended solution: customer amends after business confirmation. 1000 is the \'#1 - DQ Issues\' query\'s cut-off; the PDF masks it.'
+       'migration-scope DQ analysis: X_NUMBER_OF_OFFICE_IMPLAUSIBLE_OUTLIER. Recommended solution: customer amends after business confirmation. 1000 is the \'#1 - DQ Issues\' query\'s cut-off; the PDF masks it.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_NUMBER_OF_OFFICE_IMPLAUSIBLE_OUTLIER');
 
 -- KA_BUS_ORG_WEB_SITE_PLACEHOLDER  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_WEB_SITE_PLACEHOLDER',
        1,
        'Website is not a placeholder',
@@ -3277,11 +3483,13 @@ SELECT 'KA_BUS_ORG_WEB_SITE_PLACEHOLDER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Website is a placeholder. Recommended solution: delete. The list is the PDF\'s, compared lower-cased: the PDF\'s own query compared \'http://Nil\' with a lower-cased value, so it never matched.'
+       'migration-scope DQ analysis: Website is a placeholder. Recommended solution: delete. The list is the PDF\'s, compared lower-cased: the PDF\'s own query compared \'http://Nil\' with a lower-cased value, so it never matched.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_WEB_SITE_PLACEHOLDER');
 
 -- KA_BUS_ORG_WEB_SITE_MISSING_PROTOCOL  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_WEB_SITE_MISSING_PROTOCOL',
        1,
        'Website starts with http:// or https://',
@@ -3303,11 +3511,13 @@ SELECT 'KA_BUS_ORG_WEB_SITE_MISSING_PROTOCOL',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Website is missing protocol. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: Website is missing protocol. Recommended solution: customer amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_WEB_SITE_MISSING_PROTOCOL');
 
 -- KA_BUS_ORG_ESTABLISH_DATE_INVALID_EPOCH_VALUE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_ESTABLISH_DATE_INVALID_EPOCH_VALUE',
        1,
        'Year started is an epoch-millisecond value',
@@ -3329,11 +3539,13 @@ SELECT 'KA_BUS_ORG_ESTABLISH_DATE_INVALID_EPOCH_VALUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Invalid epoch values. Recommended solution: not stated (none found).'
+       'migration-scope DQ analysis: Invalid epoch values. Recommended solution: not stated (none found).',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_ESTABLISH_DATE_INVALID_EPOCH_VALUE');
 
 -- KA_BUS_ORG_ESTABLISH_DATE_FUTURE  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_ESTABLISH_DATE_FUTURE',
        1,
        'Year started is not in the future',
@@ -3355,11 +3567,13 @@ SELECT 'KA_BUS_ORG_ESTABLISH_DATE_FUTURE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Future dates. Recommended solution: Optus amends.'
+       'migration-scope DQ analysis: Future dates. Recommended solution: Optus amends.',
+       'dqx',
+       'is_not_in_future'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_ESTABLISH_DATE_FUTURE');
 
 -- KA_BUS_ORG_ESTABLISH_DATE_PLACEHOLDER_1753  [sentinel, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_ESTABLISH_DATE_PLACEHOLDER_1753',
        1,
        'Year started is not the 1753-01-01 placeholder',
@@ -3381,11 +3595,13 @@ SELECT 'KA_BUS_ORG_ESTABLISH_DATE_PLACEHOLDER_1753',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Primary system placeholder/default date. Recommended solution: remediate as a placeholder.'
+       'migration-scope DQ analysis: Primary system placeholder/default date. Recommended solution: remediate as a placeholder.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_ESTABLISH_DATE_PLACEHOLDER_1753');
 
 -- KA_BUS_ORG_ESTABLISH_DATE_BEFORE_SUPPORTED_HISTORY  [format, P3_monitor]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_ESTABLISH_DATE_BEFORE_SUPPORTED_HISTORY',
        1,
        'Year started is not before 1900',
@@ -3407,11 +3623,13 @@ SELECT 'KA_BUS_ORG_ESTABLISH_DATE_BEFORE_SUPPORTED_HISTORY',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Before supported history. Recommended solution: check with BCC. The PDF masks the cut-off year; 1900 is assumed, the cut-off the birth-date and establishment-date queries use. Includes the placeholder.'
+       'migration-scope DQ analysis: Before supported history. Recommended solution: check with BCC. The PDF masks the cut-off year; 1900 is assumed, the cut-off the birth-date and establishment-date queries use. Includes the placeholder.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_ESTABLISH_DATE_BEFORE_SUPPORTED_HISTORY');
 
 -- KA_BUS_ORG_X_ARBN_WRONG_LENGTH_NUMERIC  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_ARBN_WRONG_LENGTH_NUMERIC',
        1,
        'ARBN is nine digits',
@@ -3433,11 +3651,13 @@ SELECT 'KA_BUS_ORG_X_ARBN_WRONG_LENGTH_NUMERIC',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Wrong-length numeric values. Recommended solution: customer amends.'
+       'migration-scope DQ analysis: Wrong-length numeric values. Recommended solution: customer amends.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_ARBN_WRONG_LENGTH_NUMERIC');
 
 -- KA_BUS_ORG_X_ARBN_OTHER_NON_NUMERIC  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_ARBN_OTHER_NON_NUMERIC',
        1,
        'ARBN is digits only',
@@ -3459,11 +3679,13 @@ SELECT 'KA_BUS_ORG_X_ARBN_OTHER_NON_NUMERIC',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Other non-numeric values. Recommended solution: delete.'
+       'migration-scope DQ analysis: Other non-numeric values. Recommended solution: delete.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_ARBN_OTHER_NON_NUMERIC');
 
 -- KA_BUS_ORG_X_ARBN_ALL_ZEROS_PLACEHOLDER  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_ARBN_ALL_ZEROS_PLACEHOLDER',
        1,
        'ARBN is not all zeros',
@@ -3485,11 +3707,13 @@ SELECT 'KA_BUS_ORG_X_ARBN_ALL_ZEROS_PLACEHOLDER',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: All-zero placeholders. Recommended solution: delete.'
+       'migration-scope DQ analysis: All-zero placeholders. Recommended solution: delete.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_ARBN_ALL_ZEROS_PLACEHOLDER');
 
 -- KA_BUS_ORG_X_ARBN_PLACEHOLDER_TEXT  [sentinel, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_X_ARBN_PLACEHOLDER_TEXT',
        1,
        'ARBN is not placeholder text',
@@ -3511,11 +3735,13 @@ SELECT 'KA_BUS_ORG_X_ARBN_PLACEHOLDER_TEXT',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: Placeholder text values. Recommended solution: delete.'
+       'migration-scope DQ analysis: Placeholder text values. Recommended solution: delete.',
+       'sql',
+       CAST(NULL AS STRING)
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_X_ARBN_PLACEHOLDER_TEXT');
 
 -- KA_BUS_ORG_ORG_ID_NOT_NULL  [not_null, P1_block]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_ORG_ID_NOT_NULL',
        1,
        'Organisation ID is present',
@@ -3537,11 +3763,13 @@ SELECT 'KA_BUS_ORG_ORG_ID_NOT_NULL',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: NULL / blank. Recommended solution: source or technical correction.'
+       'migration-scope DQ analysis: NULL / blank. Recommended solution: source or technical correction.',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_ORG_ID_NOT_NULL');
 
 -- KA_BUS_ORG_ORG_ID_NUMERIC  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_ORG_ID_NUMERIC',
        1,
        'Organisation ID is all digits',
@@ -3563,11 +3791,13 @@ SELECT 'KA_BUS_ORG_ORG_ID_NUMERIC',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: INVALID - non-numeric or contains characters. Recommended solution: source or technical correction.'
+       'migration-scope DQ analysis: INVALID - non-numeric or contains characters. Recommended solution: source or technical correction.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_ORG_ID_NUMERIC');
 
 -- KA_BUS_ORG_ORG_ID_UNIQUE  [uniqueness, P1_block]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_BUS_ORG_ORG_ID_UNIQUE',
        1,
        'Organisation ID is unique',
@@ -3589,11 +3819,13 @@ SELECT 'KA_BUS_ORG_ORG_ID_UNIQUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: VALID - populated, numeric and unique. Recommended solution: source or technical correction. On a history table every record with two versions repeats its id. The analysis counted the latest non-deleted version of each record in migration scope (migration_scope_flag = 1). The check runner reads the whole history table, so its counts will be higher until the table gets a latest-record, migration-scope population.'
+       'migration-scope DQ analysis: VALID - populated, numeric and unique. Recommended solution: source or technical correction. On a history table every record with two versions repeats its id. The analysis counted the latest non-deleted version of each record in migration scope (migration_scope_flag = 1). The check runner reads the whole history table, so its counts will be higher until the table gets a latest-record, migration-scope population.',
+       'dqx',
+       'is_unique'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_BUS_ORG_ORG_ID_UNIQUE');
 
 -- KA_CUSTOMER_CUSTOMER_ID_NOT_NULL  [not_null, P1_block]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CUSTOMER_CUSTOMER_ID_NOT_NULL',
        1,
        'Customer ID is present',
@@ -3615,11 +3847,13 @@ SELECT 'KA_CUSTOMER_CUSTOMER_ID_NOT_NULL',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: NULL / blank. Recommended solution: source or technical correction.'
+       'migration-scope DQ analysis: NULL / blank. Recommended solution: source or technical correction.',
+       'dqx',
+       'is_not_null_and_not_empty'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CUSTOMER_CUSTOMER_ID_NOT_NULL');
 
 -- KA_CUSTOMER_CUSTOMER_ID_NUMERIC  [format, P2_alert]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CUSTOMER_CUSTOMER_ID_NUMERIC',
        1,
        'Customer ID is all digits',
@@ -3641,11 +3875,13 @@ SELECT 'KA_CUSTOMER_CUSTOMER_ID_NUMERIC',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: INVALID - non-numeric or contains characters. Recommended solution: source correction; investigate and replace the invalid identifier.'
+       'migration-scope DQ analysis: INVALID - non-numeric or contains characters. Recommended solution: source correction; investigate and replace the invalid identifier.',
+       'dqx',
+       'regex_match'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CUSTOMER_CUSTOMER_ID_NUMERIC');
 
 -- KA_CUSTOMER_CUSTOMER_ID_UNIQUE  [uniqueness, P1_block]
-INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note)
+INSERT INTO sdpt_data_trnf.udp_brnz.dq_config_rule_registry (rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, rule_expr, scope_filter, join_sql, fail_threshold_pct, severity, business_domain, owner_group, source_layer, status, effective_from, created_by, created_at, promoted_by, promoted_at, note, function_source, function_name)
 SELECT 'KA_CUSTOMER_CUSTOMER_ID_UNIQUE',
        1,
        'Customer ID is unique',
@@ -3667,7 +3903,9 @@ SELECT 'KA_CUSTOMER_CUSTOMER_ID_UNIQUE',
        current_timestamp(),
        CAST(NULL AS STRING),
        CAST(NULL AS TIMESTAMP),
-       'migration-scope DQ analysis: VALID - populated, numeric and unique. Recommended solution: source or technical correction. On a history table every record with two versions repeats its id. The analysis counted the latest non-deleted version of each record in migration scope (migration_scope_flag = 1). The check runner reads the whole history table, so its counts will be higher until the table gets a latest-record, migration-scope population.'
+       'migration-scope DQ analysis: VALID - populated, numeric and unique. Recommended solution: source or technical correction. On a history table every record with two versions repeats its id. The analysis counted the latest non-deleted version of each record in migration scope (migration_scope_flag = 1). The check runner reads the whole history table, so its counts will be higher until the table gets a latest-record, migration-scope population.',
+       'dqx',
+       'is_unique'
 WHERE  NOT EXISTS (SELECT 1 FROM sdpt_data_trnf.udp_brnz.dq_config_rule_registry WHERE rule_id = 'KA_CUSTOMER_CUSTOMER_ID_UNIQUE');
 
 -- =====================================================================

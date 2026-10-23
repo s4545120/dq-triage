@@ -167,3 +167,13 @@ def test_promoting_asks_first_and_writes_only_on_confirm():
     written = at.session_state["_pending_rule_versions"]
     assert len(written) == 1
     assert written[0]["rule_id"] == rule_id and written[0]["status"] == "active"
+
+
+def test_a_rule_says_which_function_it_implements():
+    """Since 2026-10-23 the register records the function a rule implements: a stored UC
+    function, a DQX check its SQL is equivalent to, or inline SQL. The definition tab
+    prints it beside the rule's own threshold."""
+    body = " ".join(str(m.value) for m in _run(_rule_pick="CTCT_EML_FMT").markdown)
+    assert "Function: UC function is_valid_email_v1" in body
+    body = " ".join(str(m.value) for m in _run(_rule_pick="SUBS_IMEI_NOT_NULL").markdown)
+    assert "Function: " in body and "not recorded" not in body

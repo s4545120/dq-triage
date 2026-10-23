@@ -50,6 +50,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import register as ka  # noqa: E402
 import universe  # noqa: E402
 from migrate_cde_scope import CDE_COLUMNS, RULE_COLUMNS, lit  # noqa: E402
+sys.path.insert(0, str(ROOT / "onboarding"))
+import functions as fn  # noqa: E402
 
 MONITORED_COLUMNS = ["target_table", "table_version", "table_code", "row_key", "owner_group",
                      "business_domain", "schedule_group", "scan_mode", "status",
@@ -217,9 +219,14 @@ def build(catalog: str, schema: str, prefix: str) -> tuple[list[str], list[tuple
                 "created_by": "current_user()", "created_at": "current_timestamp()",
                 "promoted_by": _null("promoted_by"), "promoted_at": _null("promoted_at"),
                 "note": lit(r.note)}
+        # Which function the rule implements (sql/ddl/01, onboarding/functions.py).
+        f_src, f_name = fn.classify(r.rule_expr, r.rule_type, None)
+        vals["function_source"] = lit(f_src)
+        vals["function_name"] = lit(f_name) if f_name else "CAST(NULL AS STRING)"
+        cols = RULE_COLUMNS + ["function_source", "function_name"]
         add(f"rule:{r.rule_id}", "insert",
-            f"INSERT INTO {reg} ({', '.join(RULE_COLUMNS)})\n"
-            f"SELECT " + ",\n       ".join(vals[c] for c in RULE_COLUMNS) + "\n"
+            f"INSERT INTO {reg} ({', '.join(cols)})\n"
+            f"SELECT " + ",\n       ".join(vals[c] for c in cols) + "\n"
             f"WHERE  NOT EXISTS (SELECT 1 FROM {reg} WHERE rule_id = {lit(r.rule_id)})",
             [f"-- {r.rule_id}  [{r.rule_type}, {r.severity}]"])
 

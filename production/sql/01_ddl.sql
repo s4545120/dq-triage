@@ -3,7 +3,7 @@
 -- target: sdpt_data_trnf.udp_brnz, prefix dq_. Rendered from sql/ddl/ by sql/render.py's rules:
 -- the config/results/fn schemas become name prefixes in this one schema.
 --
--- Expected when complete: 21 tables, 17 views, 7 functions, 93 CHECK constraints.
+-- Expected when complete: 21 tables, 17 views, 7 functions, 95 CHECK constraints.
 --
 -- ADD CONSTRAINT is not idempotent: a second pass fails on every constraint. If it
 -- stops partway, fix that one statement and continue from its banner.
@@ -102,7 +102,11 @@ CREATE TABLE IF NOT EXISTS sdpt_data_trnf.udp_brnz.dq_config_rule_registry (
   -- end, so this is where they sit on every table that predates them, and a positional
   -- INSERT written against this file must line up with those tables too.
   template_id        STRING             COMMENT 'set when the onboarding generator wrote this rule from config.check_template; NULL for a hand-written rule. A column that already has hand-written rules is never given template rules',
-  template_version   INT                COMMENT 'the template version the rule was generated from; NULL exactly when template_id is'
+  template_version   INT                COMMENT 'the template version the rule was generated from; NULL exactly when template_id is',
+  -- Since 2026-10-23: which function the rule implements (onboarding/functions.py).
+  -- A record, not an execution path: the runner still runs rule_expr.
+  function_source    STRING             COMMENT 'uc (a stored Unity Catalog function, dq.fn.<name>) | dqx (a check from the Databricks Labs DQX library that rule_expr is equivalent to) | sql (an expression no function covers yet). NULL on versions written before 2026-10-23',
+  function_name      STRING             COMMENT 'the function: e.g. is_valid_email_v1 for uc, regex_match or is_not_null for dqx. NULL exactly when function_source is sql or NULL'
 )
 USING DELTA
 CLUSTER BY (target_table, rule_id)
@@ -124,6 +128,14 @@ ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
 ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
   ADD CONSTRAINT rule_registry_template_versioned
   CHECK ((template_id IS NULL) = (template_version IS NULL));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+  ADD CONSTRAINT rule_registry_function_source_enum
+  CHECK (function_source IS NULL OR function_source IN ('uc', 'dqx', 'sql'));
+
+ALTER TABLE sdpt_data_trnf.udp_brnz.dq_config_rule_registry
+  ADD CONSTRAINT rule_registry_function_named
+  CHECK ((function_name IS NULL) = (function_source IS NULL OR function_source = 'sql'));
 
 
 -- =====================================================================

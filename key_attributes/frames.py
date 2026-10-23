@@ -27,6 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import register as ka  # noqa: E402
 import universe  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "onboarding"))
+import functions as fn  # noqa: E402  which function each rule implements
+
 WHEN = pd.Timestamp("2026-10-12 09:00:00")
 WHO = "key-attribute-migration@example.com"
 
@@ -88,7 +91,9 @@ def rule_rows() -> list[dict]:
         severity=r.severity, business_domain=ka.TABLE_DOMAIN[r.table],
         owner_group=ka.OWNER_GROUP, source_layer="L2", status="shadow", effective_from=WHEN,
         created_by=WHO, created_at=WHEN, promoted_by=None, promoted_at=pd.NaT, note=r.note,
-        template_id=None, template_version=None) for r in universe.all_rules()]
+        template_id=None, template_version=None,
+        **dict(zip(("function_source", "function_name"), fn.classify(r.rule_expr, r.rule_type, None))))
+        for r in universe.all_rules()]
 
 
 def table_rows() -> list[dict]:

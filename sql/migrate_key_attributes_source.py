@@ -39,6 +39,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 import register as ka  # noqa: E402
 from migrate_cde_scope import CDE_COLUMNS, RULE_COLUMNS, lit  # noqa: E402
+
+# Carried forward too: 01 gained the template columns on 2026-10-06 and the function
+# columns on 2026-10-23.
+_COLS = RULE_COLUMNS + ["template_id", "template_version", "function_source", "function_name"]
 from migrate_key_attributes import KA_LIKE, MONITORED_COLUMNS, _null  # noqa: E402
 
 
@@ -111,10 +115,10 @@ def build(source_catalog: str, catalog: str, schema: str, prefix: str
         sel = [{"rule_version": "r.rule_version + 1", "target_table": lit(t),
                 "effective_from": "current_timestamp()", "created_at": "current_timestamp()",
                 "created_by": "current_user()", "note": lit(note)}.get(col, f"r.{col}")
-               for col in RULE_COLUMNS]
+               for col in _COLS]
         src_names = ", ".join(lit(on(src, c)) for c in ("prod", source_catalog) if on(src, c) != t)
         add(f"rules:{src.split('.')[-1]}", "insert",
-            f"INSERT INTO {reg} ({', '.join(RULE_COLUMNS)})\n"
+            f"INSERT INTO {reg} ({', '.join(_COLS)})\n"
             f"SELECT {', '.join(sel)}\nFROM   {reg} r\n"
             f"JOIN   (SELECT rule_id AS id, max(rule_version) AS v FROM {reg} GROUP BY rule_id) m\n"
             f"  ON   m.id = r.rule_id AND m.v = r.rule_version\n"

@@ -200,6 +200,19 @@ def _rule_cards() -> None:
     captured = 0
     if sel is not None and sel["Run id"] is not None:
         captured = int(((samples["rule_id"] == pick) & (samples["run_id"] == sel["Run id"])).sum())
+    def _function_words(rule) -> str:
+        """Which function the rule implements (config.rule_registry.function_source /
+        function_name, since 2026-10-23). A record: the runner still runs rule_expr."""
+        src = opt(rule.get("function_source")) if hasattr(rule, "get") else None
+        name = opt(rule.get("function_name")) if hasattr(rule, "get") else None
+        if src == "uc":
+            return f"UC function {name}"
+        if src == "dqx":
+            return f"DQX check {name}"
+        if src == "sql":
+            return "inline SQL, no function yet"
+        return "not recorded"
+
     TAB_LABELS = ["Definition & code",
                   f"Sample rows · {captured:,}" if captured else "Sample rows", "History"]
 
@@ -525,7 +538,8 @@ def _rule_cards() -> None:
                        if scope_f else
                        f"every row of the join, driven by {html.escape(sel['Table'])}"
                        if sel["Column"] == "join" else f"all rows in {html.escape(sel['Table'])}")
-                    + f'</span><span>Allowed failure rate: ≤ {_pct(sel["Limit"], 2)}</span></div>'
+                    + f'</span><span>Allowed failure rate: ≤ {_pct(sel["Limit"], 2)}</span>'
+                    + f'<span>Function: {html.escape(_function_words(r))}</span></div>'
                     + (f'<div class="dq-rwarn">The key attribute register disputes this scope: the binding '
                        f"says the column is only populated where "
                        f'<code>{html.escape(str(expected_scope.get(pick)))}</code>, and this rule '

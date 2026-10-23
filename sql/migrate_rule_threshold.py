@@ -52,7 +52,8 @@ def build(catalog: str, schema: str, prefix: str) -> tuple[list[str], list[tuple
         stmts.append((label, kind, sql))
         lines.extend(["", *(comment or []), sql + ";"])
 
-    cols = RULE_COLUMNS + ["template_id", "template_version"]  # 01 gained these on 2026-10-06
+    cols = RULE_COLUMNS + ["template_id", "template_version",  # 01 gained these on 2026-10-06
+                           "function_source", "function_name"]  # and these on 2026-10-23
     sel = []
     for col in cols:
         sel.append({

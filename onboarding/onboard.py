@@ -50,6 +50,7 @@ except NameError:
 sys.path.insert(0, str(_HERE))
 import mock_lead
 import consistency
+import functions
 import discovery
 import elements
 import templates as tpl
@@ -158,6 +159,16 @@ def install(conn) -> None:
     _try(conn, f"ALTER TABLE {t('config', 'rule_registry')} ADD CONSTRAINT "
                f"rule_registry_template_versioned "
                f"CHECK ((template_id IS NULL) = (template_version IS NULL))")
+    # Which function a rule implements (2026-10-23), again at the end.
+    if "function_source" not in have:
+        run(conn, f"ALTER TABLE {t('config', 'rule_registry')} ADD COLUMNS ("
+                  f"function_source STRING, function_name STRING)")
+    _try(conn, f"ALTER TABLE {t('config', 'rule_registry')} ADD CONSTRAINT "
+               f"rule_registry_function_source_enum CHECK (function_source IS NULL OR "
+               f"function_source IN ('uc', 'dqx', 'sql'))")
+    _try(conn, f"ALTER TABLE {t('config', 'rule_registry')} ADD CONSTRAINT "
+               f"rule_registry_function_named CHECK ((function_name IS NULL) = "
+               f"(function_source IS NULL OR function_source = 'sql'))")
 
     # The slice (2026-10-06): seven columns on monitored_table, three on check_run, all
     # at the end where sql/ddl/15 and 03 declare them. Before the DDL below, which
@@ -573,7 +584,7 @@ SELECT rule_id, rule_version + 1, rule_name, target_table, target_column, cde_id
        rule_expr, scope_filter, fail_threshold_pct, severity, business_domain, owner_group,
        source_layer, 'retired', current_timestamp(), 'job:onboard-elements',
        current_timestamp(), promoted_by, promoted_at, {lit(note)}, join_sql, template_id,
-       template_version
+       template_version, function_source, function_name
 FROM   {rr}
 WHERE  rule_id = {lit(r['rule_id'])} AND rule_version = {int(r['rule_version'])}
   AND  NOT EXISTS (SELECT 1 FROM {rr} WHERE rule_id = {lit(r['rule_id'])}
@@ -623,13 +634,14 @@ def apply_consistency(conn) -> None:
         note = (f"{consistency.marker(p['proposal_id'])} {p['reason']} (proposed by "
                 f"{p['proposed_by']}, approved by {p['reviewed_by']}). Written from a "
                 f"consistency spec; in shadow until a person promotes it.")
+        fsrc, fname = functions.classify(r["rule_expr"], r["rule_type"], r["join_sql"])
         run(conn, f"""INSERT INTO {rr} ({RULE_COLS})
 SELECT {lit(p['rule_id'])}, 1, {lit(p['rule_name'])}, {lit(r['target_table'])},
        {lit(r['target_column'])}, {lit(p['cde_id'])}, {lit(r['rule_type'])},
        {lit(r['rule_expr'])}, {lit(r['scope_filter'])}, 0.0, {lit(p['severity'])},
        {lit(c['business_domain'])}, {lit(c['owner_group'])}, 'L2', 'shadow',
        current_timestamp(), 'job:onboard-consistency', current_timestamp(), NULL, NULL,
-       {lit(note)}, {lit(r['join_sql'])}, NULL, NULL
+       {lit(note)}, {lit(r['join_sql'])}, NULL, NULL, {lit(fsrc)}, {lit(fname)}
 WHERE NOT EXISTS (SELECT 1 FROM {rr} WHERE rule_id = {lit(p['rule_id'])})""")
         rules.append({"rule_id": p["rule_id"], "rule_version": 1, "status": "shadow", **r})
         print(f"{p['rule_id']}: written in shadow")
@@ -642,7 +654,8 @@ WHERE NOT EXISTS (SELECT 1 FROM {rr} WHERE rule_id = {lit(p['rule_id'])})""")
 RULE_COLS = ("rule_id, rule_version, rule_name, target_table, target_column, cde_id, rule_type, "
              "rule_expr, scope_filter, fail_threshold_pct, severity, business_domain, owner_group, "
              "source_layer, status, effective_from, created_by, created_at, promoted_by, "
-             "promoted_at, note, join_sql, template_id, template_version")
+             "promoted_at, note, join_sql, template_id, template_version, function_source, "
+             "function_name")
 
 
 def next_version(key: tuple, rule_id: str, existing: dict, latest: dict) -> int | None:
@@ -758,16 +771,14 @@ def generate(conn) -> None:
             if version is None:
                 skipped.append(f"{rule_id}: id already used by a rule not from this template")
                 continue
-            # A generated rule's limit is 0: any failing row makes the check read
-            # breach. Since 2026-10-08 the element's tolerance decides what reaches
-            # triage (v_check_escalation), so copying it onto every rule as well would
-            # let N rules each spend the whole tolerance. A steward may still set a
-            # rule's limit by hand; nobody is asked to approve one.
-            limit = 0.0
+            # Since 2026-10-22 a threshold lives on the rule only, and every breach
+            # escalates. A generated rule starts at its element's tolerance, the same
+            # placeholder the key-attribute rules were seeded with; a steward replaces it.
+            limit = 0.0 if b["tolerance_pct"] is None else float(b["tolerance_pct"])
             name = tp.title.replace("{element}", b["cde_name"]) + f" ({col})"
             note = (f"Generated from {tp.template_id} v{tp.version} (lifted from "
                     f"{tp.source_rule}) on the binding {col} -> {b['cde_id']}. "
-                    f"Limit 0: the element's tolerance governs escalation.")
+                    f"Threshold {limit:g}% from the element's tolerance (a placeholder).")
             if tp.is_pattern:
                 note += f" Pattern is {b['cde_id']}'s expected_signature {sig}."
             if tp.takes_date_format:
@@ -782,7 +793,8 @@ def generate(conn) -> None:
                 lit(scope), repr(limit), lit(tp.severity), lit(b["business_domain"]),
                 lit(b["owner_group"]), "'L2'", "'shadow'", "current_timestamp()",
                 "'job:onboard-generate'", "current_timestamp()", "NULL", "NULL", lit(note),
-                "NULL", lit(tp.template_id), lit(tp.version)]) + ")")
+                "NULL", lit(tp.template_id), lit(tp.version),
+                *map(lit, functions.classify(expr, tp.rule_type, None))]) + ")")
     if vals:
         run(conn, f"INSERT INTO {t('config', 'rule_registry')} ({RULE_COLS}) VALUES\n"
                   + ",\n".join(vals))

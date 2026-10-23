@@ -19,6 +19,7 @@ k AS (
 )
 SELECT k.run_id, k.run_ts, to_date(from_utc_timestamp(k.run_ts, 'Australia/Sydney')) AS run_day,
        k.rule_id, r.rule_name, r.cde_id, e.cde_name, k.target_table, k.target_column,
+       r.function_source, r.function_name,
        r.rule_type, CASE r.rule_type
          WHEN 'not_null' THEN 'Completeness'
          WHEN 'format' THEN 'Validity' WHEN 'sentinel' THEN 'Validity' WHEN 'variance' THEN 'Validity'

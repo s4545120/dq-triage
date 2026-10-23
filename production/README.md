@@ -160,7 +160,7 @@ assessed".
 | File | What it does |
 |---|---|
 | `sql/00_preflight.sql` | read-only checks: privileges, source tables readable, CDC columns present |
-| `sql/01_ddl.sql` | 21 tables, 17 views, 7 functions, 93 constraints. **Run once** |
+| `sql/01_ddl.sql` | 21 tables, 17 views, 7 functions, 95 constraints. **Run once** |
 | `sql/02_key_attributes.sql` | 22 key attributes, 119 shadow rules, 5 tables selected |
 | `sql/03_tolerances.sql` | placeholder tolerance per attribute; decides what escalates |
 | `sql/05_current_records.sql` | current record per source table (newest version, OP_TYPE 'D' dropped) |
